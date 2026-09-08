@@ -52,8 +52,84 @@ workflows:
           chmod +x gradlew
           ./gradlew assembleDebug
 
+          touch "$HOME/SITETOAPP_BUILD_SUCCESS"
+
     artifacts:
       - android/app/build/outputs/**/*.apk
       - android/app/build/outputs/**/*.aab
       - android/app/build/outputs/**/mapping.txt
       - android/app/build/outputs/**/output-metadata.json
+
+    publishing:
+
+      scripts:
+
+        - name: Enregistrer l'APK dans Supabase
+          script: |
+            echo "===== POST-PUBLISH SITE TO APP ====="
+            echo "CM_BUILD_ID=$CM_BUILD_ID"
+            echo "APPLICATION_ID=$APPLICATION_ID"
+            echo "REQUESTED_BUILD_ID=$REQUESTED_BUILD_ID"
+
+            STATUS="failed"
+            APK_URL=""
+            AAB_URL=""
+
+            if [ -f "$HOME/SITETOAPP_BUILD_SUCCESS" ]; then
+              STATUS="finished"
+
+              APK_URL=$(echo "$CM_ARTIFACT_LINKS" | jq -r \
+                '.[] | select(.name | endswith(".apk")) | .url' \
+                | head -n 1)
+
+              AAB_URL=$(echo "$CM_ARTIFACT_LINKS" | jq -r \
+                '.[] | select(.name | endswith(".aab")) | .url' \
+                | head -n 1)
+
+              if [ "$APK_URL" = "null" ]; then
+                APK_URL=""
+              fi
+
+              if [ "$AAB_URL" = "null" ]; then
+                AAB_URL=""
+              fi
+
+              if [ -z "$APK_URL" ]; then
+                echo "Aucun artefact APK trouvé."
+                STATUS="failed"
+              fi
+            fi
+
+            echo "STATUS=$STATUS"
+            echo "APK_URL=$APK_URL"
+            echo "AAB_URL=$AAB_URL"
+
+            PAYLOAD=$(jq -n \
+              --arg buildId "$CM_BUILD_ID" \
+              --arg requestedBuildId "$REQUESTED_BUILD_ID" \
+              --arg applicationId "$APPLICATION_ID" \
+              --arg status "$STATUS" \
+              --arg apkArtifactUrl "$APK_URL" \
+              --arg aabArtifactUrl "$AAB_URL" \
+              '{
+                buildId: $buildId,
+                requestedBuildId: $requestedBuildId,
+                applicationId: $applicationId,
+                status: $status,
+                apkArtifactUrl: $apkArtifactUrl,
+                aabArtifactUrl: $aabArtifactUrl
+              }')
+
+            echo "$PAYLOAD"
+
+            curl \
+              --fail-with-body \
+              --retry 3 \
+              --retry-delay 2 \
+              -X POST \
+              "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/codemagic-artifact-register" \
+              -H "Content-Type: application/json" \
+              -d "$PAYLOAD"
+
+            echo ""
+            echo "Artefact enregistré dans Supabase."
