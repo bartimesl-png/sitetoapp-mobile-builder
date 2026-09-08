@@ -1,10 +1,10 @@
 workflows:
 
-  generate-keystore:
+  android-test:
 
-    name: Générer keystore Android
+    name: SiteToApp Android
 
-    max_build_duration: 10
+    max_build_duration: 30
 
     instance_type: mac_mini_m2
 
@@ -13,35 +13,45 @@ workflows:
       java: 21
 
       vars:
-        KEYSTORE_NAME: "partenairefoyer.keystore"
-        KEY_ALIAS: "partenairefoyer"
-        KEYSTORE_PASSWORD: "ChangeMoi123!"
-        KEY_PASSWORD: "ChangeMoi123!"
+        APP_NAME: "SiteToApp"
+        APP_PACKAGE_ID: "com.sitetoapp.generated"
+        APP_WEBSITE_URL: "https://example.com"
+        APP_ICON_URL: ""
+        APP_THEME_COLOR: "#0A84FF"
+        APPLICATION_ID: ""
+        REQUESTED_BUILD_ID: ""
 
     scripts:
 
-      - name: Générer le keystore
+      - name: Installer les dépendances
         script: |
-          keytool \
-            -genkeypair \
-            -v \
-            -keystore "$KEYSTORE_NAME" \
-            -storetype JKS \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000 \
-            -alias "$KEY_ALIAS" \
-            -storepass "$KEYSTORE_PASSWORD" \
-            -keypass "$KEY_PASSWORD" \
-            -dname "CN=PartenaireFoyer, OU=SiteToApp, O=PartenaireFoyer, L=Bouvron, ST=Loire-Atlantique, C=FR"
+          npm install
 
-      - name: Vérifier le keystore
+      - name: Afficher la configuration reçue
         script: |
-          keytool \
-            -list \
-            -v \
-            -keystore "$KEYSTORE_NAME" \
-            -storepass "$KEYSTORE_PASSWORD"
+          echo "APP_NAME=$APP_NAME"
+          echo "APP_PACKAGE_ID=$APP_PACKAGE_ID"
+          echo "APP_WEBSITE_URL=$APP_WEBSITE_URL"
+          echo "APPLICATION_ID=$APPLICATION_ID"
+          echo "REQUESTED_BUILD_ID=$REQUESTED_BUILD_ID"
+
+      - name: Créer le projet Android
+        script: |
+          rm -rf android
+          npx cap add android
+
+      - name: Synchroniser Capacitor
+        script: |
+          npx cap sync android
+
+      - name: Compiler APK
+        script: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug
 
     artifacts:
-      - partenairefoyer.keystore
+      - android/app/build/outputs/**/*.apk
+      - android/app/build/outputs/**/*.aab
+      - android/app/build/outputs/**/mapping.txt
+      - android/app/build/outputs/**/output-metadata.json
