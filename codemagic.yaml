@@ -4,9 +4,9 @@ workflows:
 
     name: SiteToApp Android
 
-    max_build_duration: 30
-
     instance_type: mac_mini_m2
+
+    max_build_duration: 30
 
     environment:
       node: 22
@@ -27,7 +27,7 @@ workflows:
         script: |
           npm install
 
-      - name: Afficher la configuration reçue
+      - name: Vérifier les variables reçues
         script: |
           echo "APP_NAME=$APP_NAME"
           echo "APP_PACKAGE_ID=$APP_PACKAGE_ID"
@@ -44,7 +44,7 @@ workflows:
         script: |
           npx cap sync android
 
-      - name: Compiler APK
+      - name: Compiler APK Android
         script: |
           cd android
           chmod +x gradlew
