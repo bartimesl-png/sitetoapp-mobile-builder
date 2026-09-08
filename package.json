@@ -1,0 +1,22 @@
+{
+  "name": "sitetoapp-mobile-builder",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "echo \"SiteToApp mobile builder\"",
+    "android:add": "npx cap add android",
+    "android:sync": "npx cap sync android",
+    "ios:add": "npx cap add ios",
+    "ios:sync": "npx cap sync ios"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.0.0",
+    "@capacitor/core": "^8.0.0",
+    "@capacitor/ios": "^8.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.0.0",
+    "typescript": "^5.9.0"
+  }
+}
