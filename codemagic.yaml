@@ -1,54 +1,47 @@
 workflows:
 
-  android-test:
+  generate-keystore:
 
-    name: SiteToApp Android Test
+    name: Générer keystore Android
 
-    max_build_duration: 30
+    max_build_duration: 10
 
     instance_type: mac_mini_m2
 
     environment:
-
       node: 22
-
       java: 21
 
       vars:
-
-        APP_NAME: "PartenaireFoyer"
-
-        APP_PACKAGE_ID: "com.partenairefoyer.app"
-
-        APP_WEBSITE_URL: "https://www.partenairefoyer.com"
+        KEYSTORE_NAME: "partenairefoyer.keystore"
+        KEY_ALIAS: "partenairefoyer"
+        KEYSTORE_PASSWORD: "ChangeMoi123!"
+        KEY_PASSWORD: "ChangeMoi123!"
 
     scripts:
 
-      - name: Installer les dépendances
+      - name: Générer le keystore
         script: |
-          npm install
+          keytool \
+            -genkeypair \
+            -v \
+            -keystore "$KEYSTORE_NAME" \
+            -storetype JKS \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -alias "$KEY_ALIAS" \
+            -storepass "$KEYSTORE_PASSWORD" \
+            -keypass "$KEY_PASSWORD" \
+            -dname "CN=PartenaireFoyer, OU=SiteToApp, O=PartenaireFoyer, L=Bouvron, ST=Loire-Atlantique, C=FR"
 
-      - name: Créer le projet Android
+      - name: Vérifier le keystore
         script: |
-          rm -rf android
-          npx cap add android
-
-      - name: Synchroniser Capacitor
-        script: |
-          npx cap sync android
-
-      - name: Compiler APK Debug
-        script: |
-          cd android
-          chmod +x gradlew
-          ./gradlew assembleDebug
+          keytool \
+            -list \
+            -v \
+            -keystore "$KEYSTORE_NAME" \
+            -storepass "$KEYSTORE_PASSWORD"
 
     artifacts:
-
-      - android/app/build/outputs/**/*.apk
-
-      - android/app/build/outputs/**/*.aab
-
-      - android/app/build/outputs/**/mapping.txt
-
-      - android/app/build/outputs/**/output-metadata.json
+      - partenairefoyer.keystore
