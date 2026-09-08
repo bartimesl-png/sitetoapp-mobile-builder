@@ -16,10 +16,10 @@ workflows:
         APP_NAME: "SiteToApp"
         APP_PACKAGE_ID: "com.sitetoapp.generated"
         APP_WEBSITE_URL: "https://example.com"
-        APP_ICON_URL: ""
+        APP_ICON_URL: "https://example.com/icon.png"
         APP_THEME_COLOR: "#0A84FF"
-        APPLICATION_ID: ""
-        REQUESTED_BUILD_ID: ""
+        APPLICATION_ID: "default-application"
+        REQUESTED_BUILD_ID: "default-build"
 
     scripts:
 
@@ -32,6 +32,8 @@ workflows:
           echo "APP_NAME=$APP_NAME"
           echo "APP_PACKAGE_ID=$APP_PACKAGE_ID"
           echo "APP_WEBSITE_URL=$APP_WEBSITE_URL"
+          echo "APP_ICON_URL=$APP_ICON_URL"
+          echo "APP_THEME_COLOR=$APP_THEME_COLOR"
           echo "APPLICATION_ID=$APPLICATION_ID"
           echo "REQUESTED_BUILD_ID=$REQUESTED_BUILD_ID"
 
