@@ -917,45 +917,19 @@ workflows:
 
 
       # ========================================================
-      # 14. VERIFIER PLUGIN PUSH
+      # 14. FIREBASE CLOUD MESSAGING
       # ========================================================
 
-      - name: Vérifier Push Notifications Capacitor
+      - name: Configurer les notifications Push Firebase
         script: |
-          echo "===== PUSH NOTIFICATIONS ====="
+          echo "===== FIREBASE CLOUD MESSAGING ====="
 
-          if grep -q \
-            '"@capacitor/push-notifications"' \
-            package.json; then
+          chmod +x scripts/configure-fcm-push.sh
 
-            echo "Plugin déclaré dans package.json."
+          ./scripts/configure-fcm-push.sh
 
-          else
-
-            echo "ATTENTION : @capacitor/push-notifications absent du package.json."
-            echo "Les permissions Firebase restent configurées."
-            echo "La logique de notification de PartenaireFoyer n'est pas supprimée."
-
-          fi
-
-
-          if [ -d \
-            "node_modules/@capacitor/push-notifications" \
-          ]; then
-
-            echo "Plugin Push installé."
-
-            npm list \
-              @capacitor/push-notifications \
-              --depth=0 \
-              || true
-
-          else
-
-            echo "Plugin Push natif non installé dans ce dépôt."
-            echo "Le build continue afin de ne pas casser l'application."
-
-          fi
+          echo ""
+          echo "Configuration FCM terminée."
 
 
       # ========================================================
@@ -998,127 +972,88 @@ workflows:
 
 
           echo ""
-          echo "===== GRADLE CHECK ====="
+          echo "===== SIGNATURE ====="
 
-          cd android
-
-          chmod +x gradlew
-
-          ./gradlew \
-            :app:tasks \
-            --all \
-            >/dev/null
-
-
-          echo "Configuration Gradle valide."
-
-
-      # ========================================================
-      # 16. APK RELEASE
-      # ========================================================
-
-      - name: Compiler APK Release signé
-        script: |
-          echo "===== BUILD APK RELEASE ====="
-
-          cd android
-
-          chmod +x gradlew
-
-          ./gradlew \
-            assembleRelease
-
-
-      # ========================================================
-      # 17. AAB GOOGLE PLAY
-      # ========================================================
-
-      - name: Compiler AAB Google Play signé
-        script: |
-          echo "===== BUILD AAB GOOGLE PLAY ====="
-
-          cd android
-
-          chmod +x gradlew
-
-          ./gradlew \
-            bundleRelease
-
-
-      # ========================================================
-      # 18. VERIFICATION FINALE
-      # ========================================================
-
-      - name: Vérifier les fichiers Google Play
-        script: |
-          echo "===== APK RELEASE ====="
-
-          find \
-            android/app/build/outputs \
-            -type f \
-            -name "*.apk" \
-            -print
+          test -f \
+            android/app/codemagic-release.gradle
 
 
           echo ""
-          echo "===== AAB GOOGLE PLAY ====="
+          echo "===== BUILD ====="
 
-          find \
-            android/app/build/outputs \
-            -type f \
-            -name "*.aab" \
-            -print
+          cd android
 
+          chmod +x gradlew
 
-          APK_COUNT=$(find \
-            android/app/build/outputs \
-            -type f \
-            -name "*.apk" \
-            | wc -l \
-            | tr -d ' ')
+          ./gradlew clean
 
+          ./gradlew assembleRelease
 
-          AAB_COUNT=$(find \
-            android/app/build/outputs \
-            -type f \
-            -name "*.aab" \
-            | wc -l \
-            | tr -d ' ')
-
-
-          if [ "$APK_COUNT" -eq 0 ]; then
-
-            echo "ERREUR : aucun APK Release trouvé."
-
-            exit 1
-
-          fi
-
-
-          if [ "$AAB_COUNT" -eq 0 ]; then
-
-            echo "ERREUR : aucun AAB Google Play trouvé."
-
-            exit 1
-
-          fi
-
-
-          echo ""
-          echo "APK Release : OK"
-          echo "AAB Google Play : OK"
-
-
-    # ==========================================================
-    # ARTEFACTS
-    # ==========================================================
 
     artifacts:
 
       - android/app/build/outputs/**/*.apk
-
       - android/app/build/outputs/**/*.aab
-
       - android/app/build/outputs/**/mapping.txt
-
       - android/app/build/outputs/**/output-metadata.json
+
+    publishing:
+
+      scripts:
+
+        - name: Enregistrer l'AAB dans Supabase
+          script: |
+            STATUS="failed"
+            APK_URL=""
+            AAB_URL=""
+
+            if [ -f \
+              "android/app/build/outputs/bundle/release/app-release.aab" \
+            ]; then
+
+              STATUS="finished"
+
+              APK_URL=$(echo "$CM_ARTIFACT_LINKS" \
+                | jq -r \
+                '.[] | select(.name | endswith(".apk")) | .url' \
+                | head -n 1)
+
+              AAB_URL=$(echo "$CM_ARTIFACT_LINKS" \
+                | jq -r \
+                '.[] | select(.name | endswith(".aab")) | .url' \
+                | head -n 1)
+
+              if [ "$APK_URL" = "null" ]; then
+                APK_URL=""
+              fi
+
+              if [ "$AAB_URL" = "null" ]; then
+                AAB_URL=""
+              fi
+
+            fi
+
+            PAYLOAD=$(jq -n \
+              --arg buildId "$CM_BUILD_ID" \
+              --arg requestedBuildId "$REQUESTED_BUILD_ID" \
+              --arg applicationId "$APPLICATION_ID" \
+              --arg status "$STATUS" \
+              --arg apkArtifactUrl "$APK_URL" \
+              --arg aabArtifactUrl "$AAB_URL" \
+              '{
+                buildId: $buildId,
+                requestedBuildId: $requestedBuildId,
+                applicationId: $applicationId,
+                status: $status,
+                apkArtifactUrl: $apkArtifactUrl,
+                aabArtifactUrl: $aabArtifactUrl
+              }')
+
+            curl \
+              --fail-with-body \
+              --retry 3 \
+              --retry-delay 2 \
+              -X POST \
+              "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/codemagic-artifact-register" \
+              -H "Content-Type: application/json" \
+              -d "$PAYLOAD"
