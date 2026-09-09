@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "packageManager": "yarn@4.9.2",
   "scripts": {
     "build": "echo \"SiteToApp mobile builder\"",
     "android:add": "npx cap add android",
