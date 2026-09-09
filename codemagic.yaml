@@ -301,7 +301,8 @@ workflows:
 
       - name: Vérifier plugin Push Notifications
         script: |
-          cd ..
+          echo "===== Répertoire actuel ====="
+          pwd
 
           echo "===== Vérification package.json ====="
 
@@ -356,4 +357,4 @@ workflows:
       - android/app/build/outputs/**/*.apk
       - android/app/build/outputs/**/*.aab
       - android/app/build/outputs/**/mapping.txt
-      - android/app/build/outputs/**/output-metadata.json
+      - android/app/build/outputs/**/output
