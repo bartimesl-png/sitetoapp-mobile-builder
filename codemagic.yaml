@@ -234,8 +234,7 @@ workflows:
           plugin_line = "apply plugin: 'com.google.gms.google-services'"
 
           if plugin_line not in app_text:
-              app_text += "\\n" + plugin_line + "\\n"
-
+              app_text += "\n" + plugin_line + "\n"
               app.write_text(app_text)
 
           print("Firebase Gradle configuré.")
@@ -302,12 +301,34 @@ workflows:
 
       - name: Vérifier plugin Push Notifications
         script: |
-          if ! grep -R "@capacitor/push-notifications" ../package.json >/dev/null 2>&1; then
-            echo "ERREUR : @capacitor/push-notifications absent"
+          cd ..
+
+          echo "===== Vérification package.json ====="
+
+          if [ ! -f "package.json" ]; then
+            echo "ERREUR : package.json introuvable"
             exit 1
           fi
 
-          echo "Plugin Push Notifications présent."
+          if ! grep -q '"@capacitor/push-notifications"' package.json; then
+            echo "ERREUR : @capacitor/push-notifications absent de package.json"
+            cat package.json
+            exit 1
+          fi
+
+          echo "@capacitor/push-notifications présent dans package.json"
+
+          echo "===== Vérification node_modules ====="
+
+          if [ ! -d "node_modules/@capacitor/push-notifications" ]; then
+            echo "ERREUR : @capacitor/push-notifications non installé dans node_modules"
+            npm list @capacitor/push-notifications --depth=0 || true
+            exit 1
+          fi
+
+          npm list @capacitor/push-notifications --depth=0
+
+          echo "Plugin Push Notifications présent et installé."
 
       - name: Compiler APK Release
         script: |
