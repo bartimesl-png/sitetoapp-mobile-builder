@@ -2,11 +2,7 @@ workflows:
 
   # ============================================================
   # WORKFLOW 1
-  # TEST ANDROID UTILISÉ PAR SITETOAPP
-  #
-  # IMPORTANT :
-  # On conserve ce workflow pour ne pas casser le fonctionnement
-  # actuel SiteToApp -> Codemagic -> Supabase -> APK.
+  # BUILD DE TEST UTILISÉ PAR SITETOAPP
   # ============================================================
 
   android-test:
@@ -18,23 +14,1114 @@ workflows:
     max_build_duration: 30
 
     environment:
-
       node: 22
-
       java: 21
 
       vars:
-
         APP_NAME: "SiteToApp"
-
         APP_PACKAGE_ID: "com.sitetoapp.generated"
-
         APP_WEBSITE_URL: "https://example.com"
-
         APP_ICON_URL: "https://example.com/icon.png"
-
         APP_THEME_COLOR: "#0A84FF"
+        APPLICATION_ID: "default-application"
+        REQUESTED_BUILD_ID: "default-build"
 
+    scripts:
+
+      - name: Installer les dépendances
+        script: |
+          npm install
+
+      - name: Créer le projet Android
+        script: |
+          rm -rf android
+          npx cap add android
+
+      - name: Synchroniser Capacitor
+        script: |
+          npx cap sync android
+
+      - name: Compiler APK Android
+        script: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+          touch "$HOME/SITETOAPP_BUILD_SUCCESS"
+
+    artifacts:
+      - android/app/build/outputs/**/*.apk
+      - android/app/build/outputs/**/*.aab
+      - android/app/build/outputs/**/mapping.txt
+      - android/app/build/outputs/**/output-metadata.json
+
+    publishing:
+
+      scripts:
+
+        - name: Enregistrer l'APK dans Supabase
+          script: |
+            STATUS="failed"
+            APK_URL=""
+            AAB_URL=""
+
+            if [ -f "$HOME/SITETOAPP_BUILD_SUCCESS" ]; then
+              STATUS="finished"
+
+              APK_URL=$(echo "$CM_ARTIFACT_LINKS" | jq -r \
+                '.[] | select(.name | endswith(".apk")) | .url' \
+                | head -n 1)
+
+              AAB_URL=$(echo "$CM_ARTIFACT_LINKS" | jq -r \
+                '.[] | select(.name | endswith(".aab")) | .url' \
+                | head -n 1)
+
+              if [ "$APK_URL" = "null" ]; then
+                APK_URL=""
+              fi
+
+              if [ "$AAB_URL" = "null" ]; then
+                AAB_URL=""
+              fi
+
+              if [ -z "$APK_URL" ]; then
+                STATUS="failed"
+              fi
+            fi
+
+            PAYLOAD=$(jq -n \
+              --arg buildId "$CM_BUILD_ID" \
+              --arg requestedBuildId "$REQUESTED_BUILD_ID" \
+              --arg applicationId "$APPLICATION_ID" \
+              --arg status "$STATUS" \
+              --arg apkArtifactUrl "$APK_URL" \
+              --arg aabArtifactUrl "$AAB_URL" \
+              '{
+                buildId: $buildId,
+                requestedBuildId: $requestedBuildId,
+                applicationId: $applicationId,
+                status: $status,
+                apkArtifactUrl: $apkArtifactUrl,
+                aabArtifactUrl: $aabArtifactUrl
+              }')
+
+            curl \
+              --fail-with-body \
+              --retry 3 \
+              --retry-delay 2 \
+              -X POST \
+              "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/codemagic-artifact-register" \
+              -H "Content-Type: application/json" \
+              -d "$PAYLOAD"
+
+
+  # ============================================================
+  # WORKFLOW 2
+  # VRAIE APPLICATION PARTENAIREFOYER POUR GOOGLE PLAY
+  # ============================================================
+
+  android-release:
+
+    name: PartenaireFoyer Google Play Release
+
+    instance_type: mac_mini_m2
+
+    max_build_duration: 30
+
+    environment:
+
+      node: 22
+      java: 21
+
+      android_signing:
+        - partenairefoyer_release_2026
+
+      vars:
+
+        APP_NAME: "PartenaireFoyer"
+
+        APP_PACKAGE_ID: "com.sitetoapp.partenairefoyercom28231c01"
+
+        APP_WEBSITE_URL: "https://www.partenairefoyer.com/"
+
+        APP_ICON_URL: "https://static.wixstatic.com/media/476a15_d601a17fe7c4406aac35fac85d309948~mv2.jpg"
+
+        APP_THEME_COLOR: "#007AFF"
+
+        APPLICATION_ID: "d37e96ce-285c-44ba-8fdc-8ee85abc62d0"
+
+        REQUESTED_BUILD_ID: "google-play-release"
+
+        ANDROID_TARGET_SDK: "36"
+
+        ANDROID_COMPILE_SDK: "36"
+
+
+    scripts:
+
+      # ========================================================
+      # 1. DEPENDANCES
+      # ========================================================
+
+      - name: Installer les dépendances du projet
+        script: |
+          echo "===== INSTALLATION NPM ====="
+
+          npm install
+
+          echo ""
+          echo "Node :"
+          node --version
+
+          echo ""
+          echo "NPM :"
+          npm --version
+
+
+      # ========================================================
+      # 2. SIGNATURE GOOGLE PLAY
+      # ========================================================
+
+      - name: Vérifier le keystore Google Play
+        script: |
+          echo "===== SIGNATURE ANDROID ====="
+
+          if [ -z "$CM_KEYSTORE_PATH" ]; then
+            echo "ERREUR : CM_KEYSTORE_PATH absent"
+            exit 1
+          fi
+
+          if [ -z "$CM_KEYSTORE_PASSWORD" ]; then
+            echo "ERREUR : CM_KEYSTORE_PASSWORD absent"
+            exit 1
+          fi
+
+          if [ -z "$CM_KEY_ALIAS" ]; then
+            echo "ERREUR : CM_KEY_ALIAS absent"
+            exit 1
+          fi
+
+          if [ -z "$CM_KEY_PASSWORD" ]; then
+            echo "ERREUR : CM_KEY_PASSWORD absent"
+            exit 1
+          fi
+
+          echo "Keystore trouvé."
+          echo "Alias : $CM_KEY_ALIAS"
+
+
+      # ========================================================
+      # 3. FIREBASE
+      # ========================================================
+
+      - name: Vérifier Firebase
+        script: |
+          echo "===== FIREBASE ====="
+
+          if [ ! -f "google-services.json" ]; then
+            echo "ERREUR : google-services.json absent à la racine du dépôt"
+            exit 1
+          fi
+
+          PACKAGE_NAME=$(jq -r \
+            '.client[0].client_info.android_client_info.package_name' \
+            google-services.json)
+
+          echo "Package Firebase : $PACKAGE_NAME"
+          echo "Package application : $APP_PACKAGE_ID"
+
+          if [ "$PACKAGE_NAME" != "$APP_PACKAGE_ID" ]; then
+            echo "ERREUR : package Firebase incorrect"
+            exit 1
+          fi
+
+          echo "Firebase OK."
+
+
+      # ========================================================
+      # 4. CREATION ANDROID
+      # ========================================================
+
+      - name: Créer le projet Android
+        script: |
+          echo "===== CREATION ANDROID ====="
+
+          rm -rf android
+
+          npx cap add android
+
+          test -d android
+
+          echo "Projet Android créé."
+
+
+      # ========================================================
+      # 5. CAPACITOR + PLUGINS
+      # ========================================================
+
+      - name: Synchroniser Capacitor et les plugins
+        script: |
+          echo "===== CAPACITOR SYNC ====="
+
+          npx cap sync android
+
+          echo ""
+          echo "Plugins Capacitor :"
+
+          npx cap ls || true
+
+
+      # ========================================================
+      # 6. FIREBASE DANS ANDROID
+      # ========================================================
+
+      - name: Copier Firebase dans Android
+        script: |
+          echo "===== COPIE FIREBASE ====="
+
+          cp \
+            google-services.json \
+            android/app/google-services.json
+
+          test -f android/app/google-services.json
+
+          echo "Firebase copié."
+
+
+      # ========================================================
+      # 7. GOOGLE SERVICES GRADLE
+      # ========================================================
+
+      - name: Configurer Firebase Gradle
+        script: |
+          python3 <<'PY'
+
+          from pathlib import Path
+
+
+          root = Path(
+              "android/build.gradle"
+          )
+
+          app = Path(
+              "android/app/build.gradle"
+          )
+
+
+          if not root.exists():
+              raise SystemExit(
+                  "android/build.gradle introuvable"
+              )
+
+
+          if not app.exists():
+              raise SystemExit(
+                  "android/app/build.gradle introuvable"
+              )
+
+
+          root_text = root.read_text()
+
+
+          if (
+              "com.google.gms:google-services"
+              not in root_text
+          ):
+
+              marker = "dependencies {"
+
+
+              if marker not in root_text:
+                  raise SystemExit(
+                      "Bloc dependencies introuvable dans android/build.gradle"
+                  )
+
+
+              root_text = root_text.replace(
+                  marker,
+                  """dependencies {
+                  classpath 'com.google.gms:google-services:4.4.2'
+              """,
+                  1
+              )
+
+
+              root.write_text(
+                  root_text
+              )
+
+
+          app_text = app.read_text()
+
+
+          plugin_line = (
+              "apply plugin: "
+              "'com.google.gms.google-services'"
+          )
+
+
+          if plugin_line not in app_text:
+
+              app_text += (
+                  "\n"
+                  + plugin_line
+                  + "\n"
+              )
+
+
+              app.write_text(
+                  app_text
+              )
+
+
+          print(
+              "Firebase Gradle configuré."
+          )
+
+          PY
+
+
+      # ========================================================
+      # 8. ANDROID SDK 36
+      #
+      # CORRECTION DU BUG sdkmanager NOT FOUND
+      #
+      # On n'appelle PLUS sdkmanager directement.
+      # ========================================================
+
+      - name: Préparer Android API 36
+        script: |
+          echo "===== ANDROID SDK ====="
+
+          echo "ANDROID_HOME=${ANDROID_HOME:-non défini}"
+          echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-non défini}"
+
+          SDKMANAGER=""
+
+          if [ -n "${ANDROID_HOME:-}" ]; then
+
+            if [ -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
+              SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+            fi
+
+            if [ -z "$SDKMANAGER" ] && \
+               [ -x "$ANDROID_HOME/tools/bin/sdkmanager" ]; then
+              SDKMANAGER="$ANDROID_HOME/tools/bin/sdkmanager"
+            fi
+
+          fi
+
+          if [ -z "$SDKMANAGER" ] && \
+             [ -n "${ANDROID_SDK_ROOT:-}" ]; then
+
+            if [ -x "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
+              SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+            fi
+
+          fi
+
+          if [ -z "$SDKMANAGER" ]; then
+
+            FOUND=$(find \
+              "$HOME" \
+              /usr/local \
+              /opt \
+              -type f \
+              -name sdkmanager \
+              2>/dev/null \
+              | head -n 1 || true)
+
+            if [ -n "$FOUND" ]; then
+              SDKMANAGER="$FOUND"
+            fi
+
+          fi
+
+          if [ -n "$SDKMANAGER" ]; then
+
+            echo "sdkmanager trouvé : $SDKMANAGER"
+
+            yes | "$SDKMANAGER" --licenses \
+              >/dev/null 2>&1 || true
+
+            "$SDKMANAGER" \
+              "platforms;android-36" \
+              "build-tools;36.0.0" \
+              || true
+
+          else
+
+            echo "sdkmanager non disponible sur cette machine."
+            echo "Le build utilisera les SDK Android préinstallés par Codemagic."
+
+          fi
+
+          echo "Préparation SDK terminée."
+
+
+      # ========================================================
+      # 9. FORCER COMPILE SDK / TARGET SDK 36
+      # ========================================================
+
+      - name: Configurer Android 16 API 36
+        script: |
+          python3 <<'PY'
+
+          from pathlib import Path
+          import re
+
+
+          variables = Path(
+              "android/variables.gradle"
+          )
+
+
+          if variables.exists():
+
+              text = variables.read_text()
+
+
+              text = re.sub(
+                  r"compileSdkVersion\s*=\s*\d+",
+                  "compileSdkVersion = 36",
+                  text
+              )
+
+
+              text = re.sub(
+                  r"targetSdkVersion\s*=\s*\d+",
+                  "targetSdkVersion = 36",
+                  text
+              )
+
+
+              variables.write_text(
+                  text
+              )
+
+
+              print(
+                  "variables.gradle configuré API 36"
+              )
+
+
+          app = Path(
+              "android/app/build.gradle"
+          )
+
+
+          if app.exists():
+
+              text = app.read_text()
+
+
+              text = re.sub(
+                  r"compileSdk\s+\d+",
+                  "compileSdk 36",
+                  text
+              )
+
+
+              text = re.sub(
+                  r"compileSdkVersion\s+\d+",
+                  "compileSdkVersion 36",
+                  text
+              )
+
+
+              text = re.sub(
+                  r"targetSdk\s+\d+",
+                  "targetSdk 36",
+                  text
+              )
+
+
+              text = re.sub(
+                  r"targetSdkVersion\s+\d+",
+                  "targetSdkVersion 36",
+                  text
+              )
+
+
+              app.write_text(
+                  text
+              )
+
+
+          print(
+              "Android API 36 configuré."
+          )
+
+          PY
+
+
+      # ========================================================
+      # 10. NOM DE L'APPLICATION
+      # ========================================================
+
+      - name: Configurer le nom PartenaireFoyer
+        script: |
+          python3 <<'PY'
+
+          from pathlib import Path
+          import re
+
+
+          strings = Path(
+              "android/app/src/main/res/values/strings.xml"
+          )
+
+
+          if not strings.exists():
+
+              strings.parent.mkdir(
+                  parents=True,
+                  exist_ok=True
+              )
+
+
+              strings.write_text(
+                  """<?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <string name="app_name">PartenaireFoyer</string>
+              <string name="title_activity_main">PartenaireFoyer</string>
+              <string name="package_name">com.sitetoapp.partenairefoyercom28231c01</string>
+              <string name="custom_url_scheme">com.sitetoapp.partenairefoyercom28231c01</string>
+          </resources>
+          """
+              )
+
+          else:
+
+              text = strings.read_text()
+
+
+              if (
+                  '<string name="app_name">'
+                  in text
+              ):
+
+                  text = re.sub(
+                      r'<string name="app_name">.*?</string>',
+                      '<string name="app_name">PartenaireFoyer</string>',
+                      text
+                  )
+
+
+              if (
+                  '<string name="title_activity_main">'
+                  in text
+              ):
+
+                  text = re.sub(
+                      r'<string name="title_activity_main">.*?</string>',
+                      '<string name="title_activity_main">PartenaireFoyer</string>',
+                      text
+                  )
+
+
+              strings.write_text(
+                  text
+              )
+
+
+          print(
+              "Nom PartenaireFoyer configuré."
+          )
+
+          PY
+
+
+      # ========================================================
+      # 11. PERMISSIONS NOTIFICATIONS
+      # ========================================================
+
+      - name: Ajouter les permissions Android Notifications
+        script: |
+          python3 <<'PY'
+
+          from pathlib import Path
+
+
+          manifest = Path(
+              "android/app/src/main/AndroidManifest.xml"
+          )
+
+
+          if not manifest.exists():
+
+              raise SystemExit(
+                  "AndroidManifest.xml introuvable"
+              )
+
+
+          text = manifest.read_text()
+
+
+          permissions = [
+              (
+                  "android.permission.INTERNET",
+                  '<uses-permission android:name="android.permission.INTERNET" />'
+              ),
+              (
+                  "android.permission.POST_NOTIFICATIONS",
+                  '<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />'
+              ),
+              (
+                  "android.permission.VIBRATE",
+                  '<uses-permission android:name="android.permission.VIBRATE" />'
+              ),
+          ]
+
+
+          for permission, line in permissions:
+
+              if permission not in text:
+
+                  text = text.replace(
+                      "<application",
+                      line
+                      + "\n\n    <application",
+                      1
+                  )
+
+
+          manifest.write_text(
+              text
+          )
+
+
+          print(
+              "Permissions Android ajoutées."
+          )
+
+          PY
+
+
+      # ========================================================
+      # 12. OPTIMISATION WEBVIEW
+      #
+      # Corrige zoom / texte / responsive Android.
+      # ========================================================
+
+      - name: Optimiser la WebView Android
+        script: |
+          python3 <<'PY'
+
+          from pathlib import Path
+
+
+          java_files = list(
+              Path(
+                  "android/app/src/main/java"
+              ).rglob(
+                  "MainActivity.java"
+              )
+          )
+
+
+          kotlin_files = list(
+              Path(
+                  "android/app/src/main/java"
+              ).rglob(
+                  "MainActivity.kt"
+              )
+          )
+
+
+          if java_files:
+
+              target = java_files[0]
+
+              text = target.read_text()
+
+
+              if (
+                  "android.webkit.WebSettings"
+                  not in text
+              ):
+
+                  package_end = (
+                      text.find(";")
+                  )
+
+
+                  if package_end != -1:
+
+                      insert_at = (
+                          package_end + 1
+                      )
+
+
+                      imports = """
+
+          import android.os.Bundle;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          """
+
+
+                      text = (
+                          text[:insert_at]
+                          + imports
+                          + text[insert_at:]
+                      )
+
+
+              if (
+                  "setTextZoom(100)"
+                  not in text
+              ):
+
+                  if (
+                      "onCreate(Bundle savedInstanceState)"
+                      not in text
+                  ):
+
+                      class_pos = (
+                          text.rfind("}")
+                      )
+
+
+                      block = """
+
+              @Override
+              public void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+
+                  WebView webView =
+                      getBridge().getWebView();
+
+                  WebSettings settings =
+                      webView.getSettings();
+
+                  settings.setTextZoom(100);
+                  settings.setUseWideViewPort(true);
+                  settings.setLoadWithOverviewMode(true);
+                  settings.setBuiltInZoomControls(false);
+                  settings.setDisplayZoomControls(false);
+              }
+
+          """
+
+
+                      text = (
+                          text[:class_pos]
+                          + block
+                          + text[class_pos:]
+                      )
+
+
+              target.write_text(
+                  text
+              )
+
+
+              print(
+                  "WebView Java optimisée :",
+                  target
+              )
+
+
+          elif kotlin_files:
+
+              target = kotlin_files[0]
+
+              text = target.read_text()
+
+
+              print(
+                  "MainActivity Kotlin détecté :",
+                  target
+              )
+
+              print(
+                  "Aucune modification risquée appliquée automatiquement."
+              )
+
+
+          else:
+
+              print(
+                  "ATTENTION : MainActivity non trouvé."
+              )
+
+
+          PY
+
+
+      # ========================================================
+      # 13. CONFIGURATION SIGNATURE RELEASE
+      # ========================================================
+
+      - name: Configurer la signature Release
+        script: |
+          cat > \
+            android/app/codemagic-release.gradle \
+            <<'EOF'
+
+          android {
+
+              signingConfigs {
+
+                  codemagicRelease {
+
+                      storeFile file(
+                          System.getenv(
+                              "CM_KEYSTORE_PATH"
+                          )
+                      )
+
+                      storePassword System.getenv(
+                          "CM_KEYSTORE_PASSWORD"
+                      )
+
+                      keyAlias System.getenv(
+                          "CM_KEY_ALIAS"
+                      )
+
+                      keyPassword System.getenv(
+                          "CM_KEY_PASSWORD"
+                      )
+
+                  }
+
+              }
+
+
+              buildTypes {
+
+                  release {
+
+                      signingConfig signingConfigs.codemagicRelease
+
+                  }
+
+              }
+
+          }
+
+          EOF
+
+
+          echo "" \
+            >> android/app/build.gradle
+
+
+          echo \
+            'apply from: "codemagic-release.gradle"' \
+            >> android/app/build.gradle
+
+
+          echo "Signature Release configurée."
+
+
+      # ========================================================
+      # 14. VERIFIER PLUGIN PUSH
+      # ========================================================
+
+      - name: Vérifier Push Notifications Capacitor
+        script: |
+          echo "===== PUSH NOTIFICATIONS ====="
+
+          if grep -q \
+            '"@capacitor/push-notifications"' \
+            package.json; then
+
+            echo "Plugin déclaré dans package.json."
+
+          else
+
+            echo "ATTENTION : @capacitor/push-notifications absent du package.json."
+            echo "Les permissions Firebase restent configurées."
+            echo "La logique de notification de PartenaireFoyer n'est pas supprimée."
+
+          fi
+
+
+          if [ -d \
+            "node_modules/@capacitor/push-notifications" \
+          ]; then
+
+            echo "Plugin Push installé."
+
+            npm list \
+              @capacitor/push-notifications \
+              --depth=0 \
+              || true
+
+          else
+
+            echo "Plugin Push natif non installé dans ce dépôt."
+            echo "Le build continue afin de ne pas casser l'application."
+
+          fi
+
+
+      # ========================================================
+      # 15. VERIFICATION COMPLETE
+      # ========================================================
+
+      - name: Vérifier toute la configuration Android
+        script: |
+          echo "===== MANIFEST ====="
+
+          cat \
+            android/app/src/main/AndroidManifest.xml
+
+
+          echo ""
+          echo "===== STRINGS ====="
+
+          cat \
+            android/app/src/main/res/values/strings.xml
+
+
+          echo ""
+          echo "===== VARIABLES GRADLE ====="
+
+          if [ -f \
+            android/variables.gradle \
+          ]; then
+
+            cat \
+              android/variables.gradle
+
+          fi
+
+
+          echo ""
+          echo "===== FIREBASE ====="
+
+          test -f \
+            android/app/google-services.json
+
+
+          echo ""
+          echo "===== GRADLE CHECK ====="
+
+          cd android
+
+          chmod +x gradlew
+
+          ./gradlew \
+            :app:tasks \
+            --all \
+            >/dev/null
+
+
+          echo "Configuration Gradle valide."
+
+
+      # ========================================================
+      # 16. APK RELEASE
+      # ========================================================
+
+      - name: Compiler APK Release signé
+        script: |
+          echo "===== BUILD APK RELEASE ====="
+
+          cd android
+
+          chmod +x gradlew
+
+          ./gradlew \
+            assembleRelease
+
+
+      # ========================================================
+      # 17. AAB GOOGLE PLAY
+      # ========================================================
+
+      - name: Compiler AAB Google Play signé
+        script: |
+          echo "===== BUILD AAB GOOGLE PLAY ====="
+
+          cd android
+
+          chmod +x gradlew
+
+          ./gradlew \
+            bundleRelease
+
+
+      # ========================================================
+      # 18. VERIFICATION FINALE
+      # ========================================================
+
+      - name: Vérifier les fichiers Google Play
+        script: |
+          echo "===== APK RELEASE ====="
+
+          find \
+            android/app/build/outputs \
+            -type f \
+            -name "*.apk" \
+            -print
+
+
+          echo ""
+          echo "===== AAB GOOGLE PLAY ====="
+
+          find \
+            android/app/build/outputs \
+            -type f \
+            -name "*.aab" \
+            -print
+
+
+          APK_COUNT=$(find \
+            android/app/build/outputs \
+            -type f \
+            -name "*.apk" \
+            | wc -l \
+            | tr -d ' ')
+
+
+          AAB_COUNT=$(find \
+            android/app/build/outputs \
+            -type f \
+            -name "*.aab" \
+            | wc -l \
+            | tr -d ' ')
+
+
+          if [ "$APK_COUNT" -eq 0 ]; then
+
+            echo "ERREUR : aucun APK Release trouvé."
+
+            exit 1
+
+          fi
+
+
+          if [ "$AAB_COUNT" -eq 0 ]; then
+
+            echo "ERREUR : aucun AAB Google Play trouvé."
+
+            exit 1
+
+          fi
+
+
+          echo ""
+          echo "APK Release : OK"
+          echo "AAB Google Play : OK"
+
+
+    # ==========================================================
+    # ARTEFACTS
+    # ==========================================================
+
+    artifacts:
+
+      - android/app/build/outputs/**/*.apk
+
+      - android/app/build/outputs/**/*.aab
+
+      - android/app/build/outputs/**/mapping.txt
+
+      - android/app/build/outputs/**/output-metadata.json
         APPLICATION_ID: "default-application"
 
         REQUESTED_BUILD_ID: "default-build"
