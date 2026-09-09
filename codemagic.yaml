@@ -165,6 +165,24 @@ workflows:
           echo "Keystore trouvé."
           echo "Alias : $CM_KEY_ALIAS"
 
+      - name: Vérifier Firebase
+        script: |
+          if [ ! -f "google-services.json" ]; then
+            echo "ERREUR : google-services.json absent à la racine du dépôt"
+            exit 1
+          fi
+
+          PACKAGE_NAME=$(jq -r '.client[0].client_info.android_client_info.package_name' google-services.json)
+
+          echo "Package Firebase : $PACKAGE_NAME"
+
+          if [ "$PACKAGE_NAME" != "$APP_PACKAGE_ID" ]; then
+            echo "ERREUR : le package Firebase ne correspond pas à APP_PACKAGE_ID"
+            exit 1
+          fi
+
+          echo "Configuration Firebase valide."
+
       - name: Créer le projet Android
         script: |
           rm -rf android
@@ -173,6 +191,61 @@ workflows:
       - name: Synchroniser Capacitor
         script: |
           npx cap sync android
+
+      - name: Copier google-services.json
+        script: |
+          cp google-services.json android/app/google-services.json
+
+          echo "google-services.json copié dans android/app"
+
+          test -f android/app/google-services.json
+
+      - name: Configurer Firebase Gradle
+        script: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          root = Path("android/build.gradle")
+          app = Path("android/app/build.gradle")
+
+          root_text = root.read_text()
+
+          if "com.google.gms:google-services" not in root_text:
+              marker = "dependencies {"
+              replacement = """dependencies {
+                  classpath 'com.google.gms:google-services:4.5.0'
+          """
+
+              if marker not in root_text:
+                  raise SystemExit(
+                      "Impossible de trouver dependencies { dans android/build.gradle"
+                  )
+
+              root_text = root_text.replace(
+                  marker,
+                  replacement,
+                  1
+              )
+
+              root.write_text(root_text)
+
+          app_text = app.read_text()
+
+          plugin_line = "apply plugin: 'com.google.gms.google-services'"
+
+          if plugin_line not in app_text:
+              app_text += "\\n" + plugin_line + "\\n"
+
+              app.write_text(app_text)
+
+          print("Firebase Gradle configuré.")
+          PY
+
+          echo "===== Firebase root Gradle ====="
+          grep -n "google-services" android/build.gradle || true
+
+          echo "===== Firebase app Gradle ====="
+          grep -n "google-services" android/app/build.gradle || true
 
       - name: Installer Android API 36
         script: |
@@ -226,6 +299,15 @@ workflows:
           ./gradlew :app:tasks --all >/dev/null
 
           echo "Configuration Gradle valide."
+
+      - name: Vérifier plugin Push Notifications
+        script: |
+          if ! grep -R "@capacitor/push-notifications" ../package.json >/dev/null 2>&1; then
+            echo "ERREUR : @capacitor/push-notifications absent"
+            exit 1
+          fi
+
+          echo "Plugin Push Notifications présent."
 
       - name: Compiler APK Release
         script: |
