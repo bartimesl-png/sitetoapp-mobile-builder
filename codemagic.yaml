@@ -32,28 +32,37 @@ workflows:
         script: |
           npm install
 
+
       - name: Créer le projet Android
         script: |
           rm -rf android
+
           npx cap add android
+
 
       - name: Synchroniser Capacitor
         script: |
           npx cap sync android
 
+
       - name: Compiler APK Android
         script: |
           cd android
+
           chmod +x gradlew
+
           ./gradlew assembleDebug
 
           touch "$HOME/SITETOAPP_BUILD_SUCCESS"
 
+
     artifacts:
+
       - android/app/build/outputs/**/*.apk
       - android/app/build/outputs/**/*.aab
       - android/app/build/outputs/**/mapping.txt
       - android/app/build/outputs/**/output-metadata.json
+
 
     publishing:
 
@@ -66,6 +75,7 @@ workflows:
             AAB_URL=""
 
             if [ -f "$HOME/SITETOAPP_BUILD_SUCCESS" ]; then
+
               STATUS="finished"
 
               APK_URL=$(echo "$CM_ARTIFACT_LINKS" | jq -r \
@@ -87,6 +97,7 @@ workflows:
               if [ -z "$APK_URL" ]; then
                 STATUS="failed"
               fi
+
             fi
 
             PAYLOAD=$(jq -n \
@@ -117,7 +128,7 @@ workflows:
 
   # ============================================================
   # WORKFLOW 2
-  # VRAIE APPLICATION PARTENAIREFOYER POUR GOOGLE PLAY
+  # VRAIE APPLICATION PARTENAIREFOYER GOOGLE PLAY
   # ============================================================
 
   android-release:
@@ -170,10 +181,12 @@ workflows:
           npm install
 
           echo ""
+
           echo "Node :"
           node --version
 
           echo ""
+
           echo "NPM :"
           npm --version
 
@@ -207,6 +220,7 @@ workflows:
           fi
 
           echo "Keystore trouvé."
+
           echo "Alias : $CM_KEY_ALIAS"
 
 
@@ -227,11 +241,23 @@ workflows:
             '.client[0].client_info.android_client_info.package_name' \
             google-services.json)
 
+          FIREBASE_PROJECT=$(jq -r \
+            '.project_info.project_id' \
+            google-services.json)
+
           echo "Package Firebase : $PACKAGE_NAME"
+
+          echo "Projet Firebase : $FIREBASE_PROJECT"
+
           echo "Package application : $APP_PACKAGE_ID"
 
           if [ "$PACKAGE_NAME" != "$APP_PACKAGE_ID" ]; then
             echo "ERREUR : package Firebase incorrect"
+            exit 1
+          fi
+
+          if [ "$FIREBASE_PROJECT" != "partenairefoyer-29069" ]; then
+            echo "ERREUR : mauvais projet Firebase"
             exit 1
           fi
 
@@ -256,7 +282,7 @@ workflows:
 
 
       # ========================================================
-      # 5. CAPACITOR + PLUGINS
+      # 5. CAPACITOR
       # ========================================================
 
       - name: Synchroniser Capacitor et les plugins
@@ -266,6 +292,7 @@ workflows:
           npx cap sync android
 
           echo ""
+
           echo "Plugins Capacitor :"
 
           npx cap ls || true
@@ -309,12 +336,14 @@ workflows:
 
 
           if not root.exists():
+
               raise SystemExit(
                   "android/build.gradle introuvable"
               )
 
 
           if not app.exists():
+
               raise SystemExit(
                   "android/app/build.gradle introuvable"
               )
@@ -330,12 +359,11 @@ workflows:
 
               marker = "dependencies {"
 
-
               if marker not in root_text:
+
                   raise SystemExit(
                       "Bloc dependencies introuvable dans android/build.gradle"
                   )
-
 
               root_text = root_text.replace(
                   marker,
@@ -344,7 +372,6 @@ workflows:
               """,
                   1
               )
-
 
               root.write_text(
                   root_text
@@ -368,7 +395,6 @@ workflows:
                   + "\n"
               )
 
-
               app.write_text(
                   app_text
               )
@@ -383,10 +409,6 @@ workflows:
 
       # ========================================================
       # 8. ANDROID SDK 36
-      #
-      # CORRECTION DU BUG sdkmanager NOT FOUND
-      #
-      # On n'appelle PLUS sdkmanager directement.
       # ========================================================
 
       - name: Préparer Android API 36
@@ -394,6 +416,7 @@ workflows:
           echo "===== ANDROID SDK ====="
 
           echo "ANDROID_HOME=${ANDROID_HOME:-non défini}"
+
           echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-non défini}"
 
           SDKMANAGER=""
@@ -401,24 +424,32 @@ workflows:
           if [ -n "${ANDROID_HOME:-}" ]; then
 
             if [ -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
+
               SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+
             fi
 
             if [ -z "$SDKMANAGER" ] && \
                [ -x "$ANDROID_HOME/tools/bin/sdkmanager" ]; then
+
               SDKMANAGER="$ANDROID_HOME/tools/bin/sdkmanager"
+
             fi
 
           fi
+
 
           if [ -z "$SDKMANAGER" ] && \
              [ -n "${ANDROID_SDK_ROOT:-}" ]; then
 
             if [ -x "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
+
               SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+
             fi
 
           fi
+
 
           if [ -z "$SDKMANAGER" ]; then
 
@@ -437,6 +468,7 @@ workflows:
 
           fi
 
+
           if [ -n "$SDKMANAGER" ]; then
 
             echo "sdkmanager trouvé : $SDKMANAGER"
@@ -451,8 +483,9 @@ workflows:
 
           else
 
-            echo "sdkmanager non disponible sur cette machine."
-            echo "Le build utilisera les SDK Android préinstallés par Codemagic."
+            echo "sdkmanager non disponible."
+
+            echo "Utilisation des SDK préinstallés Codemagic."
 
           fi
 
@@ -460,14 +493,15 @@ workflows:
 
 
       # ========================================================
-      # 9. FORCER COMPILE SDK / TARGET SDK 36
+      # 9. API 36 + VERSION GOOGLE PLAY
       # ========================================================
 
-      - name: Configurer Android 16 API 36
+      - name: Configurer Android 16 API 36 et version
         script: |
           python3 <<'PY'
 
           from pathlib import Path
+          import os
           import re
 
 
@@ -480,13 +514,11 @@ workflows:
 
               text = variables.read_text()
 
-
               text = re.sub(
                   r"compileSdkVersion\s*=\s*\d+",
                   "compileSdkVersion = 36",
                   text
               )
-
 
               text = re.sub(
                   r"targetSdkVersion\s*=\s*\d+",
@@ -494,14 +526,8 @@ workflows:
                   text
               )
 
-
               variables.write_text(
                   text
-              )
-
-
-              print(
-                  "variables.gradle configuré API 36"
               )
 
 
@@ -510,46 +536,88 @@ workflows:
           )
 
 
-          if app.exists():
+          if not app.exists():
 
-              text = app.read_text()
-
-
-              text = re.sub(
-                  r"compileSdk\s+\d+",
-                  "compileSdk 36",
-                  text
+              raise SystemExit(
+                  "android/app/build.gradle introuvable"
               )
 
 
-              text = re.sub(
-                  r"compileSdkVersion\s+\d+",
-                  "compileSdkVersion 36",
-                  text
+          text = app.read_text()
+
+
+          text = re.sub(
+              r"compileSdk\s+\d+",
+              "compileSdk 36",
+              text
+          )
+
+
+          text = re.sub(
+              r"compileSdkVersion\s+\d+",
+              "compileSdkVersion 36",
+              text
+          )
+
+
+          text = re.sub(
+              r"targetSdk\s+\d+",
+              "targetSdk 36",
+              text
+          )
+
+
+          text = re.sub(
+              r"targetSdkVersion\s+\d+",
+              "targetSdkVersion 36",
+              text
+          )
+
+
+          build_number = os.environ.get(
+              "BUILD_NUMBER",
+              "2"
+          )
+
+
+          try:
+              version_code = int(
+                  build_number
               )
+          except Exception:
+              version_code = 2
 
 
-              text = re.sub(
-                  r"targetSdk\s+\d+",
-                  "targetSdk 36",
-                  text
-              )
+          if version_code < 2:
+              version_code = 2
 
 
-              text = re.sub(
-                  r"targetSdkVersion\s+\d+",
-                  "targetSdkVersion 36",
-                  text
-              )
+          text = re.sub(
+              r"versionCode\s+\d+",
+              f"versionCode {version_code}",
+              text
+          )
 
 
-              app.write_text(
-                  text
-              )
+          text = re.sub(
+              r'versionName\s+"[^"]+"',
+              f'versionName "1.0.{version_code}"',
+              text
+          )
+
+
+          app.write_text(
+              text
+          )
 
 
           print(
               "Android API 36 configuré."
+          )
+
+          print(
+              "VersionCode :",
+              version_code
           )
 
           PY
@@ -579,7 +647,6 @@ workflows:
                   exist_ok=True
               )
 
-
               strings.write_text(
                   """<?xml version="1.0" encoding="utf-8"?>
           <resources>
@@ -595,7 +662,6 @@ workflows:
 
               text = strings.read_text()
 
-
               if (
                   '<string name="app_name">'
                   in text
@@ -607,7 +673,6 @@ workflows:
                       text
                   )
 
-
               if (
                   '<string name="title_activity_main">'
                   in text
@@ -618,7 +683,6 @@ workflows:
                       '<string name="title_activity_main">PartenaireFoyer</string>',
                       text
                   )
-
 
               strings.write_text(
                   text
@@ -633,7 +697,7 @@ workflows:
 
 
       # ========================================================
-      # 11. PERMISSIONS NOTIFICATIONS
+      # 11. PERMISSIONS ANDROID
       # ========================================================
 
       - name: Ajouter les permissions Android Notifications
@@ -700,8 +764,6 @@ workflows:
 
       # ========================================================
       # 12. OPTIMISATION WEBVIEW
-      #
-      # Corrige zoom / texte / responsive Android.
       # ========================================================
 
       - name: Optimiser la WebView Android
@@ -716,15 +778,6 @@ workflows:
                   "android/app/src/main/java"
               ).rglob(
                   "MainActivity.java"
-              )
-          )
-
-
-          kotlin_files = list(
-              Path(
-                  "android/app/src/main/java"
-              ).rglob(
-                  "MainActivity.kt"
               )
           )
 
@@ -745,13 +798,11 @@ workflows:
                       text.find(";")
                   )
 
-
                   if package_end != -1:
 
                       insert_at = (
                           package_end + 1
                       )
-
 
                       imports = """
 
@@ -759,7 +810,6 @@ workflows:
           import android.webkit.WebSettings;
           import android.webkit.WebView;
           """
-
 
                       text = (
                           text[:insert_at]
@@ -782,7 +832,6 @@ workflows:
                           text.rfind("}")
                       )
 
-
                       block = """
 
               @Override
@@ -804,7 +853,6 @@ workflows:
 
           """
 
-
                       text = (
                           text[:class_pos]
                           + block
@@ -818,40 +866,22 @@ workflows:
 
 
               print(
-                  "WebView Java optimisée :",
+                  "WebView optimisée :",
                   target
-              )
-
-
-          elif kotlin_files:
-
-              target = kotlin_files[0]
-
-              text = target.read_text()
-
-
-              print(
-                  "MainActivity Kotlin détecté :",
-                  target
-              )
-
-              print(
-                  "Aucune modification risquée appliquée automatiquement."
               )
 
 
           else:
 
               print(
-                  "ATTENTION : MainActivity non trouvé."
+                  "ATTENTION : MainActivity.java non trouvé."
               )
-
 
           PY
 
 
       # ========================================================
-      # 13. CONFIGURATION SIGNATURE RELEASE
+      # 13. SIGNATURE RELEASE
       # ========================================================
 
       - name: Configurer la signature Release
@@ -907,11 +937,9 @@ workflows:
           echo "" \
             >> android/app/build.gradle
 
-
           echo \
             'apply from: "codemagic-release.gradle"' \
             >> android/app/build.gradle
-
 
           echo "Signature Release configurée."
 
@@ -924,11 +952,20 @@ workflows:
         script: |
           echo "===== FIREBASE CLOUD MESSAGING ====="
 
+          if [ ! -f "scripts/configure-fcm-push.sh" ]; then
+
+            echo "ERREUR : scripts/configure-fcm-push.sh introuvable"
+
+            exit 1
+
+          fi
+
           chmod +x scripts/configure-fcm-push.sh
 
           ./scripts/configure-fcm-push.sh
 
           echo ""
+
           echo "Configuration FCM terminée."
 
 
@@ -945,26 +982,7 @@ workflows:
 
 
           echo ""
-          echo "===== STRINGS ====="
 
-          cat \
-            android/app/src/main/res/values/strings.xml
-
-
-          echo ""
-          echo "===== VARIABLES GRADLE ====="
-
-          if [ -f \
-            android/variables.gradle \
-          ]; then
-
-            cat \
-              android/variables.gradle
-
-          fi
-
-
-          echo ""
           echo "===== FIREBASE ====="
 
           test -f \
@@ -972,30 +990,161 @@ workflows:
 
 
           echo ""
-          echo "===== SIGNATURE ====="
 
-          test -f \
-            android/app/codemagic-release.gradle
+          echo "===== FIREBASE MESSAGING ====="
+
+          grep \
+            "firebase-messaging" \
+            android/app/build.gradle
 
 
           echo ""
-          echo "===== BUILD ====="
+
+          echo "===== MAIN ACTIVITY FCM ====="
+
+          grep \
+            -R \
+            "FirebaseMessaging" \
+            android/app/src/main/java
+
+
+          echo ""
+
+          echo "===== GRADLE CHECK ====="
 
           cd android
 
           chmod +x gradlew
 
-          ./gradlew clean
+          ./gradlew \
+            :app:tasks \
+            --all \
+            >/dev/null
+
+          echo "Configuration Gradle valide."
+
+
+      # ========================================================
+      # 16. COMPILER APK RELEASE
+      # ========================================================
+
+      - name: Compiler APK Release signé
+        script: |
+          echo "===== BUILD APK RELEASE ====="
+
+          cd android
+
+          chmod +x gradlew
 
           ./gradlew assembleRelease
 
+          echo "APK compilé."
+
+
+      # ========================================================
+      # 17. COMPILER AAB GOOGLE PLAY
+      # ========================================================
+
+      - name: Compiler AAB Google Play signé
+        script: |
+          echo "===== BUILD AAB GOOGLE PLAY ====="
+
+          cd android
+
+          chmod +x gradlew
+
+          ./gradlew bundleRelease
+
+          echo "AAB compilé."
+
+
+      # ========================================================
+      # 18. VERIFICATION FINALE
+      # ========================================================
+
+      - name: Vérifier APK et AAB Google Play
+        script: |
+          echo "===== APK RELEASE ====="
+
+          find \
+            android/app/build/outputs \
+            -type f \
+            -name "*.apk" \
+            -print
+
+
+          echo ""
+
+          echo "===== AAB GOOGLE PLAY ====="
+
+          find \
+            android/app/build/outputs \
+            -type f \
+            -name "*.aab" \
+            -print
+
+
+          APK_COUNT=$(find \
+            android/app/build/outputs \
+            -type f \
+            -name "*.apk" \
+            | wc -l \
+            | tr -d ' ')
+
+
+          AAB_COUNT=$(find \
+            android/app/build/outputs \
+            -type f \
+            -name "*.aab" \
+            | wc -l \
+            | tr -d ' ')
+
+
+          if [ "$APK_COUNT" -eq 0 ]; then
+
+            echo "ERREUR : aucun APK Release trouvé."
+
+            exit 1
+
+          fi
+
+
+          if [ "$AAB_COUNT" -eq 0 ]; then
+
+            echo "ERREUR : aucun AAB Google Play trouvé."
+
+            exit 1
+
+          fi
+
+
+          echo ""
+
+          echo "APK Release : OK"
+
+          echo "AAB Google Play : OK"
+
+          touch "$HOME/PARTENAIREFOYER_RELEASE_SUCCESS"
+
+
+    # ==========================================================
+    # ARTEFACTS
+    # ==========================================================
 
     artifacts:
 
       - android/app/build/outputs/**/*.apk
+
       - android/app/build/outputs/**/*.aab
+
       - android/app/build/outputs/**/mapping.txt
+
       - android/app/build/outputs/**/output-metadata.json
+
+
+    # ==========================================================
+    # PUBLISHING
+    # ==========================================================
 
     publishing:
 
@@ -1003,35 +1152,55 @@ workflows:
 
         - name: Enregistrer l'AAB dans Supabase
           script: |
+            echo "===== ENREGISTREMENT SUPABASE ====="
+
             STATUS="failed"
+
             APK_URL=""
+
             AAB_URL=""
 
-            if [ -f \
-              "android/app/build/outputs/bundle/release/app-release.aab" \
-            ]; then
+
+            if [ -f "$HOME/PARTENAIREFOYER_RELEASE_SUCCESS" ]; then
 
               STATUS="finished"
 
-              APK_URL=$(echo "$CM_ARTIFACT_LINKS" \
-                | jq -r \
-                '.[] | select(.name | endswith(".apk")) | .url' \
-                | head -n 1)
+            fi
 
-              AAB_URL=$(echo "$CM_ARTIFACT_LINKS" \
-                | jq -r \
-                '.[] | select(.name | endswith(".aab")) | .url' \
-                | head -n 1)
 
-              if [ "$APK_URL" = "null" ]; then
-                APK_URL=""
-              fi
+            APK_URL=$(echo "$CM_ARTIFACT_LINKS" | jq -r \
+              '.[] | select(.name | endswith(".apk")) | .url' \
+              | head -n 1)
 
-              if [ "$AAB_URL" = "null" ]; then
-                AAB_URL=""
-              fi
+
+            AAB_URL=$(echo "$CM_ARTIFACT_LINKS" | jq -r \
+              '.[] | select(.name | endswith(".aab")) | .url' \
+              | head -n 1)
+
+
+            if [ "$APK_URL" = "null" ]; then
+              APK_URL=""
+            fi
+
+
+            if [ "$AAB_URL" = "null" ]; then
+              AAB_URL=""
+            fi
+
+
+            if [ -z "$AAB_URL" ]; then
+
+              echo "ATTENTION : URL AAB absente."
+
+              STATUS="failed"
 
             fi
+
+
+            echo "APK URL : $APK_URL"
+
+            echo "AAB URL : $AAB_URL"
+
 
             PAYLOAD=$(jq -n \
               --arg buildId "$CM_BUILD_ID" \
@@ -1049,6 +1218,7 @@ workflows:
                 aabArtifactUrl: $aabArtifactUrl
               }')
 
+
             curl \
               --fail-with-body \
               --retry 3 \
@@ -1057,3 +1227,8 @@ workflows:
               "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/codemagic-artifact-register" \
               -H "Content-Type: application/json" \
               -d "$PAYLOAD"
+
+
+            echo ""
+
+            echo "Enregistrement Supabase terminé."
