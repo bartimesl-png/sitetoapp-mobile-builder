@@ -1,45 +1,219 @@
 workflows:
 
-  generate-play-keystore:
+  android-test:
 
-    name: Générer keystore Google Play
+    name: SiteToApp Android
 
     instance_type: mac_mini_m2
 
-    max_build_duration: 10
+    max_build_duration: 30
 
     environment:
+      node: 22
       java: 21
 
       vars:
-        KEYSTORE_PASSWORD: "NINO2027"
-        KEY_PASSWORD: "2026NINO"
-        KEY_ALIAS: "partenairefoyer"
+        APP_NAME: "SiteToApp"
+        APP_PACKAGE_ID: "com.sitetoapp.generated"
+        APP_WEBSITE_URL: "https://example.com"
+        APP_ICON_URL: "https://example.com/icon.png"
+        APP_THEME_COLOR: "#0A84FF"
+        APPLICATION_ID: "default-application"
+        REQUESTED_BUILD_ID: "default-build"
 
     scripts:
 
-      - name: Générer le keystore PKCS12
+      - name: Installer les dépendances
         script: |
-          keytool \
-            -genkeypair \
-            -v \
-            -keystore partenairefoyer.keystore \
-            -storetype PKCS12 \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000 \
-            -alias "$KEY_ALIAS" \
-            -storepass "$KEYSTORE_PASSWORD" \
-            -keypass "$KEY_PASSWORD" \
-            -dname "CN=PartenaireFoyer, OU=SiteToApp, O=PartenaireFoyer, L=Bouvron, ST=Loire-Atlantique, C=FR"
+          npm install
 
-      - name: Vérifier le keystore
+      - name: Créer le projet Android
         script: |
-          keytool \
-            -list \
-            -v \
-            -keystore partenairefoyer.keystore \
-            -storepass "$KEYSTORE_PASSWORD"
+          rm -rf android
+          npx cap add android
+
+      - name: Synchroniser Capacitor
+        script: |
+          npx cap sync android
+
+      - name: Compiler APK Android
+        script: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+          touch "$HOME/SITETOAPP_BUILD_SUCCESS"
 
     artifacts:
-      - partenairefoyer.keystore
+      - android/app/build/outputs/**/*.apk
+      - android/app/build/outputs/**/*.aab
+      - android/app/build/outputs/**/mapping.txt
+      - android/app/build/outputs/**/output-metadata.json
+
+    publishing:
+
+      scripts:
+
+        - name: Enregistrer l'APK dans Supabase
+          script: |
+            STATUS="failed"
+            APK_URL=""
+            AAB_URL=""
+
+            if [ -f "$HOME/SITETOAPP_BUILD_SUCCESS" ]; then
+              STATUS="finished"
+
+              APK_URL=$(echo "$CM_ARTIFACT_LINKS" | jq -r \
+                '.[] | select(.name | endswith(".apk")) | .url' \
+                | head -n 1)
+
+              AAB_URL=$(echo "$CM_ARTIFACT_LINKS" | jq -r \
+                '.[] | select(.name | endswith(".aab")) | .url' \
+                | head -n 1)
+
+              if [ "$APK_URL" = "null" ]; then
+                APK_URL=""
+              fi
+
+              if [ "$AAB_URL" = "null" ]; then
+                AAB_URL=""
+              fi
+
+              if [ -z "$APK_URL" ]; then
+                STATUS="failed"
+              fi
+            fi
+
+            PAYLOAD=$(jq -n \
+              --arg buildId "$CM_BUILD_ID" \
+              --arg requestedBuildId "$REQUESTED_BUILD_ID" \
+              --arg applicationId "$APPLICATION_ID" \
+              --arg status "$STATUS" \
+              --arg apkArtifactUrl "$APK_URL" \
+              --arg aabArtifactUrl "$AAB_URL" \
+              '{
+                buildId: $buildId,
+                requestedBuildId: $requestedBuildId,
+                applicationId: $applicationId,
+                status: $status,
+                apkArtifactUrl: $apkArtifactUrl,
+                aabArtifactUrl: $aabArtifactUrl
+              }')
+
+            curl \
+              --fail-with-body \
+              --retry 3 \
+              --retry-delay 2 \
+              -X POST \
+              "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/codemagic-artifact-register" \
+              -H "Content-Type: application/json" \
+              -d "$PAYLOAD"
+
+
+  android-release:
+
+    name: PartenaireFoyer Google Play Release
+
+    instance_type: mac_mini_m2
+
+    max_build_duration: 30
+
+    environment:
+      node: 22
+      java: 21
+
+      android_signing:
+        - partenairefoyer_keystore
+
+      vars:
+        APP_NAME: "Partenairefoyer.com"
+        APP_PACKAGE_ID: "com.sitetoapp.partenairefoyercom28231c01"
+        APP_WEBSITE_URL: "https://www.partenairefoyer.com/"
+        APP_ICON_URL: "https://static.wixstatic.com/media/476a15_d601a17fe7c4406aac35fac85d309948~mv2.jpg"
+        APP_THEME_COLOR: "#007AFF"
+
+    scripts:
+
+      - name: Installer les dépendances
+        script: |
+          npm install
+
+      - name: Créer le projet Android
+        script: |
+          rm -rf android
+          npx cap add android
+
+      - name: Synchroniser Capacitor
+        script: |
+          npx cap sync android
+
+      - name: Configurer API Android 36
+        script: |
+          if [ -f "android/variables.gradle" ]; then
+            sed -i.bak \
+              's/compileSdkVersion = [0-9]*/compileSdkVersion = 36/' \
+              android/variables.gradle || true
+
+            sed -i.bak \
+              's/targetSdkVersion = [0-9]*/targetSdkVersion = 36/' \
+              android/variables.gradle || true
+          fi
+
+      - name: Configurer signature Release
+        script: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path("android/app/build.gradle")
+
+          if not path.exists():
+              raise SystemExit("android/app/build.gradle introuvable")
+
+          text = path.read_text()
+
+          if "signingConfigs {" not in text:
+              text = text.replace(
+                  "android {",
+                  """android {
+
+              signingConfigs {
+                  release {
+                      storeFile file(System.getenv("CM_KEYSTORE_PATH"))
+                      storePassword System.getenv("CM_KEYSTORE_PASSWORD")
+                      keyAlias System.getenv("CM_KEY_ALIAS")
+                      keyPassword System.getenv("CM_KEY_PASSWORD")
+                  }
+              }
+              """,
+                  1
+              )
+
+          if "signingConfig signingConfigs.release" not in text:
+              text = text.replace(
+                  "release {",
+                  """release {
+                      signingConfig signingConfigs.release
+                  """,
+                  1
+              )
+
+          path.write_text(text)
+          PY
+
+      - name: Compiler APK Release
+        script: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleRelease
+
+      - name: Compiler AAB Google Play
+        script: |
+          cd android
+          chmod +x gradlew
+          ./gradlew bundleRelease
+
+    artifacts:
+      - android/app/build/outputs/**/*.apk
+      - android/app/build/outputs/**/*.aab
+      - android/app/build/outputs/**/mapping.txt
+      - android/app/build/outputs/**/output-metadata.json
