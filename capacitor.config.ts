@@ -1,4 +1,6 @@
-import type { CapacitorConfig } from '@capacitor/cli';
+import type {
+  CapacitorConfig,
+} from '@capacitor/cli';
 
 const appId =
   process.env.APP_PACKAGE_ID ||
@@ -17,17 +19,30 @@ const config: CapacitorConfig = {
 
   appName,
 
-  webDir: 'www',
+  webDir:
+    'www',
 
   server: {
-    url: websiteUrl,
-    cleartext: false,
-    androidScheme: 'https',
-    allowNavigation: ['*'],
+    url:
+      websiteUrl,
+
+    cleartext:
+      false,
+
+    androidScheme:
+      'https',
+
+    allowNavigation: [
+      '*',
+    ],
   },
 
   android: {
-    allowMixedContent: false,
+    allowMixedContent:
+      false,
+
+    appendUserAgent:
+      'PartenaireFoyerApp Android',
   },
 };
 
