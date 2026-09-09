@@ -123,7 +123,7 @@ workflows:
       java: 21
 
       android_signing:
-        - partenairefoyer_keystore
+        - partenairefoyer_release_2026
 
       vars:
         APP_NAME: "Partenairefoyer.com"
