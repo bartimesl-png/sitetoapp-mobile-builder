@@ -138,6 +138,33 @@ workflows:
         script: |
           npm install
 
+      - name: Vérifier le keystore
+        script: |
+          echo "Vérification de la signature Android..."
+
+          if [ -z "$CM_KEYSTORE_PATH" ]; then
+            echo "ERREUR : CM_KEYSTORE_PATH absent"
+            exit 1
+          fi
+
+          if [ -z "$CM_KEYSTORE_PASSWORD" ]; then
+            echo "ERREUR : CM_KEYSTORE_PASSWORD absent"
+            exit 1
+          fi
+
+          if [ -z "$CM_KEY_ALIAS" ]; then
+            echo "ERREUR : CM_KEY_ALIAS absent"
+            exit 1
+          fi
+
+          if [ -z "$CM_KEY_PASSWORD" ]; then
+            echo "ERREUR : CM_KEY_PASSWORD absent"
+            exit 1
+          fi
+
+          echo "Keystore trouvé."
+          echo "Alias : $CM_KEY_ALIAS"
+
       - name: Créer le projet Android
         script: |
           rm -rf android
@@ -147,70 +174,80 @@ workflows:
         script: |
           npx cap sync android
 
-      - name: Configurer API Android 36
+      - name: Installer Android API 36
         script: |
-          if [ -f "android/variables.gradle" ]; then
-            sed -i.bak \
-              's/compileSdkVersion = [0-9]*/compileSdkVersion = 36/' \
-              android/variables.gradle || true
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager "platforms;android-36" || true
 
-            sed -i.bak \
-              's/targetSdkVersion = [0-9]*/targetSdkVersion = 36/' \
-              android/variables.gradle || true
-          fi
-
-      - name: Configurer signature Release
+      - name: Configurer Android Release
         script: |
-          python3 <<'PY'
-          from pathlib import Path
+          cat > android/app/codemagic-release.gradle <<'EOF'
+          android {
 
-          path = Path("android/app/build.gradle")
+              compileSdk 36
 
-          if not path.exists():
-              raise SystemExit("android/app/build.gradle introuvable")
-
-          text = path.read_text()
-
-          if "signingConfigs {" not in text:
-              text = text.replace(
-                  "android {",
-                  """android {
+              defaultConfig {
+                  targetSdk 36
+              }
 
               signingConfigs {
+
                   release {
                       storeFile file(System.getenv("CM_KEYSTORE_PATH"))
                       storePassword System.getenv("CM_KEYSTORE_PASSWORD")
                       keyAlias System.getenv("CM_KEY_ALIAS")
                       keyPassword System.getenv("CM_KEY_PASSWORD")
                   }
+
               }
-              """,
-                  1
-              )
 
-          if "signingConfig signingConfigs.release" not in text:
-              text = text.replace(
-                  "release {",
-                  """release {
+              buildTypes {
+
+                  release {
                       signingConfig signingConfigs.release
-                  """,
-                  1
-              )
+                  }
 
-          path.write_text(text)
-          PY
+              }
+
+          }
+          EOF
+
+          echo "" >> android/app/build.gradle
+          echo 'apply from: "codemagic-release.gradle"' >> android/app/build.gradle
+
+          echo "===== Configuration Release ajoutée ====="
+          cat android/app/codemagic-release.gradle
+
+      - name: Vérifier Gradle
+        script: |
+          cd android
+          chmod +x gradlew
+
+          ./gradlew :app:tasks --all >/dev/null
+
+          echo "Configuration Gradle valide."
 
       - name: Compiler APK Release
         script: |
           cd android
           chmod +x gradlew
+
           ./gradlew assembleRelease
 
       - name: Compiler AAB Google Play
         script: |
           cd android
           chmod +x gradlew
+
           ./gradlew bundleRelease
+
+      - name: Vérifier les fichiers Release
+        script: |
+          echo "===== APK ====="
+          find android/app/build/outputs -type f -name "*.apk" -print
+
+          echo "===== AAB ====="
+          find android/app/build/outputs -type f -name "*.aab" -print
 
     artifacts:
       - android/app/build/outputs/**/*.apk
