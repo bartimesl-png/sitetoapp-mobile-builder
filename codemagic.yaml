@@ -1363,15 +1363,14 @@ workflows:
           echo ""
           echo "===== RECHERCHE AAB ====="
 
-          AAB_FILE=$(find "$CM_BUILD_DIR/android/app/build" \
-            -type f \
-            -name "*.aab" \
-            | head -n 1 \
-            || true)
+          # IMPORTANT : prendre UNIQUEMENT le bundle Release final généré par Gradle.
+          # L'ancienne recherche avec `find ... | head -n 1` pouvait sélectionner
+          # un AAB intermédiaire/non signé présent dans android/app/build.
+          AAB_FILE="$CM_BUILD_DIR/android/app/build/outputs/bundle/release/app-release.aab"
 
-          if [ -z "$AAB_FILE" ]; then
+          if [ ! -s "$AAB_FILE" ]; then
 
-            echo "ERREUR : Gradle n'a généré aucun fichier AAB."
+            echo "ERREUR : app-release.aab final introuvable."
 
             echo ""
             echo "Recherche globale pour diagnostic :"
@@ -1386,12 +1385,42 @@ workflows:
 
           fi
 
-          echo "AAB trouvé :"
+          echo "AAB Release final trouvé :"
           echo "$AAB_FILE"
 
+          echo ""
+          echo "===== VERIFICATION SIGNATURE AAB ====="
+          jarsigner -verify -verbose -certs "$AAB_FILE" >/tmp/aab-signature-check.txt 2>&1 || {
+            cat /tmp/aab-signature-check.txt
+            echo "ERREUR : le bundle app-release.aab n'est pas correctement signé."
+            exit 1
+          }
+          tail -n 20 /tmp/aab-signature-check.txt || true
+          echo "Signature AAB : OK"
+
+          # La version destinée à Google Play est une copie STRICTEMENT IDENTIQUE
+          # du vrai app-release.aab signé, seulement renommée.
           cp \
             "$AAB_FILE" \
             "$CM_BUILD_DIR/build-artifacts/partenairefoyer-release.aab"
+
+          echo ""
+          echo "===== VERIFICATION COPIE FINALE ====="
+          shasum -a 256 "$AAB_FILE"
+          shasum -a 256 "$CM_BUILD_DIR/build-artifacts/partenairefoyer-release.aab"
+          cmp -s \
+            "$AAB_FILE" \
+            "$CM_BUILD_DIR/build-artifacts/partenairefoyer-release.aab" || {
+              echo "ERREUR : la copie PartenaireFoyer diffère de l'AAB signé source."
+              exit 1
+            }
+          jarsigner -verify \
+            "$CM_BUILD_DIR/build-artifacts/partenairefoyer-release.aab" \
+            >/dev/null 2>&1 || {
+              echo "ERREUR : partenairefoyer-release.aab n'est pas signé."
+              exit 1
+            }
+          echo "partenairefoyer-release.aab : SIGNÉ ET IDENTIQUE AU BUILD RELEASE FINAL"
 
           echo ""
           echo "===== ARTEFACTS FINAUX ====="
