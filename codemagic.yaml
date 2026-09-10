@@ -32,37 +32,27 @@ workflows:
         script: |
           npm install
 
-
       - name: Créer le projet Android
         script: |
           rm -rf android
-
           npx cap add android
-
 
       - name: Synchroniser Capacitor
         script: |
           npx cap sync android
 
-
       - name: Compiler APK Android
         script: |
           cd android
-
           chmod +x gradlew
-
           ./gradlew assembleDebug
-
           touch "$HOME/SITETOAPP_BUILD_SUCCESS"
 
-
     artifacts:
-
       - android/app/build/outputs/**/*.apk
       - android/app/build/outputs/**/*.aab
       - android/app/build/outputs/**/mapping.txt
       - android/app/build/outputs/**/output-metadata.json
-
 
     publishing:
 
@@ -75,7 +65,6 @@ workflows:
             AAB_URL=""
 
             if [ -f "$HOME/SITETOAPP_BUILD_SUCCESS" ]; then
-
               STATUS="finished"
 
               APK_URL=$(echo "$CM_ARTIFACT_LINKS" | jq -r \
@@ -97,7 +86,6 @@ workflows:
               if [ -z "$APK_URL" ]; then
                 STATUS="failed"
               fi
-
             fi
 
             PAYLOAD=$(jq -n \
@@ -692,7 +680,7 @@ workflows:
           PY
 
 
-            # ========================================================
+      # ========================================================
       # 11. LOGO ANDROID - VRAI LOGO PARTENAIREFOYER
       # ========================================================
 
@@ -825,6 +813,7 @@ workflows:
 
           echo ""
           echo "Logo PartenaireFoyer généré avec succès."
+
 
       # ========================================================
       # 12. PERMISSIONS ANDROID
@@ -1185,7 +1174,7 @@ workflows:
 
           text = manifest.read_text()
 
-          m = re.search(r"<application\\b[^>]*>", text, flags=re.S)
+          m = re.search(r"<application\b[^>]*>", text, flags=re.S)
           if not m:
               raise SystemExit("Balise <application> introuvable")
 
@@ -1342,54 +1331,58 @@ workflows:
       # 20. VERIFICATION FINALE
       # ========================================================
 
-      - name: Vérifier APK et AAB Google Play
+      - name: Vérifier le fichier Google Play
         script: |
-          echo "===== APK RELEASE ====="
+          echo "===== RECHERCHE DES BUILDS ANDROID ====="
 
-          find \
-            android/app/build/outputs \
+          echo ""
+          echo "APK éventuellement disponible :"
+
+          find android \
             -type f \
             -name "*.apk" \
-            -print
+            -print \
+            || true
 
+          echo ""
+          echo "AAB Google Play :"
+
+          find android \
+            -type f \
+            -name "*.aab" \
+            -print \
+            || true
 
           echo ""
 
-          echo "===== AAB GOOGLE PLAY ====="
-
-          find \
-            android/app/build/outputs \
-            -type f \
-            -name "*.aab" \
-            -print
-
-
-          APK_COUNT=$(find \
-            android/app/build/outputs \
+          APK_FILE=$(find android \
             -type f \
             -name "*.apk" \
-            | wc -l \
-            | tr -d ' ')
+            | head -n 1 \
+            || true)
 
-
-          AAB_COUNT=$(find \
-            android/app/build/outputs \
+          AAB_FILE=$(find android \
             -type f \
             -name "*.aab" \
-            | wc -l \
-            | tr -d ' ')
+            | head -n 1 \
+            || true)
 
+          if [ -n "$APK_FILE" ]; then
 
-          if [ "$APK_COUNT" -eq 0 ]; then
+            echo "APK Release trouvé :"
 
-            echo "ERREUR : aucun APK Release trouvé."
+            echo "$APK_FILE"
 
-            exit 1
+          else
+
+            echo "INFO : aucun APK trouvé."
+
+            echo "Ce n'est pas bloquant pour Google Play."
 
           fi
 
 
-          if [ "$AAB_COUNT" -eq 0 ]; then
+          if [ -z "$AAB_FILE" ]; then
 
             echo "ERREUR : aucun AAB Google Play trouvé."
 
@@ -1400,11 +1393,41 @@ workflows:
 
           echo ""
 
-          echo "APK Release : OK"
+          echo "AAB Google Play trouvé :"
 
-          echo "AAB Google Play : OK"
+          echo "$AAB_FILE"
+
+
+          mkdir -p build-artifacts
+
+
+          cp \
+            "$AAB_FILE" \
+            build-artifacts/partenairefoyer-release.aab
+
+
+          if [ -n "$APK_FILE" ]; then
+
+            cp \
+              "$APK_FILE" \
+              build-artifacts/partenairefoyer-release.apk
+
+          fi
+
+
+          echo ""
+
+          echo "===== ARTEFACTS FINAUX ====="
+
+          ls -lh build-artifacts
+
 
           touch "$HOME/PARTENAIREFOYER_RELEASE_SUCCESS"
+
+
+          echo ""
+
+          echo "BUILD GOOGLE PLAY : OK"
 
 
     # ==========================================================
@@ -1412,6 +1435,10 @@ workflows:
     # ==========================================================
 
     artifacts:
+
+      - build-artifacts/*.aab
+
+      - build-artifacts/*.apk
 
       - android/app/build/outputs/**/*.apk
 
