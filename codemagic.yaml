@@ -26,23 +26,173 @@ workflows:
         APPLICATION_ID: "default-application"
         REQUESTED_BUILD_ID: "default-build"
 
+        APP_VERSION_CODE: "2"
+        APP_VERSION_NAME: "1.1"
+
     scripts:
 
       - name: Installer les dépendances
         script: |
           npm install
+          npm install --save-dev @capacitor/assets
+
+
+      - name: Vérifier les variables reçues
+        script: |
+          echo "APP_NAME=$APP_NAME"
+          echo "APP_PACKAGE_ID=$APP_PACKAGE_ID"
+          echo "APP_WEBSITE_URL=$APP_WEBSITE_URL"
+          echo "APP_ICON_URL=$APP_ICON_URL"
+          echo "APPLICATION_ID=$APPLICATION_ID"
+          echo "REQUESTED_BUILD_ID=$REQUESTED_BUILD_ID"
+          echo "APP_VERSION_CODE=$APP_VERSION_CODE"
+          echo "APP_VERSION_NAME=$APP_VERSION_NAME"
 
 
       - name: Créer le projet Android
         script: |
           rm -rf android
-
           npx cap add android
 
 
       - name: Synchroniser Capacitor
         script: |
           npx cap sync android
+
+
+      - name: Configurer version Android
+        script: |
+          python3 <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          version_code = os.environ.get("APP_VERSION_CODE", "2")
+          version_name = os.environ.get("APP_VERSION_NAME", "1.1")
+
+          path = Path("android/app/build.gradle")
+
+          if not path.exists():
+              raise SystemExit("android/app/build.gradle introuvable")
+
+          text = path.read_text()
+
+          text = re.sub(
+              r'versionCode\s+\d+',
+              f'versionCode {version_code}',
+              text
+          )
+
+          text = re.sub(
+              r'versionName\s+["\'][^"\']+["\']',
+              f'versionName "{version_name}"',
+              text
+          )
+
+          path.write_text(text)
+
+          print("Version Android configurée :")
+          print("versionCode =", version_code)
+          print("versionName =", version_name)
+          PY
+
+
+      - name: Ajouter permission notifications Android
+        script: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          manifest = Path(
+              "android/app/src/main/AndroidManifest.xml"
+          )
+
+          if not manifest.exists():
+              raise SystemExit(
+                  "AndroidManifest.xml introuvable"
+              )
+
+          text = manifest.read_text()
+
+          permission = (
+              '<uses-permission '
+              'android:name="android.permission.POST_NOTIFICATIONS" />'
+          )
+
+          if permission not in text:
+              text = text.replace(
+                  "<application",
+                  permission + "\n\n    <application",
+                  1
+              )
+
+          manifest.write_text(text)
+
+          print(
+              "Permission POST_NOTIFICATIONS vérifiée."
+          )
+          PY
+
+
+      - name: Télécharger le logo
+        script: |
+          rm -rf assets
+          mkdir -p assets
+
+          if [ -n "$APP_ICON_URL" ] && \
+             [ "$APP_ICON_URL" != "https://example.com/icon.png" ]; then
+
+            curl -L \
+              --fail \
+              --retry 3 \
+              "$APP_ICON_URL" \
+              -o assets/icon.png
+
+            echo "Logo téléchargé"
+            ls -lh assets/icon.png
+
+          else
+
+            echo "Pas de logo personnalisé reçu"
+
+          fi
+
+
+      - name: Générer les icônes Android
+        script: |
+          if [ -f "assets/icon.png" ]; then
+
+            npx @capacitor/assets generate \
+              --android \
+              --assetPath assets \
+              --iconBackgroundColor "#FFFFFF" \
+              --iconBackgroundColorDark "#FFFFFF"
+
+          else
+
+            echo "Génération icône ignorée"
+
+          fi
+
+
+      - name: Vérifier configuration Android
+        script: |
+          echo "===== VERSION ====="
+
+          grep -n "versionCode" \
+            android/app/build.gradle || true
+
+          grep -n "versionName" \
+            android/app/build.gradle || true
+
+          echo "===== PACKAGE ====="
+
+          grep -n "applicationId" \
+            android/app/build.gradle || true
+
+          echo "===== PERMISSIONS ====="
+
+          grep -n "POST_NOTIFICATIONS" \
+            android/app/src/main/AndroidManifest.xml || true
 
 
       - name: Compiler APK Android
@@ -53,11 +203,8 @@ workflows:
 
           ./gradlew assembleDebug
 
-          touch "$HOME/SITETOAPP_BUILD_SUCCESS"
-
 
     artifacts:
-
       - android/app/build/outputs/**/*.apk
       - android/app/build/outputs/**/*.aab
       - android/app/build/outputs/**/mapping.txt
@@ -68,52 +215,39 @@ workflows:
 
       scripts:
 
-        - name: Enregistrer l'APK dans Supabase
+        - name: Enregistrer APK dans Supabase
           script: |
-            STATUS="failed"
-            APK_URL=""
-            AAB_URL=""
+            echo "===== PUBLICATION SITETOAPP ====="
 
-            if [ -f "$HOME/SITETOAPP_BUILD_SUCCESS" ]; then
+            echo "CM_BUILD_ID=$CM_BUILD_ID"
+            echo "APPLICATION_ID=$APPLICATION_ID"
+            echo "REQUESTED_BUILD_ID=$REQUESTED_BUILD_ID"
 
-              STATUS="finished"
+            APK_URL=$(echo "$CM_ARTIFACT_LINKS" | jq -r \
+              '.[] | select(.name | endswith(".apk")) | .url' \
+              | head -n 1)
 
-              APK_URL=$(echo "$CM_ARTIFACT_LINKS" | jq -r \
-                '.[] | select(.name | endswith(".apk")) | .url' \
-                | head -n 1)
+            if [ "$APK_URL" = "null" ]; then
+              APK_URL=""
+            fi
 
-              AAB_URL=$(echo "$CM_ARTIFACT_LINKS" | jq -r \
-                '.[] | select(.name | endswith(".aab")) | .url' \
-                | head -n 1)
-
-              if [ "$APK_URL" = "null" ]; then
-                APK_URL=""
-              fi
-
-              if [ "$AAB_URL" = "null" ]; then
-                AAB_URL=""
-              fi
-
-              if [ -z "$APK_URL" ]; then
-                STATUS="failed"
-              fi
-
+            if [ -z "$APK_URL" ]; then
+              echo "Aucun APK trouvé"
+              exit 0
             fi
 
             PAYLOAD=$(jq -n \
               --arg buildId "$CM_BUILD_ID" \
               --arg requestedBuildId "$REQUESTED_BUILD_ID" \
               --arg applicationId "$APPLICATION_ID" \
-              --arg status "$STATUS" \
+              --arg status "finished" \
               --arg apkArtifactUrl "$APK_URL" \
-              --arg aabArtifactUrl "$AAB_URL" \
               '{
                 buildId: $buildId,
                 requestedBuildId: $requestedBuildId,
                 applicationId: $applicationId,
                 status: $status,
-                apkArtifactUrl: $apkArtifactUrl,
-                aabArtifactUrl: $aabArtifactUrl
+                apkArtifactUrl: $apkArtifactUrl
               }')
 
             curl \
@@ -126,906 +260,248 @@ workflows:
               -d "$PAYLOAD"
 
 
+
   # ============================================================
   # WORKFLOW 2
-  # VRAIE APPLICATION PARTENAIREFOYER GOOGLE PLAY
+  # VERSION RELEASE GOOGLE PLAY
   # ============================================================
 
   android-release:
 
-    name: PartenaireFoyer Google Play Release
+    name: PartenaireFoyer Google Play 1.1
 
     instance_type: mac_mini_m2
 
     max_build_duration: 30
 
     environment:
-
       node: 22
       java: 21
 
       android_signing:
-        - partenairefoyer_release_2026
+        - partenairefoyer
 
       vars:
-
         APP_NAME: "PartenaireFoyer"
 
-        APP_PACKAGE_ID: "com.sitetoapp.partenairefoyercom28231c01"
+        APP_PACKAGE_ID:
+          "com.sitetoapp.partenairefoyercom28231c01"
 
-        APP_WEBSITE_URL: "https://www.partenairefoyer.com/"
+        APP_WEBSITE_URL:
+          "https://www.partenairefoyer.com/"
 
-        APP_ICON_URL: "https://static.wixstatic.com/media/476a15_d601a17fe7c4406aac35fac85d309948~mv2.jpg"
+        APP_ICON_URL:
+          "https://static.wixstatic.com/media/476a15_d601a17fe7c4406aac35fac85d309948~mv2.jpg"
 
         APP_THEME_COLOR: "#007AFF"
 
-        APPLICATION_ID: "d37e96ce-285c-44ba-8fdc-8ee85abc62d0"
+        APPLICATION_ID:
+          "d37e96ce-285c-44ba-8fdc-8ee85abc62d0"
 
-        REQUESTED_BUILD_ID: "google-play-release"
+        REQUESTED_BUILD_ID:
+          "partenairefoyer-release-1-1"
 
-        ANDROID_TARGET_SDK: "36"
-
-        ANDROID_COMPILE_SDK: "36"
+        APP_VERSION_CODE: "2"
+        APP_VERSION_NAME: "1.1"
 
 
     scripts:
 
-      # ========================================================
-      # 1. DEPENDANCES
-      # ========================================================
-
-      - name: Installer les dépendances du projet
+      - name: Installer les dépendances
         script: |
-          echo "===== INSTALLATION NPM ====="
-
           npm install
-
           npm install --save-dev @capacitor/assets
 
-          echo ""
 
-          echo "Node :"
-          node --version
-
-          echo ""
-
-          echo "NPM :"
-          npm --version
-
-
-      # ========================================================
-      # 2. SIGNATURE GOOGLE PLAY
-      # ========================================================
-
-      - name: Vérifier le keystore Google Play
+      - name: Vérifier configuration release
         script: |
-          echo "===== SIGNATURE ANDROID ====="
+          echo "APP_NAME=$APP_NAME"
+          echo "APP_PACKAGE_ID=$APP_PACKAGE_ID"
+          echo "APP_WEBSITE_URL=$APP_WEBSITE_URL"
+
+          echo "VERSION CODE=$APP_VERSION_CODE"
+          echo "VERSION NAME=$APP_VERSION_NAME"
 
           if [ -z "$CM_KEYSTORE_PATH" ]; then
-            echo "ERREUR : CM_KEYSTORE_PATH absent"
+            echo "ERREUR : keystore absent"
             exit 1
           fi
 
           if [ -z "$CM_KEYSTORE_PASSWORD" ]; then
-            echo "ERREUR : CM_KEYSTORE_PASSWORD absent"
+            echo "ERREUR : mot de passe keystore absent"
             exit 1
           fi
 
           if [ -z "$CM_KEY_ALIAS" ]; then
-            echo "ERREUR : CM_KEY_ALIAS absent"
+            echo "ERREUR : alias keystore absent"
             exit 1
           fi
 
           if [ -z "$CM_KEY_PASSWORD" ]; then
-            echo "ERREUR : CM_KEY_PASSWORD absent"
+            echo "ERREUR : mot de passe clé absent"
             exit 1
           fi
 
-          echo "Keystore trouvé."
 
-          echo "Alias : $CM_KEY_ALIAS"
-
-
-      # ========================================================
-      # 3. FIREBASE
-      # ========================================================
-
-      - name: Vérifier Firebase
+      - name: Créer projet Android
         script: |
-          echo "===== FIREBASE ====="
-
-          if [ ! -f "google-services.json" ]; then
-            echo "ERREUR : google-services.json absent à la racine du dépôt"
-            exit 1
-          fi
-
-          PACKAGE_NAME=$(jq -r \
-            '.client[0].client_info.android_client_info.package_name' \
-            google-services.json)
-
-          FIREBASE_PROJECT=$(jq -r \
-            '.project_info.project_id' \
-            google-services.json)
-
-          echo "Package Firebase : $PACKAGE_NAME"
-
-          echo "Projet Firebase : $FIREBASE_PROJECT"
-
-          echo "Package application : $APP_PACKAGE_ID"
-
-          if [ "$PACKAGE_NAME" != "$APP_PACKAGE_ID" ]; then
-            echo "ERREUR : package Firebase incorrect"
-            exit 1
-          fi
-
-          if [ "$FIREBASE_PROJECT" != "partenairefoyer-29069" ]; then
-            echo "ERREUR : mauvais projet Firebase"
-            exit 1
-          fi
-
-          echo "Firebase OK."
-
-
-      # ========================================================
-      # 4. CREATION ANDROID
-      # ========================================================
-
-      - name: Créer le projet Android
-        script: |
-          echo "===== CREATION ANDROID ====="
-
           rm -rf android
 
           npx cap add android
 
-          test -d android
 
-          echo "Projet Android créé."
-
-
-      # ========================================================
-      # 5. CAPACITOR
-      # ========================================================
-
-      - name: Synchroniser Capacitor et les plugins
+      - name: Synchroniser Capacitor
         script: |
-          echo "===== CAPACITOR SYNC ====="
-
           npx cap sync android
 
-          echo ""
 
-          echo "Plugins Capacitor :"
-
-          npx cap ls || true
-
-
-      # ========================================================
-      # 6. FIREBASE DANS ANDROID
-      # ========================================================
-
-      - name: Copier Firebase dans Android
-        script: |
-          echo "===== COPIE FIREBASE ====="
-
-          cp \
-            google-services.json \
-            android/app/google-services.json
-
-          test -f android/app/google-services.json
-
-          echo "Firebase copié."
-
-
-      # ========================================================
-      # 7. GOOGLE SERVICES GRADLE
-      # ========================================================
-
-      - name: Configurer Firebase Gradle
+      - name: Configurer version 1.1
         script: |
           python3 <<'PY'
-
-          from pathlib import Path
-
-
-          root = Path(
-              "android/build.gradle"
-          )
-
-          app = Path(
-              "android/app/build.gradle"
-          )
-
-
-          if not root.exists():
-
-              raise SystemExit(
-                  "android/build.gradle introuvable"
-              )
-
-
-          if not app.exists():
-
-              raise SystemExit(
-                  "android/app/build.gradle introuvable"
-              )
-
-
-          root_text = root.read_text()
-
-
-          if (
-              "com.google.gms:google-services"
-              not in root_text
-          ):
-
-              marker = "dependencies {"
-
-              if marker not in root_text:
-
-                  raise SystemExit(
-                      "Bloc dependencies introuvable dans android/build.gradle"
-                  )
-
-              root_text = root_text.replace(
-                  marker,
-                  """dependencies {
-                  classpath 'com.google.gms:google-services:4.4.2'
-              """,
-                  1
-              )
-
-              root.write_text(
-                  root_text
-              )
-
-
-          app_text = app.read_text()
-
-
-          plugin_line = (
-              "apply plugin: "
-              "'com.google.gms.google-services'"
-          )
-
-
-          if plugin_line not in app_text:
-
-              app_text += (
-                  "\n"
-                  + plugin_line
-                  + "\n"
-              )
-
-              app.write_text(
-                  app_text
-              )
-
-
-          print(
-              "Firebase Gradle configuré."
-          )
-
-          PY
-
-
-      # ========================================================
-      # 8. ANDROID SDK 36
-      # ========================================================
-
-      - name: Préparer Android API 36
-        script: |
-          echo "===== ANDROID SDK ====="
-
-          echo "ANDROID_HOME=${ANDROID_HOME:-non défini}"
-
-          echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-non défini}"
-
-          SDKMANAGER=""
-
-          if [ -n "${ANDROID_HOME:-}" ]; then
-
-            if [ -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
-              SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-            fi
-
-            if [ -z "$SDKMANAGER" ] && \
-               [ -x "$ANDROID_HOME/tools/bin/sdkmanager" ]; then
-              SDKMANAGER="$ANDROID_HOME/tools/bin/sdkmanager"
-            fi
-
-          fi
-
-
-          if [ -z "$SDKMANAGER" ] && \
-             [ -n "${ANDROID_SDK_ROOT:-}" ]; then
-
-            if [ -x "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
-              SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
-            fi
-
-          fi
-
-
-          if [ -z "$SDKMANAGER" ]; then
-
-            FOUND=$(find \
-              "$HOME" \
-              /usr/local \
-              /opt \
-              -type f \
-              -name sdkmanager \
-              2>/dev/null \
-              | head -n 1 || true)
-
-            if [ -n "$FOUND" ]; then
-              SDKMANAGER="$FOUND"
-            fi
-
-          fi
-
-
-          if [ -n "$SDKMANAGER" ]; then
-
-            echo "sdkmanager trouvé : $SDKMANAGER"
-
-            yes | "$SDKMANAGER" --licenses \
-              >/dev/null 2>&1 || true
-
-            "$SDKMANAGER" \
-              "platforms;android-36" \
-              "build-tools;36.0.0" \
-              || true
-
-          else
-
-            echo "sdkmanager non disponible."
-
-            echo "Utilisation des SDK préinstallés Codemagic."
-
-          fi
-
-          echo "Préparation SDK terminée."
-
-
-      # ========================================================
-      # 9. API 36 + VERSION GOOGLE PLAY
-      # ========================================================
-
-      - name: Configurer Android 16 API 36 et version
-        script: |
-          python3 <<'PY'
-
-          from pathlib import Path
           import os
           import re
+          from pathlib import Path
 
-
-          variables = Path(
-              "android/variables.gradle"
-          )
-
-
-          if variables.exists():
-
-              text = variables.read_text()
-
-              text = re.sub(
-                  r"compileSdkVersion\s*=\s*\d+",
-                  "compileSdkVersion = 36",
-                  text
-              )
-
-              text = re.sub(
-                  r"targetSdkVersion\s*=\s*\d+",
-                  "targetSdkVersion = 36",
-                  text
-              )
-
-              variables.write_text(
-                  text
-              )
-
-
-          app = Path(
-              "android/app/build.gradle"
-          )
-
-
-          if not app.exists():
-
-              raise SystemExit(
-                  "android/app/build.gradle introuvable"
-              )
-
-
-          text = app.read_text()
-
-
-          text = re.sub(
-              r"compileSdk\s+\d+",
-              "compileSdk 36",
-              text
-          )
-
-
-          text = re.sub(
-              r"compileSdkVersion\s+\d+",
-              "compileSdkVersion 36",
-              text
-          )
-
-
-          text = re.sub(
-              r"targetSdk\s+\d+",
-              "targetSdk 36",
-              text
-          )
-
-
-          text = re.sub(
-              r"targetSdkVersion\s+\d+",
-              "targetSdkVersion 36",
-              text
-          )
-
-
-          build_number = os.environ.get(
-              "BUILD_NUMBER",
+          version_code = os.environ.get(
+              "APP_VERSION_CODE",
               "2"
           )
 
+          version_name = os.environ.get(
+              "APP_VERSION_NAME",
+              "1.1"
+          )
 
-          try:
-              version_code = int(
-                  build_number
+          path = Path(
+              "android/app/build.gradle"
+          )
+
+          if not path.exists():
+              raise SystemExit(
+                  "build.gradle introuvable"
               )
-          except Exception:
-              version_code = 2
 
-
-          if version_code < 2:
-              version_code = 2
-
+          text = path.read_text()
 
           text = re.sub(
-              r"versionCode\s+\d+",
-              f"versionCode {version_code}",
+              r'versionCode\s+\d+',
+              f'versionCode {version_code}',
               text
           )
-
 
           text = re.sub(
-              r'versionName\s+"[^"]+"',
-              f'versionName "1.0.{version_code}"',
+              r'versionName\s+["\'][^"\']+["\']',
+              f'versionName "{version_name}"',
               text
           )
 
-
-          app.write_text(
-              text
-          )
-
+          path.write_text(text)
 
           print(
-              "Android API 36 configuré."
+              f"VERSION = {version_name} ({version_code})"
           )
-
-          print(
-              "VersionCode :",
-              version_code
-          )
-
           PY
 
 
-      # ========================================================
-      # 10. NOM DE L'APPLICATION
-      # ========================================================
-
-      - name: Configurer le nom PartenaireFoyer
+      - name: Configurer Android API 36
         script: |
-          python3 <<'PY'
+          if [ -f "android/variables.gradle" ]; then
 
-          from pathlib import Path
-          import re
+            sed -i.bak \
+              's/compileSdkVersion = [0-9]*/compileSdkVersion = 36/' \
+              android/variables.gradle
 
+            sed -i.bak \
+              's/targetSdkVersion = [0-9]*/targetSdkVersion = 36/' \
+              android/variables.gradle
 
-          strings = Path(
-              "android/app/src/main/res/values/strings.xml"
-          )
-
-
-          if not strings.exists():
-
-              strings.parent.mkdir(
-                  parents=True,
-                  exist_ok=True
-              )
-
-              strings.write_text(
-                  """<?xml version="1.0" encoding="utf-8"?>
-          <resources>
-              <string name="app_name">PartenaireFoyer</string>
-              <string name="title_activity_main">PartenaireFoyer</string>
-              <string name="package_name">com.sitetoapp.partenairefoyercom28231c01</string>
-              <string name="custom_url_scheme">com.sitetoapp.partenairefoyercom28231c01</string>
-          </resources>
-          """
-              )
-
-          else:
-
-              text = strings.read_text()
-
-              if (
-                  '<string name="app_name">'
-                  in text
-              ):
-
-                  text = re.sub(
-                      r'<string name="app_name">.*?</string>',
-                      '<string name="app_name">PartenaireFoyer</string>',
-                      text
-                  )
-
-              if (
-                  '<string name="title_activity_main">'
-                  in text
-              ):
-
-                  text = re.sub(
-                      r'<string name="title_activity_main">.*?</string>',
-                      '<string name="title_activity_main">PartenaireFoyer</string>',
-                      text
-                  )
-
-              strings.write_text(
-                  text
-              )
-
-
-          print(
-              "Nom PartenaireFoyer configuré."
-          )
-
-          PY
-
-
-            # ========================================================
-      # 11. LOGO ANDROID - VRAI LOGO PARTENAIREFOYER
-      # ========================================================
-
-      - name: Configurer le vrai logo PartenaireFoyer
-        script: |
-          echo "===== VRAI LOGO ANDROID ====="
-
-          npm install --save-dev @capacitor/assets
-
-          rm -rf assets
-          mkdir -p assets
-
-          echo "Téléchargement du logo :"
-          echo "$APP_ICON_URL"
-
-          curl \
-            --fail \
-            --location \
-            --retry 3 \
-            --retry-delay 2 \
-            "$APP_ICON_URL" \
-            -o assets/icon-source
-
-          test -s assets/icon-source
-
-          echo "Conversion en PNG..."
-
-          sips \
-            -s format png \
-            assets/icon-source \
-            --out assets/icon.png \
-            >/dev/null
-
-          test -s assets/icon.png
-
-          WIDTH=$(sips -g pixelWidth assets/icon.png | awk '/pixelWidth/ {print $2}')
-          HEIGHT=$(sips -g pixelHeight assets/icon.png | awk '/pixelHeight/ {print $2}')
-
-          echo "Dimensions source : ${WIDTH}x${HEIGHT}"
-
-          if [ -z "$WIDTH" ] || [ -z "$HEIGHT" ]; then
-            echo "ERREUR : dimensions du logo introuvables"
-            exit 1
           fi
 
-          if [ "$WIDTH" -lt "$HEIGHT" ]; then
-            CROP_SIZE="$WIDTH"
-          else
-            CROP_SIZE="$HEIGHT"
-          fi
 
-          echo "Recadrage carré : ${CROP_SIZE}x${CROP_SIZE}"
-
-          sips \
-            --cropToHeightWidth "$CROP_SIZE" "$CROP_SIZE" \
-            assets/icon.png \
-            >/dev/null
-
-          echo "Redimensionnement 1024x1024..."
-
-          sips \
-            -z 1024 1024 \
-            assets/icon.png \
-            >/dev/null
-
-          echo "Fichier final :"
-
-          sips \
-            -g pixelWidth \
-            -g pixelHeight \
-            assets/icon.png
-
-          echo ""
-          echo "Suppression des anciennes icônes Capacitor..."
-
-          rm -f android/app/src/main/res/mipmap-mdpi/ic_launcher*
-          rm -f android/app/src/main/res/mipmap-hdpi/ic_launcher*
-          rm -f android/app/src/main/res/mipmap-xhdpi/ic_launcher*
-          rm -f android/app/src/main/res/mipmap-xxhdpi/ic_launcher*
-          rm -f android/app/src/main/res/mipmap-xxxhdpi/ic_launcher*
-          rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher*
-
-          echo ""
-          echo "Génération officielle Capacitor..."
-
-          npx @capacitor/assets generate \
-            --android \
-            --assetPath assets \
-            --iconBackgroundColor "#007AFF" \
-            --iconBackgroundColorDark "#007AFF"
-
-          echo ""
-          echo "===== ICÔNES GÉNÉRÉES ====="
-
-          find android/app/src/main/res \
-            -type f \
-            \( \
-              -name "ic_launcher*" \
-              -o \
-              -name "*foreground*" \
-              -o \
-              -name "*background*" \
-            \) \
-            -print \
-            | sort
-
-          echo ""
-          echo "===== MANIFEST ICON ====="
-
-          grep \
-            -n \
-            "android:icon\\|android:roundIcon" \
-            android/app/src/main/AndroidManifest.xml \
-            || true
-
-          echo ""
-          echo "Vérification icône standard..."
-
-          test -f \
-            android/app/src/main/res/mipmap-mdpi/ic_launcher.png
-
-          test -f \
-            android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
-
-          echo ""
-          echo "Vérification adaptive icon..."
-
-          test -f \
-            android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
-
-          echo ""
-          echo "Logo PartenaireFoyer généré avec succès."
-
-      # ========================================================
-      # 12. PERMISSIONS ANDROID
-      # ========================================================
-
-      - name: Ajouter les permissions Android Notifications
+      - name: Ajouter permission notifications
         script: |
           python3 <<'PY'
-
           from pathlib import Path
-
 
           manifest = Path(
               "android/app/src/main/AndroidManifest.xml"
           )
 
-
           if not manifest.exists():
-
               raise SystemExit(
                   "AndroidManifest.xml introuvable"
               )
 
-
           text = manifest.read_text()
 
-
-          permissions = [
-              (
-                  "android.permission.INTERNET",
-                  '<uses-permission android:name="android.permission.INTERNET" />'
-              ),
-              (
-                  "android.permission.POST_NOTIFICATIONS",
-                  '<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />'
-              ),
-              (
-                  "android.permission.VIBRATE",
-                  '<uses-permission android:name="android.permission.VIBRATE" />'
-              ),
-          ]
-
-
-          for permission, line in permissions:
-
-              if permission not in text:
-
-                  text = text.replace(
-                      "<application",
-                      line
-                      + "\n\n    <application",
-                      1
-                  )
-
-
-          manifest.write_text(
-              text
+          permission = (
+              '<uses-permission '
+              'android:name="android.permission.POST_NOTIFICATIONS" />'
           )
 
+          if permission not in text:
+
+              text = text.replace(
+                  "<application",
+                  permission + "\n\n    <application",
+                  1
+              )
+
+          manifest.write_text(text)
 
           print(
-              "Permissions Android ajoutées."
+              "POST_NOTIFICATIONS ajouté"
           )
-
           PY
 
 
-      # ========================================================
-      # 13. OPTIMISATION WEBVIEW
-      # ========================================================
+      - name: Télécharger logo PartenaireFoyer
+        script: |
+          rm -rf assets
+          mkdir -p assets
 
-      - name: Optimiser la WebView Android
+          curl -L \
+            --fail \
+            --retry 3 \
+            "$APP_ICON_URL" \
+            -o assets/icon.png
+
+          ls -lh assets/icon.png
+
+
+      - name: Générer vraie icône Android
+        script: |
+          npx @capacitor/assets generate \
+            --android \
+            --assetPath assets \
+            --iconBackgroundColor "#FFFFFF" \
+            --iconBackgroundColorDark "#FFFFFF"
+
+
+      - name: Configurer signature release
         script: |
           python3 <<'PY'
-
           from pathlib import Path
 
-
-          java_files = list(
-              Path(
-                  "android/app/src/main/java"
-              ).rglob(
-                  "MainActivity.java"
-              )
+          path = Path(
+              "android/app/build.gradle"
           )
 
-
-          if java_files:
-
-              target = java_files[0]
-
-              text = target.read_text()
-
-
-              if (
-                  "android.webkit.WebSettings"
-                  not in text
-              ):
-
-                  package_end = (
-                      text.find(";")
-                  )
-
-                  if package_end != -1:
-
-                      insert_at = (
-                          package_end + 1
-                      )
-
-                      imports = """
-
-          import android.os.Bundle;
-          import android.webkit.WebSettings;
-          import android.webkit.WebView;
-          """
-
-                      text = (
-                          text[:insert_at]
-                          + imports
-                          + text[insert_at:]
-                      )
-
-
-              if (
-                  "setTextZoom(100)"
-                  not in text
-              ):
-
-                  if (
-                      "onCreate(Bundle savedInstanceState)"
-                      not in text
-                  ):
-
-                      class_pos = (
-                          text.rfind("}")
-                      )
-
-                      block = """
-
-              @Override
-              public void onCreate(Bundle savedInstanceState) {
-                  super.onCreate(savedInstanceState);
-
-                  WebView webView =
-                      getBridge().getWebView();
-
-                  WebSettings settings =
-                      webView.getSettings();
-
-                  settings.setTextZoom(100);
-                  settings.setUseWideViewPort(true);
-                  settings.setLoadWithOverviewMode(true);
-                  settings.setBuiltInZoomControls(false);
-                  settings.setDisplayZoomControls(false);
-              }
-
-          """
-
-                      text = (
-                          text[:class_pos]
-                          + block
-                          + text[class_pos:]
-                      )
-
-
-              target.write_text(
-                  text
+          if not path.exists():
+              raise SystemExit(
+                  "build.gradle introuvable"
               )
 
+          text = path.read_text()
 
-              print(
-                  "WebView optimisée :",
-                  target
-              )
+          if "signingConfigs {" not in text:
 
-
-          else:
-
-              print(
-                  "ATTENTION : MainActivity.java non trouvé."
-              )
-
-          PY
-
-
-      # ========================================================
-      # 14. SIGNATURE RELEASE
-      # ========================================================
-
-      - name: Configurer la signature Release
-        script: |
-          cat > \
-            android/app/codemagic-release.gradle \
-            <<'EOF'
-
-          android {
+              text = text.replace(
+                  "android {",
+                  """android {
 
               signingConfigs {
-
-                  codemagicRelease {
-
+                  release {
                       storeFile file(
                           System.getenv(
                               "CM_KEYSTORE_PATH"
@@ -1043,479 +519,75 @@ workflows:
                       keyPassword System.getenv(
                           "CM_KEY_PASSWORD"
                       )
-
                   }
-
               }
-
-
-              buildTypes {
-
-                  release {
-
-                      signingConfig signingConfigs.codemagicRelease
-
-                  }
-
-              }
-
-          }
-
-          EOF
-
-
-          echo "" \
-            >> android/app/build.gradle
-
-          echo \
-            'apply from: "codemagic-release.gradle"' \
-            >> android/app/build.gradle
-
-          echo "Signature Release configurée."
-
-
-      # ========================================================
-      # 15. FIREBASE CLOUD MESSAGING
-      # ========================================================
-
-      - name: Configurer les notifications Push Firebase
-        script: |
-          echo "===== FIREBASE CLOUD MESSAGING ====="
-
-          if [ ! -f "scripts/configure-fcm-push.sh" ]; then
-
-            echo "ERREUR : scripts/configure-fcm-push.sh introuvable"
-
-            exit 1
-
-          fi
-
-          chmod +x scripts/configure-fcm-push.sh
-
-          ./scripts/configure-fcm-push.sh
-
-          echo ""
-
-          echo "Configuration FCM terminée."
-
-
-      # ========================================================
-      # 16. FORCER LE VRAI LOGO ANDROID EN DERNIER
-      # ========================================================
-
-      - name: Forcer le vrai logo PartenaireFoyer avant compilation
-        script: |
-          echo "===== LOGO ANDROID FINAL ====="
-
-          npm install --save-dev @capacitor/assets
-
-          rm -rf assets
-          mkdir -p assets
-
-          curl \
-            --fail \
-            --location \
-            --retry 3 \
-            --retry-delay 2 \
-            "$APP_ICON_URL" \
-            -o assets/icon-source
-
-          test -s assets/icon-source
-
-          sips \
-            -s format png \
-            assets/icon-source \
-            --out assets/icon.png \
-            >/dev/null
-
-          test -s assets/icon.png
-
-          WIDTH=$(sips -g pixelWidth assets/icon.png | awk '/pixelWidth/ {print $2}')
-          HEIGHT=$(sips -g pixelHeight assets/icon.png | awk '/pixelHeight/ {print $2}')
-
-          if [ -z "$WIDTH" ] || [ -z "$HEIGHT" ]; then
-            echo "ERREUR : dimensions du logo introuvables"
-            exit 1
-          fi
-
-          if [ "$WIDTH" -lt "$HEIGHT" ]; then
-            CROP_SIZE="$WIDTH"
-          else
-            CROP_SIZE="$HEIGHT"
-          fi
-
-          sips \
-            --cropToHeightWidth "$CROP_SIZE" "$CROP_SIZE" \
-            assets/icon.png \
-            >/dev/null
-
-          sips \
-            -z 1024 1024 \
-            assets/icon.png \
-            >/dev/null
-
-          find android/app/src/main/res \
-            -type f \
-            \( \
-              -name "ic_launcher.png" \
-              -o -name "ic_launcher.webp" \
-              -o -name "ic_launcher_round.png" \
-              -o -name "ic_launcher_round.webp" \
-              -o -name "ic_launcher_foreground.png" \
-              -o -name "ic_launcher_foreground.webp" \
-              -o -name "ic_launcher.xml" \
-              -o -name "ic_launcher_round.xml" \
-            \) \
-            -delete
-
-          npx @capacitor/assets generate \
-            --android \
-            --assetPath assets \
-            --iconBackgroundColor "#002B55" \
-            --iconBackgroundColorDark "#002B55"
-
-          python3 <<'PY'
-          from pathlib import Path
-          import re
-
-          manifest = Path("android/app/src/main/AndroidManifest.xml")
-
-          if not manifest.exists():
-              raise SystemExit("AndroidManifest.xml introuvable")
-
-          text = manifest.read_text()
-
-          m = re.search(r"<application\\b[^>]*>", text, flags=re.S)
-          if not m:
-              raise SystemExit("Balise <application> introuvable")
-
-          tag = m.group(0)
-
-          if 'android:icon=' in tag:
-              tag = re.sub(
-                  r'android:icon="[^"]*"',
-                  'android:icon="@mipmap/ic_launcher"',
-                  tag
+              """,
+                  1
               )
-          else:
-              tag = tag[:-1] + ' android:icon="@mipmap/ic_launcher">'
 
-          if 'android:roundIcon=' in tag:
-              tag = re.sub(
-                  r'android:roundIcon="[^"]*"',
-                  'android:roundIcon="@mipmap/ic_launcher_round"',
-                  tag
+          if (
+              "signingConfig signingConfigs.release"
+              not in text
+          ):
+
+              text = text.replace(
+                  "release {",
+                  """release {
+                      signingConfig signingConfigs.release
+                  """,
+                  1
               )
-          else:
-              tag = tag[:-1] + ' android:roundIcon="@mipmap/ic_launcher_round">'
 
-          text = text[:m.start()] + tag + text[m.end():]
-          manifest.write_text(text)
+          path.write_text(text)
+
+          print(
+              "Signature release configurée"
+          )
           PY
 
-          echo "===== MANIFEST FINAL ====="
 
-          grep \
-            -n \
-            "android:icon\\|android:roundIcon" \
-            android/app/src/main/AndroidManifest.xml
-
-          echo "===== FICHIERS LAUNCHER FINAUX ====="
-
-          find android/app/src/main/res \
-            -type f \
-            \( \
-              -name "ic_launcher*" \
-              -o -name "*launcher_foreground*" \
-              -o -name "*launcher_background*" \
-            \) \
-            -print \
-            | sort
-
-          test -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
-          test -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
-
-          echo "Logo Android final : OK."
-
-
-      # ========================================================
-      # 17. VERIFICATION COMPLETE
-      # ========================================================
-
-      - name: Vérifier toute la configuration Android
+      - name: Vérification finale
         script: |
+          echo "===== BUILD.GRADLE ====="
+
+          grep -n "applicationId" \
+            android/app/build.gradle || true
+
+          grep -n "versionCode" \
+            android/app/build.gradle || true
+
+          grep -n "versionName" \
+            android/app/build.gradle || true
+
+          grep -n "signingConfig" \
+            android/app/build.gradle || true
+
           echo "===== MANIFEST ====="
 
-          cat \
-            android/app/src/main/AndroidManifest.xml
+          grep -n "POST_NOTIFICATIONS" \
+            android/app/src/main/AndroidManifest.xml || true
 
 
-          echo ""
-
-          echo "===== FIREBASE ====="
-
-          test -f \
-            android/app/google-services.json
-
-
-          echo ""
-
-          echo "===== FIREBASE MESSAGING ====="
-
-          grep \
-            "firebase-messaging" \
-            android/app/build.gradle
-
-
-          echo ""
-
-          echo "===== MAIN ACTIVITY FCM ====="
-
-          grep \
-            -R \
-            "FirebaseMessaging" \
-            android/app/src/main/java
-
-
-          echo ""
-
-          echo "===== LOGO ANDROID ====="
-
-          test -f android/app/src/main/res/mipmap-mdpi/ic_launcher.png
-          test -f android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
-          test -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
-
-          echo "Logo Android : OK"
-
-
-          echo ""
-
-          echo "===== GRADLE CHECK ====="
-
+      - name: Compiler APK release
+        script: |
           cd android
 
           chmod +x gradlew
 
-          ./gradlew \
-            :app:tasks \
-            --all \
-            >/dev/null
-
-          echo "Configuration Gradle valide."
+          ./gradlew assembleRelease
 
 
-      # ========================================================
-      # 18. COMPILER ET RECUPERER LES BUILDS GOOGLE PLAY
-      # ========================================================
-
-      - name: Compiler APK et AAB Release
+      - name: Compiler AAB Google Play
         script: |
-          echo "===== BUILD ANDROID RELEASE ====="
-
-          mkdir -p "$CM_BUILD_DIR/build-artifacts"
-
-          cd "$CM_BUILD_DIR/android"
+          cd android
 
           chmod +x gradlew
 
-          echo ""
-          echo "Compilation APK Release..."
-          ./gradlew :app:assembleRelease --stacktrace
+          ./gradlew bundleRelease
 
-          echo ""
-          echo "Compilation AAB Google Play..."
-          ./gradlew :app:bundleRelease --stacktrace
-
-          echo ""
-          echo "===== CONTENU DU DOSSIER BUILD ====="
-
-          find "$CM_BUILD_DIR/android/app/build" \
-            -type f \
-            \( -name "*.apk" -o -name "*.aab" \) \
-            -print \
-            || true
-
-          echo ""
-          echo "===== RECHERCHE APK ====="
-
-          APK_FILE=$(find "$CM_BUILD_DIR/android/app/build" \
-            -type f \
-            -name "*.apk" \
-            | head -n 1 \
-            || true)
-
-          if [ -n "$APK_FILE" ]; then
-
-            echo "APK trouvé :"
-            echo "$APK_FILE"
-
-            cp \
-              "$APK_FILE" \
-              "$CM_BUILD_DIR/build-artifacts/partenairefoyer-release.apk"
-
-          else
-
-            echo "INFO : aucun APK trouvé."
-            echo "L'APK n'est pas obligatoire pour Google Play."
-
-          fi
-
-          echo ""
-          echo "===== RECHERCHE AAB ====="
-
-          AAB_FILE=$(find "$CM_BUILD_DIR/android/app/build" \
-            -type f \
-            -name "*.aab" \
-            | head -n 1 \
-            || true)
-
-          if [ -z "$AAB_FILE" ]; then
-
-            echo "ERREUR : Gradle n'a généré aucun fichier AAB."
-
-            echo ""
-            echo "Recherche globale pour diagnostic :"
-
-            find "$CM_BUILD_DIR" \
-              -type f \
-              \( -name "*.apk" -o -name "*.aab" \) \
-              -print \
-              || true
-
-            exit 1
-
-          fi
-
-          echo "AAB trouvé :"
-          echo "$AAB_FILE"
-
-          cp \
-            "$AAB_FILE" \
-            "$CM_BUILD_DIR/build-artifacts/partenairefoyer-release.aab"
-
-          echo ""
-          echo "===== ARTEFACTS FINAUX ====="
-
-          ls -lah \
-            "$CM_BUILD_DIR/build-artifacts"
-
-          test -s \
-            "$CM_BUILD_DIR/build-artifacts/partenairefoyer-release.aab"
-
-          touch "$HOME/PARTENAIREFOYER_RELEASE_SUCCESS"
-
-          echo ""
-          echo "======================================"
-          echo "BUILD GOOGLE PLAY TERMINE AVEC SUCCES"
-          echo "======================================"
-
-
-    # ==========================================================
-    # ARTEFACTS
-    # ==========================================================
 
     artifacts:
-
-      - build-artifacts/*.aab
-
-      - build-artifacts/*.apk
-
       - android/app/build/outputs/**/*.apk
-
       - android/app/build/outputs/**/*.aab
-
       - android/app/build/outputs/**/mapping.txt
-
       - android/app/build/outputs/**/output-metadata.json
-
-
-    # ==========================================================
-    # PUBLISHING
-    # ==========================================================
-
-    publishing:
-
-      scripts:
-
-        - name: Enregistrer l'AAB dans Supabase
-          script: |
-            echo "===== ENREGISTREMENT SUPABASE ====="
-
-            STATUS="failed"
-
-            APK_URL=""
-
-            AAB_URL=""
-
-
-            if [ -f "$HOME/PARTENAIREFOYER_RELEASE_SUCCESS" ]; then
-
-              STATUS="finished"
-
-            fi
-
-
-            APK_URL=$(echo "$CM_ARTIFACT_LINKS" | jq -r \
-              '.[] | select(.name | endswith(".apk")) | .url' \
-              | head -n 1)
-
-
-            AAB_URL=$(echo "$CM_ARTIFACT_LINKS" | jq -r \
-              '.[] | select(.name | endswith(".aab")) | .url' \
-              | head -n 1)
-
-
-            if [ "$APK_URL" = "null" ]; then
-              APK_URL=""
-            fi
-
-
-            if [ "$AAB_URL" = "null" ]; then
-              AAB_URL=""
-            fi
-
-
-            if [ -z "$AAB_URL" ]; then
-
-              echo "ATTENTION : URL AAB absente."
-
-              STATUS="failed"
-
-            fi
-
-
-            echo "APK URL : $APK_URL"
-
-            echo "AAB URL : $AAB_URL"
-
-
-            PAYLOAD=$(jq -n \
-              --arg buildId "$CM_BUILD_ID" \
-              --arg requestedBuildId "$REQUESTED_BUILD_ID" \
-              --arg applicationId "$APPLICATION_ID" \
-              --arg status "$STATUS" \
-              --arg apkArtifactUrl "$APK_URL" \
-              --arg aabArtifactUrl "$AAB_URL" \
-              '{
-                buildId: $buildId,
-                requestedBuildId: $requestedBuildId,
-                applicationId: $applicationId,
-                status: $status,
-                apkArtifactUrl: $apkArtifactUrl,
-                aabArtifactUrl: $aabArtifactUrl
-              }')
-
-
-            curl \
-              --fail-with-body \
-              --retry 3 \
-              --retry-delay 2 \
-              -X POST \
-              "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/codemagic-artifact-register" \
-              -H "Content-Type: application/json" \
-              -d "$PAYLOAD"
-
-
-            echo ""
-
-            echo "Enregistrement Supabase terminé."
