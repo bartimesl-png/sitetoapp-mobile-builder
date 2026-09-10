@@ -570,8 +570,22 @@ workflows:
           )
 
 
-          version_code = 2
-          version_name = "1.1"
+          build_number = os.environ.get(
+              "BUILD_NUMBER",
+              "29"
+          )
+
+
+          try:
+              version_code = int(
+                  build_number
+              )
+          except Exception:
+              version_code = 29
+
+
+          if version_code < 29:
+              version_code = 29
 
 
           text = re.sub(
@@ -583,7 +597,7 @@ workflows:
 
           text = re.sub(
               r'versionName\s+"[^"]+"',
-              f'versionName "{version_name}"',
+              f'versionName "1.1.{version_code}"',
               text
           )
 
