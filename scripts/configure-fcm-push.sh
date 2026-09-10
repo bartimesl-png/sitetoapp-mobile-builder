@@ -516,7 +516,7 @@ bridge = r'''
 
 
     @Override
-    protected void onResume() {
+public void onResume() {
 
         super.onResume();
 
