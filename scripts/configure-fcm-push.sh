@@ -142,7 +142,7 @@ public class MainActivity extends BridgeActivity {
     }
 
     @Override
-  public void onResume() {
+    public void onResume() {
         super.onResume();
 
         String token = getSharedPreferences(
@@ -223,12 +223,15 @@ public class MainActivity extends BridgeActivity {
             "var token=" + quotedToken + ";" +
             "window.__ANDROID_FCM_TOKEN__=token;" +
             "window.__FCM_TOKEN__=token;" +
+            "window.__PF_FCM_TOKEN__=token;" +
             "try{localStorage.setItem('androidFcmToken',token);}catch(e){}" +
             "try{localStorage.setItem('fcmToken',token);}catch(e){}" +
             "try{localStorage.setItem('FCM_TOKEN',token);}catch(e){}" +
+            "try{localStorage.setItem('pf_fcm_token',token);}catch(e){}" +
             "try{window.dispatchEvent(new CustomEvent('android-fcm-token',{detail:{token:token}}));}catch(e){}" +
             "try{window.dispatchEvent(new CustomEvent('fcm-token',{detail:{token:token}}));}catch(e){}" +
             "try{window.dispatchEvent(new CustomEvent('native-fcm-token',{detail:{token:token}}));}catch(e){}" +
+            "try{window.dispatchEvent(new CustomEvent('pf-native-fcm-token',{detail:{token:token,platform:'android'}}));}catch(e){}" +
             "try{window.postMessage({type:'FCM_TOKEN',token:token,source:'android-native'},'*');}catch(e){}" +
             "try{window.postMessage({type:'ANDROID_FCM_TOKEN',token:token,source:'android-native'},'*');}catch(e){}" +
             "console.log('SiteToApp FCM token transmis à la page');" +
