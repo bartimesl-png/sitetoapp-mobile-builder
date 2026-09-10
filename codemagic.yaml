@@ -180,6 +180,8 @@ workflows:
 
           npm install
 
+          npm install --save-dev @capacitor/assets
+
           echo ""
 
           echo "Node :"
@@ -694,13 +696,17 @@ workflows:
       # 11. LOGO ANDROID
       # ========================================================
 
-      - name: Configurer le logo PartenaireFoyer
+      - name: Configurer le vrai logo PartenaireFoyer
         script: |
-          echo "===== LOGO ANDROID ====="
+          echo "===== LOGO ANDROID PARTENAIREFOYER ====="
+
+          rm -rf assets
+          mkdir -p assets
 
           ICON_SOURCE="$CM_BUILD_DIR/partenairefoyer-icon-source"
           ICON_PNG="$CM_BUILD_DIR/partenairefoyer-icon.png"
-          ICON_SQUARE="$CM_BUILD_DIR/partenairefoyer-icon-square.png"
+
+          echo "Téléchargement du logo : $APP_ICON_URL"
 
           curl \
             --fail \
@@ -712,6 +718,8 @@ workflows:
 
           test -s "$ICON_SOURCE"
 
+          echo "Conversion du logo en PNG..."
+
           sips \
             -s format png \
             "$ICON_SOURCE" \
@@ -720,6 +728,8 @@ workflows:
 
           WIDTH=$(sips -g pixelWidth "$ICON_PNG" | awk '/pixelWidth/ {print $2}')
           HEIGHT=$(sips -g pixelHeight "$ICON_PNG" | awk '/pixelHeight/ {print $2}')
+
+          echo "Dimensions source : ${WIDTH}x${HEIGHT}"
 
           if [ -z "$WIDTH" ] || [ -z "$HEIGHT" ]; then
             echo "ERREUR : dimensions du logo introuvables"
@@ -732,89 +742,97 @@ workflows:
             CROP_SIZE="$HEIGHT"
           fi
 
-          cp "$ICON_PNG" "$ICON_SQUARE"
+          echo "Recadrage carré : ${CROP_SIZE}x${CROP_SIZE}"
+
+          cp "$ICON_PNG" assets/logo.png
 
           sips \
             --cropToHeightWidth "$CROP_SIZE" "$CROP_SIZE" \
-            "$ICON_SQUARE" \
+            assets/logo.png \
             >/dev/null
 
-          RES_DIR="android/app/src/main/res"
+          echo "Mise au format 1024x1024 pour Android..."
 
-          for SPEC in \
-            "mdpi:48" \
-            "hdpi:72" \
-            "xhdpi:96" \
-            "xxhdpi:144" \
-            "xxxhdpi:192"
-          do
-            DENSITY="${SPEC%%:*}"
-            SIZE="${SPEC##*:}"
+          sips \
+            -z 1024 1024 \
+            assets/logo.png \
+            --out assets/logo-ready.png \
+            >/dev/null
 
-            mkdir -p "$RES_DIR/mipmap-$DENSITY"
+          mv assets/logo-ready.png assets/logo.png
 
-            sips \
-              -z "$SIZE" "$SIZE" \
-              "$ICON_SQUARE" \
-              --out "$RES_DIR/mipmap-$DENSITY/ic_launcher.png" \
-              >/dev/null
+          test -s assets/logo.png
 
-            cp \
-              "$RES_DIR/mipmap-$DENSITY/ic_launcher.png" \
-              "$RES_DIR/mipmap-$DENSITY/ic_launcher_round.png"
-          done
+          echo "Génération officielle des icônes Capacitor Android..."
 
-          for SPEC in \
-            "mdpi:108" \
-            "hdpi:162" \
-            "xhdpi:216" \
-            "xxhdpi:324" \
-            "xxxhdpi:432"
-          do
-            DENSITY="${SPEC%%:*}"
-            SIZE="${SPEC##*:}"
+          npx @capacitor/assets generate \
+            --android \
+            --assetPath assets \
+            --iconBackgroundColor "$APP_THEME_COLOR" \
+            --iconBackgroundColorDark "$APP_THEME_COLOR"
 
-            mkdir -p "$RES_DIR/mipmap-$DENSITY"
+          echo ""
+          echo "Forçage du manifeste sur les ressources du launcher..."
 
-            sips \
-              -z "$SIZE" "$SIZE" \
-              "$ICON_SQUARE" \
-              --out "$RES_DIR/mipmap-$DENSITY/ic_launcher_foreground.png" \
-              >/dev/null
-          done
+          python3 <<'PY'
 
-          mkdir -p "$RES_DIR/values"
-          mkdir -p "$RES_DIR/mipmap-anydpi-v26"
+          from pathlib import Path
 
-          cat > "$RES_DIR/values/ic_launcher_background.xml" <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <resources>
-              <color name="ic_launcher_background">#007AFF</color>
-          </resources>
-          EOF
+          manifest = Path(
+              "android/app/src/main/AndroidManifest.xml"
+          )
 
-          cat > "$RES_DIR/mipmap-anydpi-v26/ic_launcher.xml" <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-              <background android:drawable="@color/ic_launcher_background" />
-              <foreground android:drawable="@mipmap/ic_launcher_foreground" />
-          </adaptive-icon>
-          EOF
+          if not manifest.exists():
+              raise SystemExit(
+                  "AndroidManifest.xml introuvable"
+              )
 
-          cat > "$RES_DIR/mipmap-anydpi-v26/ic_launcher_round.xml" <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-              <background android:drawable="@color/ic_launcher_background" />
-              <foreground android:drawable="@mipmap/ic_launcher_foreground" />
-          </adaptive-icon>
-          EOF
+          text = manifest.read_text()
 
-          echo "Logo Android PartenaireFoyer configuré."
+          if "android:icon=" not in text:
+              text = text.replace(
+                  "<application",
+                  '<application android:icon="@mipmap/ic_launcher"',
+                  1
+              )
 
-          find "$RES_DIR" \
+          if "android:roundIcon=" not in text:
+              text = text.replace(
+                  "<application",
+                  '<application android:roundIcon="@mipmap/ic_launcher_round"',
+                  1
+              )
+
+          manifest.write_text(
+              text
+          )
+
+          print(
+              "Manifest launcher vérifié."
+          )
+
+          PY
+
+          echo ""
+          echo "===== ICÔNES GÉNÉRÉES ====="
+
+          find android/app/src/main/res \
             -type f \
-            \( -name "ic_launcher*" -o -name "ic_launcher_background.xml" \) \
-            -print
+            \( -name "ic_launcher*" -o -name "ic_foreground*" \) \
+            -print \
+            | sort
+
+          echo ""
+          echo "===== MANIFEST ICON ====="
+
+          grep \
+            -n \
+            "android:icon\|android:roundIcon" \
+            android/app/src/main/AndroidManifest.xml \
+            || true
+
+          echo ""
+          echo "Logo Android PartenaireFoyer généré avec @capacitor/assets."
 
 
       # ========================================================
