@@ -8,6 +8,7 @@ echo "=========================================="
 
 APP_GRADLE="android/app/build.gradle"
 MAIN_DIR="android/app/src/main/java"
+MANIFEST="android/app/src/main/AndroidManifest.xml"
 
 if [ ! -f "$APP_GRADLE" ]; then
   echo "ERREUR : $APP_GRADLE introuvable"
@@ -16,6 +17,11 @@ fi
 
 if [ ! -d "$MAIN_DIR" ]; then
   echo "ERREUR : $MAIN_DIR introuvable"
+  exit 1
+fi
+
+if [ ! -f "$MANIFEST" ]; then
+  echo "ERREUR : $MANIFEST introuvable"
   exit 1
 fi
 
@@ -31,11 +37,17 @@ python3 <<'PY'
 
 from pathlib import Path
 
-path = Path("android/app/build.gradle")
+path = Path(
+    "android/app/build.gradle"
+)
 
 text = path.read_text()
 
-dependency = "implementation 'com.google.firebase:firebase-messaging:24.1.2'"
+dependency = (
+    "implementation "
+    "'com.google.firebase:"
+    "firebase-messaging:24.1.2'"
+)
 
 if dependency not in text:
 
@@ -43,18 +55,23 @@ if dependency not in text:
 
     if marker not in text:
         raise SystemExit(
-            "Bloc dependencies introuvable dans android/app/build.gradle"
+            "Bloc dependencies introuvable "
+            "dans android/app/build.gradle"
         )
 
     text = text.replace(
         marker,
-        marker + "\n    " + dependency,
+        marker
+        + "\n    "
+        + dependency,
         1
     )
 
     path.write_text(text)
 
-print("Firebase Messaging configuré.")
+print(
+    "Firebase Messaging configuré."
+)
 
 PY
 
@@ -85,9 +102,12 @@ echo "MainActivity : $MAIN_ACTIVITY"
 python3 - "$MAIN_ACTIVITY" <<'PY'
 
 from pathlib import Path
+import re
 import sys
 
-path = Path(sys.argv[1])
+path = Path(
+    sys.argv[1]
+)
 
 text = path.read_text()
 
@@ -96,114 +116,228 @@ text = path.read_text()
 # IMPORTS
 # ------------------------------------------------------------
 
-imports = """
-import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
-import android.util.Log;
-
-import com.google.firebase.messaging.FirebaseMessaging;
-
-import org.json.JSONObject;
-"""
-
-
-package_end = text.find(";")
-
-if package_end == -1:
-    raise SystemExit("Package Java introuvable")
-
-
-for import_line in [
+required_imports = [
+    "import android.os.Bundle;",
     "import android.os.Handler;",
     "import android.os.Looper;",
     "import android.util.Log;",
-    "import com.google.firebase.messaging.FirebaseMessaging;",
-    "import org.json.JSONObject;",
-]:
-    if import_line not in text:
-
-        package_end = text.find(";")
-
-        text = (
-            text[:package_end + 1]
-            + "\n"
-            + import_line
-            + text[package_end + 1:]
-        )
+    "import android.webkit.WebView;",
+    (
+        "import com.google.firebase.messaging."
+        "FirebaseMessaging;"
+    ),
+]
 
 
-# Bundle peut déjà exister à cause de la configuration WebView.
+package_match = re.search(
+    r"package\s+[^;]+;",
+    text
+)
 
-if "import android.os.Bundle;" not in text:
+if not package_match:
+    raise SystemExit(
+        "Déclaration package Java introuvable"
+    )
 
-    package_end = text.find(";")
+
+insert_position = (
+    package_match.end()
+)
+
+
+for import_line in required_imports:
+
+    if import_line in text:
+        continue
 
     text = (
-        text[:package_end + 1]
-        + "\nimport android.os.Bundle;"
-        + text[package_end + 1:]
+        text[:insert_position]
+        + "\n"
+        + import_line
+        + text[insert_position:]
+    )
+
+    insert_position += (
+        len(import_line)
+        + 1
     )
 
 
 # ------------------------------------------------------------
-# MÉTHODES FCM
+# SUPPRIMER UNE ANCIENNE VERSION DU BRIDGE
 # ------------------------------------------------------------
 
-marker = "PF_NATIVE_FCM_BRIDGE"
+old_start = (
+    "// ========================================================\n"
+    "    // PF_NATIVE_FCM_BRIDGE"
+)
 
-if marker not in text:
+old_position = text.find(
+    old_start
+)
 
-    class_end = text.rfind("}")
+if old_position != -1:
+
+    class_end = text.rfind(
+        "}"
+    )
 
     if class_end == -1:
         raise SystemExit(
             "Fin de classe MainActivity introuvable"
         )
 
-    block = r'''
+    text = (
+        text[:old_position]
+        + text[class_end:]
+    )
+
+
+# ------------------------------------------------------------
+# SUPPRIMER LES ANCIENS APPELS
+# ------------------------------------------------------------
+
+text = text.replace(
+    "\n        initPartenaireFoyerPush();",
+    ""
+)
+
+text = text.replace(
+    "\n        schedulePartenaireFoyerPush();",
+    ""
+)
+
+
+# ------------------------------------------------------------
+# AJOUT DU NOUVEAU BRIDGE
+# ------------------------------------------------------------
+
+class_end = text.rfind(
+    "}"
+)
+
+if class_end == -1:
+    raise SystemExit(
+        "Fin de classe MainActivity introuvable"
+    )
+
+
+bridge = r'''
 
     // ========================================================
     // PF_NATIVE_FCM_BRIDGE
     // Firebase Cloud Messaging -> WebView PartenaireFoyer
     // ========================================================
 
+    private String pfFcmToken = null;
+
+    private final Handler pfPushHandler =
+        new Handler(
+            Looper.getMainLooper()
+        );
+
+
     private void initPartenaireFoyerPush() {
+
+        Log.d(
+            "PartenaireFoyer",
+            "Initialisation Firebase FCM"
+        );
 
         FirebaseMessaging
             .getInstance()
             .getToken()
-            .addOnCompleteListener(task -> {
+            .addOnCompleteListener(
+                task -> {
 
-                if (!task.isSuccessful()) {
+                    if (
+                        !task.isSuccessful()
+                    ) {
 
-                    Log.e(
+                        Log.e(
+                            "PartenaireFoyer",
+                            "Impossible de récupérer le token FCM",
+                            task.getException()
+                        );
+
+                        return;
+                    }
+
+
+                    String token =
+                        task.getResult();
+
+
+                    if (
+                        token == null ||
+                        token.trim().isEmpty()
+                    ) {
+
+                        Log.e(
+                            "PartenaireFoyer",
+                            "Firebase a retourné un token FCM vide"
+                        );
+
+                        return;
+                    }
+
+
+                    pfFcmToken =
+                        token.trim();
+
+
+                    Log.d(
                         "PartenaireFoyer",
-                        "Impossible de récupérer le token FCM",
-                        task.getException()
+                        "Token FCM récupéré, longueur=" +
+                        pfFcmToken.length()
                     );
 
-                    return;
+
+                    schedulePartenaireFoyerPush();
                 }
+            );
+    }
 
-                String token = task.getResult();
 
-                if (
-                    token == null ||
-                    token.trim().isEmpty()
-                ) {
-                    return;
-                }
+    private void schedulePartenaireFoyerPush() {
 
-                Log.d(
-                    "PartenaireFoyer",
-                    "Token FCM récupéré"
-                );
+        if (
+            pfFcmToken == null ||
+            pfFcmToken.trim().isEmpty()
+        ) {
+            return;
+        }
 
-                sendFcmTokenToWebsite(
-                    token
-                );
-            });
+
+        /*
+         * Plusieurs tentatives.
+         *
+         * Avec server.url, la WebView peut mettre
+         * plusieurs secondes avant d'être réellement
+         * arrivée sur partenairefoyer.com.
+         */
+        long[] delays = {
+            1000,
+            3000,
+            6000,
+            10000,
+            15000,
+            25000
+        };
+
+
+        for (
+            long delay :
+            delays
+        ) {
+
+            pfPushHandler.postDelayed(
+                () -> sendFcmTokenToWebsite(
+                    pfFcmToken
+                ),
+                delay
+            );
+        }
     }
 
 
@@ -211,122 +345,279 @@ if marker not in text:
         String token
     ) {
 
-        try {
+        if (
+            token == null ||
+            token.trim().isEmpty()
+        ) {
+            return;
+        }
 
-            JSONObject payload =
-                new JSONObject();
 
-            payload.put(
-                "token",
+        if (
+            getBridge() == null ||
+            getBridge().getWebView() == null
+        ) {
+
+            Log.d(
+                "PartenaireFoyer",
+                "WebView pas encore disponible pour FCM"
+            );
+
+            return;
+        }
+
+
+        final WebView webView =
+            getBridge()
+                .getWebView();
+
+
+        final String safeToken =
+            org.json.JSONObject.quote(
                 token
             );
 
-            payload.put(
-                "platform",
-                "android"
-            );
 
-            String json =
-                payload.toString();
+        final String js =
+            "(function(){" +
 
-            String js =
-                "(function(){" +
-                "try{" +
+            "try{" +
 
-                "window.__PF_FCM_TOKEN__=" +
-                JSONObject.quote(token) +
-                ";" +
+            "var host='';" +
 
-                "localStorage.setItem(" +
-                "'pf_fcm_token'," +
-                JSONObject.quote(token) +
+            "try{" +
+                "host=(" +
+                    "window.location.hostname||''" +
+                ").toLowerCase();" +
+            "}catch(e){}" +
+
+            "if(" +
+                "host!=='www.partenairefoyer.com'" +
+                "&&" +
+                "host!=='partenairefoyer.com'" +
+            "){" +
+                "return 'PF_WAITING_FOR_SITE:'+host;" +
+            "}" +
+
+            "window.__PF_FCM_TOKEN__=" +
+                safeToken +
+            ";" +
+
+            /*
+             * localStorage ne doit JAMAIS empêcher
+             * l'envoi de l'événement.
+             */
+            "try{" +
+                "window.localStorage.setItem(" +
+                    "'pf_fcm_token'," +
+                    safeToken +
+                ");" +
+            "}catch(storageError){" +
+                "console.warn(" +
+                    "'PF FCM localStorage indisponible'," +
+                    "storageError" +
+                ");" +
+            "}" +
+
+            "try{" +
+
+                "window.dispatchEvent(" +
+                    "new CustomEvent(" +
+                        "'pf-native-fcm-token'," +
+                        "{" +
+                            "detail:{" +
+                                "token:" +
+                                    safeToken +
+                                "," +
+                                "platform:'android'" +
+                            "}" +
+                        "}" +
+                    ")" +
+                ");" +
+
+            "}catch(eventError){" +
+
+                /*
+                 * Fallback pour WebView plus ancienne.
+                 */
+                "var pfEvent=" +
+                    "document.createEvent(" +
+                        "'CustomEvent'" +
+                    ");" +
+
+                "pfEvent.initCustomEvent(" +
+                    "'pf-native-fcm-token'," +
+                    "false," +
+                    "false," +
+                    "{" +
+                        "token:" +
+                            safeToken +
+                        "," +
+                        "platform:'android'" +
+                    "}" +
                 ");" +
 
                 "window.dispatchEvent(" +
-                "new CustomEvent(" +
-                "'pf-native-fcm-token'," +
-                "{detail:" +
-                json +
-                "}" +
-                ")" +
+                    "pfEvent" +
                 ");" +
+            "}" +
 
-                "}catch(e){" +
+            "console.log(" +
+                "'[PF_NATIVE] Token FCM transmis au site'" +
+            ");" +
+
+            "return 'PF_FCM_SENT';" +
+
+            "}catch(e){" +
+
                 "console.error(" +
-                "'PF FCM bridge error'," +
-                "e" +
+                    "'PF FCM bridge error'," +
+                    "e" +
                 ");" +
-                "}" +
-                "})();";
+
+                "return 'PF_FCM_ERROR:'+" +
+                    "String(e);" +
+
+            "}" +
+
+            "})();";
 
 
-            new Handler(
-                Looper.getMainLooper()
-            ).postDelayed(
-                () -> {
+        pfPushHandler.post(
+            () -> {
 
-                    if (
-                        getBridge() == null ||
-                        getBridge().getWebView() == null
-                    ) {
-                        return;
+                try {
+
+                    webView.evaluateJavascript(
+                        js,
+                        result -> {
+
+                            Log.d(
+                                "PartenaireFoyer",
+                                "Résultat bridge FCM : " +
+                                result
+                            );
+                        }
+                    );
+
+                } catch (
+                    Exception error
+                ) {
+
+                    Log.e(
+                        "PartenaireFoyer",
+                        "Erreur evaluateJavascript FCM",
+                        error
+                    );
+                }
+            }
+        );
+    }
+
+
+    @Override
+    protected void onResume() {
+
+        super.onResume();
+
+
+        /*
+         * Très important :
+         *
+         * si la page était encore en chargement
+         * lors du lancement initial, on retente
+         * quand l'utilisateur revient dans l'app.
+         */
+        if (
+            pfFcmToken != null &&
+            !pfFcmToken.trim().isEmpty()
+        ) {
+
+            pfPushHandler.postDelayed(
+                () -> sendFcmTokenToWebsite(
+                    pfFcmToken
+                ),
+                1500
+            );
+
+        } else {
+
+            FirebaseMessaging
+                .getInstance()
+                .getToken()
+                .addOnCompleteListener(
+                    task -> {
+
+                        if (
+                            task.isSuccessful() &&
+                            task.getResult() != null &&
+                            !task.getResult()
+                                .trim()
+                                .isEmpty()
+                        ) {
+
+                            pfFcmToken =
+                                task.getResult()
+                                    .trim();
+
+                            pfPushHandler.postDelayed(
+                                () ->
+                                    sendFcmTokenToWebsite(
+                                        pfFcmToken
+                                    ),
+                                1500
+                            );
+                        }
                     }
-
-                    getBridge()
-                        .getWebView()
-                        .evaluateJavascript(
-                            js,
-                            null
-                        );
-
-                },
-                4000
-            );
-
-        } catch (Exception error) {
-
-            Log.e(
-                "PartenaireFoyer",
-                "Erreur bridge FCM",
-                error
-            );
+                );
         }
     }
 
 '''
 
-    text = (
-        text[:class_end]
-        + block
-        + text[class_end:]
-    )
+
+text = (
+    text[:class_end]
+    + bridge
+    + text[class_end:]
+)
 
 
 # ------------------------------------------------------------
-# APPELER FCM DEPUIS ONCREATE
+# APPELER FCM APRÈS super.onCreate()
 # ------------------------------------------------------------
 
-if "initPartenaireFoyerPush();" not in text:
+target = (
+    "super.onCreate(savedInstanceState);"
+)
 
-    target = "super.onCreate(savedInstanceState);"
 
-    if target in text:
+if target in text:
 
-        text = text.replace(
-            target,
-            target
-            + """
+    text = text.replace(
+        target,
+        target
+        + """
 
         initPartenaireFoyerPush();
 """,
-            1
+        1
+    )
+
+else:
+
+    class_match = re.search(
+        r"public\s+class\s+MainActivity[^{]*\{",
+        text
+    )
+
+    if not class_match:
+        raise SystemExit(
+            "Classe MainActivity introuvable"
         )
 
-    else:
 
-        class_start = text.find("{")
-
-        on_create = """
+    on_create = r'''
 
     @Override
     public void onCreate(
@@ -340,16 +631,25 @@ if "initPartenaireFoyerPush();" not in text:
         initPartenaireFoyerPush();
     }
 
-"""
-
-        text = (
-            text[:class_start + 1]
-            + on_create
-            + text[class_start + 1:]
-        )
+'''
 
 
-path.write_text(text)
+    insert_at = (
+        class_match.end()
+    )
+
+
+    text = (
+        text[:insert_at]
+        + on_create
+        + text[insert_at:]
+    )
+
+
+path.write_text(
+    text
+)
+
 
 print(
     "MainActivity FCM configurée :",
@@ -362,8 +662,6 @@ PY
 # ============================================================
 # 4. PERMISSION ANDROID 13+
 # ============================================================
-
-MANIFEST="android/app/src/main/AndroidManifest.xml"
 
 python3 <<'PY'
 
@@ -385,6 +683,11 @@ if (
     not in text
 ):
 
+    if "<application" not in text:
+        raise SystemExit(
+            "Balise <application> introuvable"
+        )
+
     text = text.replace(
         "<application",
         permission
@@ -392,9 +695,11 @@ if (
         1
     )
 
+
 manifest.write_text(
     text
 )
+
 
 print(
     "Permission POST_NOTIFICATIONS OK"
@@ -402,6 +707,29 @@ print(
 
 PY
 
+
+# ============================================================
+# 5. VERIFICATION DU BRIDGE
+# ============================================================
+
+echo ""
+echo "Vérification du bridge FCM..."
+
+grep -R \
+  "PF_NATIVE_FCM_BRIDGE" \
+  "$MAIN_DIR"
+
+grep -R \
+  "__PF_FCM_TOKEN__" \
+  "$MAIN_DIR"
+
+grep -R \
+  "pf-native-fcm-token" \
+  "$MAIN_DIR"
+
+grep -R \
+  "FirebaseMessaging" \
+  "$MAIN_DIR"
 
 echo ""
 echo "=========================================="
