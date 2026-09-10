@@ -692,21 +692,21 @@ workflows:
           PY
 
 
-      # ========================================================
-      # 11. LOGO ANDROID
+            # ========================================================
+      # 11. LOGO ANDROID - VRAI LOGO PARTENAIREFOYER
       # ========================================================
 
       - name: Configurer le vrai logo PartenaireFoyer
         script: |
-          echo "===== LOGO ANDROID PARTENAIREFOYER ====="
+          echo "===== VRAI LOGO ANDROID ====="
+
+          npm install --save-dev @capacitor/assets
 
           rm -rf assets
           mkdir -p assets
 
-          ICON_SOURCE="$CM_BUILD_DIR/partenairefoyer-icon-source"
-          ICON_PNG="$CM_BUILD_DIR/partenairefoyer-icon.png"
-
-          echo "Téléchargement du logo : $APP_ICON_URL"
+          echo "Téléchargement du logo :"
+          echo "$APP_ICON_URL"
 
           curl \
             --fail \
@@ -714,20 +714,22 @@ workflows:
             --retry 3 \
             --retry-delay 2 \
             "$APP_ICON_URL" \
-            -o "$ICON_SOURCE"
+            -o assets/icon-source
 
-          test -s "$ICON_SOURCE"
+          test -s assets/icon-source
 
-          echo "Conversion du logo en PNG..."
+          echo "Conversion en PNG..."
 
           sips \
             -s format png \
-            "$ICON_SOURCE" \
-            --out "$ICON_PNG" \
+            assets/icon-source \
+            --out assets/icon.png \
             >/dev/null
 
-          WIDTH=$(sips -g pixelWidth "$ICON_PNG" | awk '/pixelWidth/ {print $2}')
-          HEIGHT=$(sips -g pixelHeight "$ICON_PNG" | awk '/pixelHeight/ {print $2}')
+          test -s assets/icon.png
+
+          WIDTH=$(sips -g pixelWidth assets/icon.png | awk '/pixelWidth/ {print $2}')
+          HEIGHT=$(sips -g pixelHeight assets/icon.png | awk '/pixelHeight/ {print $2}')
 
           echo "Dimensions source : ${WIDTH}x${HEIGHT}"
 
@@ -744,81 +746,56 @@ workflows:
 
           echo "Recadrage carré : ${CROP_SIZE}x${CROP_SIZE}"
 
-          cp "$ICON_PNG" assets/logo.png
-
           sips \
             --cropToHeightWidth "$CROP_SIZE" "$CROP_SIZE" \
-            assets/logo.png \
+            assets/icon.png \
             >/dev/null
 
-          echo "Mise au format 1024x1024 pour Android..."
+          echo "Redimensionnement 1024x1024..."
 
           sips \
             -z 1024 1024 \
-            assets/logo.png \
-            --out assets/logo-ready.png \
+            assets/icon.png \
             >/dev/null
 
-          mv assets/logo-ready.png assets/logo.png
+          echo "Fichier final :"
 
-          test -s assets/logo.png
+          sips \
+            -g pixelWidth \
+            -g pixelHeight \
+            assets/icon.png
 
-          echo "Génération officielle des icônes Capacitor Android..."
+          echo ""
+          echo "Suppression des anciennes icônes Capacitor..."
+
+          rm -f android/app/src/main/res/mipmap-mdpi/ic_launcher*
+          rm -f android/app/src/main/res/mipmap-hdpi/ic_launcher*
+          rm -f android/app/src/main/res/mipmap-xhdpi/ic_launcher*
+          rm -f android/app/src/main/res/mipmap-xxhdpi/ic_launcher*
+          rm -f android/app/src/main/res/mipmap-xxxhdpi/ic_launcher*
+          rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher*
+
+          echo ""
+          echo "Génération officielle Capacitor..."
 
           npx @capacitor/assets generate \
             --android \
             --assetPath assets \
-            --iconBackgroundColor "$APP_THEME_COLOR" \
-            --iconBackgroundColorDark "$APP_THEME_COLOR"
-
-          echo ""
-          echo "Forçage du manifeste sur les ressources du launcher..."
-
-          python3 <<'PY'
-
-          from pathlib import Path
-
-          manifest = Path(
-              "android/app/src/main/AndroidManifest.xml"
-          )
-
-          if not manifest.exists():
-              raise SystemExit(
-                  "AndroidManifest.xml introuvable"
-              )
-
-          text = manifest.read_text()
-
-          if "android:icon=" not in text:
-              text = text.replace(
-                  "<application",
-                  '<application android:icon="@mipmap/ic_launcher"',
-                  1
-              )
-
-          if "android:roundIcon=" not in text:
-              text = text.replace(
-                  "<application",
-                  '<application android:roundIcon="@mipmap/ic_launcher_round"',
-                  1
-              )
-
-          manifest.write_text(
-              text
-          )
-
-          print(
-              "Manifest launcher vérifié."
-          )
-
-          PY
+            --iconBackgroundColor "#007AFF" \
+            --iconBackgroundColorDark "#007AFF"
 
           echo ""
           echo "===== ICÔNES GÉNÉRÉES ====="
 
           find android/app/src/main/res \
             -type f \
-            \( -name "ic_launcher*" -o -name "ic_foreground*" \) \
+            \( \
+              -name "ic_launcher*" \
+              -o \
+              -name "*foreground*" \
+              -o \
+              -name "*background*" \
+            \) \
             -print \
             | sort
 
@@ -827,13 +804,27 @@ workflows:
 
           grep \
             -n \
-            "android:icon\|android:roundIcon" \
+            "android:icon\\|android:roundIcon" \
             android/app/src/main/AndroidManifest.xml \
             || true
 
           echo ""
-          echo "Logo Android PartenaireFoyer généré avec @capacitor/assets."
+          echo "Vérification icône standard..."
 
+          test -f \
+            android/app/src/main/res/mipmap-mdpi/ic_launcher.png
+
+          test -f \
+            android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
+
+          echo ""
+          echo "Vérification adaptive icon..."
+
+          test -f \
+            android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
+
+          echo ""
+          echo "Logo PartenaireFoyer généré avec succès."
 
       # ========================================================
       # 12. PERMISSIONS ANDROID
