@@ -32,27 +32,37 @@ workflows:
         script: |
           npm install
 
+
       - name: Créer le projet Android
         script: |
           rm -rf android
+
           npx cap add android
+
 
       - name: Synchroniser Capacitor
         script: |
           npx cap sync android
 
+
       - name: Compiler APK Android
         script: |
           cd android
+
           chmod +x gradlew
+
           ./gradlew assembleDebug
+
           touch "$HOME/SITETOAPP_BUILD_SUCCESS"
 
+
     artifacts:
+
       - android/app/build/outputs/**/*.apk
       - android/app/build/outputs/**/*.aab
       - android/app/build/outputs/**/mapping.txt
       - android/app/build/outputs/**/output-metadata.json
+
 
     publishing:
 
@@ -65,6 +75,7 @@ workflows:
             AAB_URL=""
 
             if [ -f "$HOME/SITETOAPP_BUILD_SUCCESS" ]; then
+
               STATUS="finished"
 
               APK_URL=$(echo "$CM_ARTIFACT_LINKS" | jq -r \
@@ -86,6 +97,7 @@ workflows:
               if [ -z "$APK_URL" ]; then
                 STATUS="failed"
               fi
+
             fi
 
             PAYLOAD=$(jq -n \
@@ -680,7 +692,7 @@ workflows:
           PY
 
 
-      # ========================================================
+            # ========================================================
       # 11. LOGO ANDROID - VRAI LOGO PARTENAIREFOYER
       # ========================================================
 
@@ -813,7 +825,6 @@ workflows:
 
           echo ""
           echo "Logo PartenaireFoyer généré avec succès."
-
 
       # ========================================================
       # 12. PERMISSIONS ANDROID
@@ -1174,7 +1185,7 @@ workflows:
 
           text = manifest.read_text()
 
-          m = re.search(r"<application\b[^>]*>", text, flags=re.S)
+          m = re.search(r"<application\\b[^>]*>", text, flags=re.S)
           if not m:
               raise SystemExit("Balise <application> introuvable")
 
@@ -1294,140 +1305,109 @@ workflows:
 
 
       # ========================================================
-      # 18. COMPILER APK RELEASE
+      # 18. COMPILER ET RECUPERER LES BUILDS GOOGLE PLAY
       # ========================================================
 
-      - name: Compiler APK Release signé
+      - name: Compiler APK et AAB Release
         script: |
-          echo "===== BUILD APK RELEASE ====="
+          echo "===== BUILD ANDROID RELEASE ====="
 
-          cd android
+          mkdir -p "$CM_BUILD_DIR/build-artifacts"
+
+          cd "$CM_BUILD_DIR/android"
 
           chmod +x gradlew
-
-          ./gradlew assembleRelease
-
-          echo "APK compilé."
-
-
-      # ========================================================
-      # 19. COMPILER AAB GOOGLE PLAY
-      # ========================================================
-
-      - name: Compiler AAB Google Play signé
-        script: |
-          echo "===== BUILD AAB GOOGLE PLAY ====="
-
-          cd android
-
-          chmod +x gradlew
-
-          ./gradlew bundleRelease
-
-          echo "AAB compilé."
-
-
-      # ========================================================
-      # 20. VERIFICATION FINALE
-      # ========================================================
-
-      - name: Vérifier le fichier Google Play
-        script: |
-          echo "===== RECHERCHE DES BUILDS ANDROID ====="
 
           echo ""
-          echo "APK éventuellement disponible :"
+          echo "Compilation APK Release..."
+          ./gradlew :app:assembleRelease --stacktrace
 
-          find android \
+          echo ""
+          echo "Compilation AAB Google Play..."
+          ./gradlew :app:bundleRelease --stacktrace
+
+          echo ""
+          echo "===== CONTENU DU DOSSIER BUILD ====="
+
+          find "$CM_BUILD_DIR/android/app/build" \
             -type f \
-            -name "*.apk" \
+            \( -name "*.apk" -o -name "*.aab" \) \
             -print \
             || true
 
           echo ""
-          echo "AAB Google Play :"
+          echo "===== RECHERCHE APK ====="
 
-          find android \
-            -type f \
-            -name "*.aab" \
-            -print \
-            || true
-
-          echo ""
-
-          APK_FILE=$(find android \
+          APK_FILE=$(find "$CM_BUILD_DIR/android/app/build" \
             -type f \
             -name "*.apk" \
-            | head -n 1 \
-            || true)
-
-          AAB_FILE=$(find android \
-            -type f \
-            -name "*.aab" \
             | head -n 1 \
             || true)
 
           if [ -n "$APK_FILE" ]; then
 
-            echo "APK Release trouvé :"
-
+            echo "APK trouvé :"
             echo "$APK_FILE"
+
+            cp \
+              "$APK_FILE" \
+              "$CM_BUILD_DIR/build-artifacts/partenairefoyer-release.apk"
 
           else
 
             echo "INFO : aucun APK trouvé."
-
-            echo "Ce n'est pas bloquant pour Google Play."
+            echo "L'APK n'est pas obligatoire pour Google Play."
 
           fi
 
+          echo ""
+          echo "===== RECHERCHE AAB ====="
+
+          AAB_FILE=$(find "$CM_BUILD_DIR/android/app/build" \
+            -type f \
+            -name "*.aab" \
+            | head -n 1 \
+            || true)
 
           if [ -z "$AAB_FILE" ]; then
 
-            echo "ERREUR : aucun AAB Google Play trouvé."
+            echo "ERREUR : Gradle n'a généré aucun fichier AAB."
+
+            echo ""
+            echo "Recherche globale pour diagnostic :"
+
+            find "$CM_BUILD_DIR" \
+              -type f \
+              \( -name "*.apk" -o -name "*.aab" \) \
+              -print \
+              || true
 
             exit 1
 
           fi
 
-
-          echo ""
-
-          echo "AAB Google Play trouvé :"
-
+          echo "AAB trouvé :"
           echo "$AAB_FILE"
-
-
-          mkdir -p build-artifacts
-
 
           cp \
             "$AAB_FILE" \
-            build-artifacts/partenairefoyer-release.aab
-
-
-          if [ -n "$APK_FILE" ]; then
-
-            cp \
-              "$APK_FILE" \
-              build-artifacts/partenairefoyer-release.apk
-
-          fi
-
+            "$CM_BUILD_DIR/build-artifacts/partenairefoyer-release.aab"
 
           echo ""
-
           echo "===== ARTEFACTS FINAUX ====="
 
-          ls -lh build-artifacts
+          ls -lah \
+            "$CM_BUILD_DIR/build-artifacts"
 
+          test -s \
+            "$CM_BUILD_DIR/build-artifacts/partenairefoyer-release.aab"
 
           touch "$HOME/PARTENAIREFOYER_RELEASE_SUCCESS"
 
-
           echo ""
-
-          echo "BUILD GOOGLE PLAY : OK"
+          echo "======================================"
+          echo "BUILD GOOGLE PLAY TERMINE AVEC SUCCES"
+          echo "======================================"
 
 
     # ==========================================================
