@@ -1100,7 +1100,146 @@ workflows:
 
 
       # ========================================================
-      # 16. VERIFICATION COMPLETE
+      # 16. FORCER LE VRAI LOGO ANDROID EN DERNIER
+      # ========================================================
+
+      - name: Forcer le vrai logo PartenaireFoyer avant compilation
+        script: |
+          echo "===== LOGO ANDROID FINAL ====="
+
+          npm install --save-dev @capacitor/assets
+
+          rm -rf assets
+          mkdir -p assets
+
+          curl \
+            --fail \
+            --location \
+            --retry 3 \
+            --retry-delay 2 \
+            "$APP_ICON_URL" \
+            -o assets/icon-source
+
+          test -s assets/icon-source
+
+          sips \
+            -s format png \
+            assets/icon-source \
+            --out assets/icon.png \
+            >/dev/null
+
+          test -s assets/icon.png
+
+          WIDTH=$(sips -g pixelWidth assets/icon.png | awk '/pixelWidth/ {print $2}')
+          HEIGHT=$(sips -g pixelHeight assets/icon.png | awk '/pixelHeight/ {print $2}')
+
+          if [ -z "$WIDTH" ] || [ -z "$HEIGHT" ]; then
+            echo "ERREUR : dimensions du logo introuvables"
+            exit 1
+          fi
+
+          if [ "$WIDTH" -lt "$HEIGHT" ]; then
+            CROP_SIZE="$WIDTH"
+          else
+            CROP_SIZE="$HEIGHT"
+          fi
+
+          sips \
+            --cropToHeightWidth "$CROP_SIZE" "$CROP_SIZE" \
+            assets/icon.png \
+            >/dev/null
+
+          sips \
+            -z 1024 1024 \
+            assets/icon.png \
+            >/dev/null
+
+          find android/app/src/main/res \
+            -type f \
+            \( \
+              -name "ic_launcher.png" \
+              -o -name "ic_launcher.webp" \
+              -o -name "ic_launcher_round.png" \
+              -o -name "ic_launcher_round.webp" \
+              -o -name "ic_launcher_foreground.png" \
+              -o -name "ic_launcher_foreground.webp" \
+              -o -name "ic_launcher.xml" \
+              -o -name "ic_launcher_round.xml" \
+            \) \
+            -delete
+
+          npx @capacitor/assets generate \
+            --android \
+            --assetPath assets \
+            --iconBackgroundColor "#002B55" \
+            --iconBackgroundColorDark "#002B55"
+
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          manifest = Path("android/app/src/main/AndroidManifest.xml")
+
+          if not manifest.exists():
+              raise SystemExit("AndroidManifest.xml introuvable")
+
+          text = manifest.read_text()
+
+          m = re.search(r"<application\\b[^>]*>", text, flags=re.S)
+          if not m:
+              raise SystemExit("Balise <application> introuvable")
+
+          tag = m.group(0)
+
+          if 'android:icon=' in tag:
+              tag = re.sub(
+                  r'android:icon="[^"]*"',
+                  'android:icon="@mipmap/ic_launcher"',
+                  tag
+              )
+          else:
+              tag = tag[:-1] + ' android:icon="@mipmap/ic_launcher">'
+
+          if 'android:roundIcon=' in tag:
+              tag = re.sub(
+                  r'android:roundIcon="[^"]*"',
+                  'android:roundIcon="@mipmap/ic_launcher_round"',
+                  tag
+              )
+          else:
+              tag = tag[:-1] + ' android:roundIcon="@mipmap/ic_launcher_round">'
+
+          text = text[:m.start()] + tag + text[m.end():]
+          manifest.write_text(text)
+          PY
+
+          echo "===== MANIFEST FINAL ====="
+
+          grep \
+            -n \
+            "android:icon\\|android:roundIcon" \
+            android/app/src/main/AndroidManifest.xml
+
+          echo "===== FICHIERS LAUNCHER FINAUX ====="
+
+          find android/app/src/main/res \
+            -type f \
+            \( \
+              -name "ic_launcher*" \
+              -o -name "*launcher_foreground*" \
+              -o -name "*launcher_background*" \
+            \) \
+            -print \
+            | sort
+
+          test -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
+          test -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
+
+          echo "Logo Android final : OK."
+
+
+      # ========================================================
+      # 17. VERIFICATION COMPLETE
       # ========================================================
 
       - name: Vérifier toute la configuration Android
@@ -1166,7 +1305,7 @@ workflows:
 
 
       # ========================================================
-      # 17. COMPILER APK RELEASE
+      # 18. COMPILER APK RELEASE
       # ========================================================
 
       - name: Compiler APK Release signé
@@ -1183,7 +1322,7 @@ workflows:
 
 
       # ========================================================
-      # 18. COMPILER AAB GOOGLE PLAY
+      # 19. COMPILER AAB GOOGLE PLAY
       # ========================================================
 
       - name: Compiler AAB Google Play signé
@@ -1200,7 +1339,7 @@ workflows:
 
 
       # ========================================================
-      # 19. VERIFICATION FINALE
+      # 20. VERIFICATION FINALE
       # ========================================================
 
       - name: Vérifier APK et AAB Google Play
