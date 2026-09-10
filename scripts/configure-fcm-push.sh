@@ -142,7 +142,7 @@ public class MainActivity extends BridgeActivity {
     }
 
     @Override
-    public void onResume()
+  public void onResume() {
         super.onResume();
 
         String token = getSharedPreferences(
