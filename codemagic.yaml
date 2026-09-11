@@ -151,7 +151,7 @@ workflows:
 
         APP_NAME: "PartenaireFoyer"
 
-        APP_PACKAGE_ID: "com.sitetoapp.partenairefoyercom28231c01"
+        APP_PACKAGE_ID: "com.partenairefoyer.app"
 
         APP_WEBSITE_URL: "https://www.partenairefoyer.com/"
 
@@ -572,7 +572,7 @@ workflows:
 
           build_number = os.environ.get(
               "BUILD_NUMBER",
-              "29"
+              "1"
           )
 
 
@@ -581,11 +581,11 @@ workflows:
                   build_number
               )
           except Exception:
-              version_code = 29
+              version_code = 1
 
 
-          if version_code < 29:
-              version_code = 29
+          if version_code < 1:
+              version_code = 1
 
 
           text = re.sub(
@@ -597,7 +597,7 @@ workflows:
 
           text = re.sub(
               r'versionName\s+"[^"]+"',
-              f'versionName "1.1.{version_code}"',
+              f'versionName "1.0.{version_code}"',
               text
           )
 
@@ -648,8 +648,8 @@ workflows:
           <resources>
               <string name="app_name">PartenaireFoyer</string>
               <string name="title_activity_main">PartenaireFoyer</string>
-              <string name="package_name">com.sitetoapp.partenairefoyercom28231c01</string>
-              <string name="custom_url_scheme">com.sitetoapp.partenairefoyercom28231c01</string>
+              <string name="package_name">com.partenairefoyer.app</string>
+              <string name="custom_url_scheme">com.partenairefoyer.app</string>
           </resources>
           """
               )
