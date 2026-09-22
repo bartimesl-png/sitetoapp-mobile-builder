@@ -176,13 +176,10 @@ public class MainActivity extends BridgeActivity {
     }
 
     /**
-     * Compatibilité Wix Login / Signup dans la WebView Android.
+     * Compatibilité Wix Login / Signup dans Capacitor.
      *
-     * IMPORTANT :
-     * - ne remplace PAS le WebChromeClient de Capacitor ;
-     * - conserve donc les comportements natifs Capacitor existants ;
-     * - window.open() / target=_blank restent dans la WebView principale ;
-     * - autorise les cookies tiers nécessaires aux flux Wix.
+     * On garde la WebView principale et on active la gestion
+     * des nouvelles fenêtres via SiteToAppWebChromeClient.
      */
     private void configureWixAuthenticationWebView() {
         if (siteToAppWebView == null) {
@@ -195,20 +192,8 @@ public class MainActivity extends BridgeActivity {
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
         settings.setJavaScriptCanOpenWindowsAutomatically(true);
+        settings.setSupportMultipleWindows(true);
 
-        /*
-         * false est volontaire :
-         * Android traite alors window.open() et target="_blank"
-         * comme une navigation de premier niveau dans la même WebView.
-         *
-         * On évite ainsi de remplacer le WebChromeClient de Capacitor.
-         */
-        settings.setSupportMultipleWindows(false);
-
-        /*
-         * Ce script recrée MainActivity.java après l'étape WebView
-         * du codemagic.yaml : on conserve donc ici les mêmes réglages.
-         */
         settings.setTextZoom(100);
         settings.setUseWideViewPort(true);
         settings.setLoadWithOverviewMode(true);
@@ -232,8 +217,15 @@ public class MainActivity extends BridgeActivity {
 
         cookieManager.flush();
 
+        siteToAppWebView.setWebChromeClient(
+            new SiteToAppWebChromeClient(
+                getBridge(),
+                siteToAppWebView
+            )
+        );
+
         System.out.println(
-            "SiteToApp WebView : Wix Login compatible"
+            "SiteToApp WebView : popup Wix Login activée"
         );
     }
 
@@ -307,6 +299,322 @@ public class MainActivity extends BridgeActivity {
         siteToAppWebView.post(
             () -> siteToAppWebView.evaluateJavascript(script, null)
         );
+    }
+}
+JAVA
+
+cat > "$PACKAGE_DIR/SiteToAppWebChromeClient.java" <<JAVA
+package $PACKAGE_NAME;
+
+import android.app.Dialog;
+import android.graphics.Bitmap;
+import android.net.Uri;
+import android.os.Build;
+import android.os.Message;
+import android.view.ViewGroup;
+import android.view.Window;
+import android.webkit.CookieManager;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
+
+import com.getcapacitor.Bridge;
+import com.getcapacitor.BridgeWebChromeClient;
+
+import java.util.HashMap;
+import java.util.Map;
+
+public class SiteToAppWebChromeClient extends BridgeWebChromeClient {
+
+    private final WebView mainWebView;
+
+    private final Map<WebView, Dialog> popupDialogs =
+        new HashMap<>();
+
+    private final Map<WebView, Boolean> popupVisitedExternalAuth =
+        new HashMap<>();
+
+    public SiteToAppWebChromeClient(
+        Bridge bridge,
+        WebView mainWebView
+    ) {
+        super(bridge);
+        this.mainWebView = mainWebView;
+    }
+
+    private boolean isPartenaireFoyerUrl(String rawUrl) {
+        if (rawUrl == null || rawUrl.trim().isEmpty()) {
+            return false;
+        }
+
+        try {
+            Uri uri = Uri.parse(rawUrl);
+            String host = uri.getHost();
+
+            if (host == null) {
+                return false;
+            }
+
+            host = host.toLowerCase();
+
+            return (
+                host.equals("partenairefoyer.com") ||
+                host.equals("www.partenairefoyer.com")
+            );
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private void configurePopupWebView(WebView popup) {
+        WebSettings settings = popup.getSettings();
+
+        settings.setJavaScriptEnabled(true);
+        settings.setDomStorageEnabled(true);
+        settings.setJavaScriptCanOpenWindowsAutomatically(true);
+        settings.setSupportMultipleWindows(true);
+
+        settings.setTextZoom(100);
+        settings.setUseWideViewPort(true);
+        settings.setLoadWithOverviewMode(true);
+        settings.setBuiltInZoomControls(false);
+        settings.setDisplayZoomControls(false);
+
+        CookieManager cookieManager =
+            CookieManager.getInstance();
+
+        cookieManager.setAcceptCookie(true);
+
+        if (
+            Build.VERSION.SDK_INT >=
+                Build.VERSION_CODES.LOLLIPOP
+        ) {
+            cookieManager.setAcceptThirdPartyCookies(
+                popup,
+                true
+            );
+        }
+
+        cookieManager.flush();
+    }
+
+    private void closePopupAndContinueInMain(
+        WebView popup,
+        String url
+    ) {
+        if (
+            mainWebView != null &&
+            url != null &&
+            !url.trim().isEmpty()
+        ) {
+            mainWebView.post(
+                () -> mainWebView.loadUrl(url)
+            );
+        }
+
+        Dialog dialog = popupDialogs.remove(popup);
+        popupVisitedExternalAuth.remove(popup);
+
+        if (
+            dialog != null &&
+            dialog.isShowing()
+        ) {
+            dialog.dismiss();
+        }
+    }
+
+    @Override
+    public boolean onCreateWindow(
+        WebView view,
+        boolean isDialog,
+        boolean isUserGesture,
+        Message resultMsg
+    ) {
+        if (view == null || resultMsg == null) {
+            return false;
+        }
+
+        final WebView popup =
+            new WebView(view.getContext());
+
+        configurePopupWebView(popup);
+
+        popupVisitedExternalAuth.put(
+            popup,
+            false
+        );
+
+        final Dialog dialog =
+            new Dialog(view.getContext());
+
+        dialog.requestWindowFeature(
+            Window.FEATURE_NO_TITLE
+        );
+
+        dialog.setContentView(
+            popup,
+            new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        );
+
+        popup.setWebChromeClient(this);
+
+        popup.setWebViewClient(
+            new WebViewClient() {
+
+                private void inspectUrl(String url) {
+                    if (
+                        url == null ||
+                        url.trim().isEmpty() ||
+                        url.startsWith("about:")
+                    ) {
+                        return;
+                    }
+
+                    boolean isPf =
+                        isPartenaireFoyerUrl(url);
+
+                    boolean visitedExternal =
+                        Boolean.TRUE.equals(
+                            popupVisitedExternalAuth.get(
+                                popup
+                            )
+                        );
+
+                    if (!isPf) {
+                        popupVisitedExternalAuth.put(
+                            popup,
+                            true
+                        );
+                        return;
+                    }
+
+                    if (visitedExternal) {
+                        CookieManager
+                            .getInstance()
+                            .flush();
+
+                        closePopupAndContinueInMain(
+                            popup,
+                            url
+                        );
+                    }
+                }
+
+                @Override
+                public void onPageStarted(
+                    WebView webView,
+                    String url,
+                    Bitmap favicon
+                ) {
+                    super.onPageStarted(
+                        webView,
+                        url,
+                        favicon
+                    );
+
+                    inspectUrl(url);
+                }
+
+                @Override
+                public boolean shouldOverrideUrlLoading(
+                    WebView webView,
+                    WebResourceRequest request
+                ) {
+                    if (
+                        request != null &&
+                        request.getUrl() != null
+                    ) {
+                        inspectUrl(
+                            request
+                                .getUrl()
+                                .toString()
+                        );
+                    }
+
+                    return false;
+                }
+
+                @Override
+                @SuppressWarnings("deprecation")
+                public boolean shouldOverrideUrlLoading(
+                    WebView webView,
+                    String url
+                ) {
+                    inspectUrl(url);
+                    return false;
+                }
+            }
+        );
+
+        dialog.setOnDismissListener(
+            ignored -> {
+                popupDialogs.remove(popup);
+                popupVisitedExternalAuth.remove(popup);
+
+                try {
+                    popup.stopLoading();
+                    popup.loadUrl("about:blank");
+                    popup.removeAllViews();
+                    popup.destroy();
+                } catch (Exception ignoredDestroy) {
+                }
+
+                if (mainWebView != null) {
+                    mainWebView.post(
+                        mainWebView::reload
+                    );
+                }
+            }
+        );
+
+        popupDialogs.put(
+            popup,
+            dialog
+        );
+
+        dialog.show();
+
+        Window window =
+            dialog.getWindow();
+
+        if (window != null) {
+            window.setLayout(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            );
+        }
+
+        WebView.WebViewTransport transport =
+            (WebView.WebViewTransport)
+                resultMsg.obj;
+
+        transport.setWebView(popup);
+        resultMsg.sendToTarget();
+
+        System.out.println(
+            "SiteToApp WebView : popup Wix ouverte"
+        );
+
+        return true;
+    }
+
+    @Override
+    public void onCloseWindow(WebView window) {
+        Dialog dialog =
+            popupDialogs.get(window);
+
+        if (
+            dialog != null &&
+            dialog.isShowing()
+        ) {
+            dialog.dismiss();
+        }
+
+        super.onCloseWindow(window);
     }
 }
 JAVA
@@ -483,11 +791,14 @@ grep -n "POST_NOTIFICATIONS" "$MANIFEST"
 grep -n "SiteToAppFirebaseMessagingService\|MESSAGING_EVENT" "$MANIFEST"
 
 echo ""
-echo "===== VERIFICATION WIX LOGIN WEBVIEW ====="
+echo "===== VERIFICATION WIX LOGIN POPUP ====="
+
+test -f "$PACKAGE_DIR/SiteToAppWebChromeClient.java"
 
 grep -n \
-  "setAcceptThirdPartyCookies\|setJavaScriptCanOpenWindowsAutomatically\|setSupportMultipleWindows" \
+  "onCreateWindow\|setSupportMultipleWindows(true)\|setAcceptThirdPartyCookies" \
+  "$PACKAGE_DIR/SiteToAppWebChromeClient.java" \
   "$MAIN_ACTIVITY"
 
 echo ""
-echo "FCM natif + pont WebView + compatibilité Wix Login configurés avec succès."
+echo "FCM natif + pont WebView + popup Wix Login configurés avec succès."
