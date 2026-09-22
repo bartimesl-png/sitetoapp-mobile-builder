@@ -96,6 +96,8 @@ import android.Manifest;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.webkit.CookieManager;
+import android.webkit.WebSettings;
 import android.webkit.WebView;
 
 import com.getcapacitor.BridgeActivity;
@@ -113,6 +115,8 @@ public class MainActivity extends BridgeActivity {
         super.onCreate(savedInstanceState);
 
         siteToAppWebView = getBridge().getWebView();
+
+        configureWixAuthenticationWebView();
 
         requestNotificationPermissionIfNeeded();
 
@@ -169,6 +173,68 @@ public class MainActivity extends BridgeActivity {
                     scheduleTokenDelivery(freshToken);
                 }
             });
+    }
+
+    /**
+     * Compatibilité Wix Login / Signup dans la WebView Android.
+     *
+     * IMPORTANT :
+     * - ne remplace PAS le WebChromeClient de Capacitor ;
+     * - conserve donc les comportements natifs Capacitor existants ;
+     * - window.open() / target=_blank restent dans la WebView principale ;
+     * - autorise les cookies tiers nécessaires aux flux Wix.
+     */
+    private void configureWixAuthenticationWebView() {
+        if (siteToAppWebView == null) {
+            return;
+        }
+
+        WebSettings settings =
+            siteToAppWebView.getSettings();
+
+        settings.setJavaScriptEnabled(true);
+        settings.setDomStorageEnabled(true);
+        settings.setJavaScriptCanOpenWindowsAutomatically(true);
+
+        /*
+         * false est volontaire :
+         * Android traite alors window.open() et target="_blank"
+         * comme une navigation de premier niveau dans la même WebView.
+         *
+         * On évite ainsi de remplacer le WebChromeClient de Capacitor.
+         */
+        settings.setSupportMultipleWindows(false);
+
+        /*
+         * Ce script recrée MainActivity.java après l'étape WebView
+         * du codemagic.yaml : on conserve donc ici les mêmes réglages.
+         */
+        settings.setTextZoom(100);
+        settings.setUseWideViewPort(true);
+        settings.setLoadWithOverviewMode(true);
+        settings.setBuiltInZoomControls(false);
+        settings.setDisplayZoomControls(false);
+
+        CookieManager cookieManager =
+            CookieManager.getInstance();
+
+        cookieManager.setAcceptCookie(true);
+
+        if (
+            Build.VERSION.SDK_INT >=
+                Build.VERSION_CODES.LOLLIPOP
+        ) {
+            cookieManager.setAcceptThirdPartyCookies(
+                siteToAppWebView,
+                true
+            );
+        }
+
+        cookieManager.flush();
+
+        System.out.println(
+            "SiteToApp WebView : Wix Login compatible"
+        );
     }
 
     private void requestNotificationPermissionIfNeeded() {
@@ -417,4 +483,11 @@ grep -n "POST_NOTIFICATIONS" "$MANIFEST"
 grep -n "SiteToAppFirebaseMessagingService\|MESSAGING_EVENT" "$MANIFEST"
 
 echo ""
-echo "FCM natif + pont WebView configurés avec succès."
+echo "===== VERIFICATION WIX LOGIN WEBVIEW ====="
+
+grep -n \
+  "setAcceptThirdPartyCookies\|setJavaScriptCanOpenWindowsAutomatically\|setSupportMultipleWindows" \
+  "$MAIN_ACTIVITY"
+
+echo ""
+echo "FCM natif + pont WebView + compatibilité Wix Login configurés avec succès."
