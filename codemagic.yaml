@@ -1562,9 +1562,16 @@ workflows:
 
     max_build_duration: 45
 
+    integrations:
+      app_store_connect: Codemagic PartenaireFoyer
+
     environment:
 
       node: 22
+
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.partenairefoyer.app
 
       vars:
 
@@ -1794,31 +1801,41 @@ workflows:
           echo "Projet Xcode valide."
 
       # ========================================================
-      # 10. BUILD IOS NON SIGNE
-      # Permet de valider le code avant activation Apple Developer.
+      # 10. SIGNATURE APPLE
       # ========================================================
 
-      - name: Compiler PartenaireFoyer iOS sans signature
+      - name: Configurer la signature Apple
         script: |
-          echo "===== BUILD IOS NON SIGNE ====="
+          echo "===== SIGNATURE APPLE ====="
+          xcode-project use-profiles
+          echo "Profil App Store et certificat de distribution configurés."
 
-          cd ios/App
+      # ========================================================
+      # 11. BUILD IPA SIGNE
+      # ========================================================
 
-          xcodebuild \
-            -project App.xcodeproj \
-            -scheme "$XCODE_SCHEME" \
-            -configuration Release \
-            -sdk iphoneos \
-            -derivedDataPath "$CM_BUILD_DIR/ios-derived-data" \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            clean build
+      - name: Compiler PartenaireFoyer IPA signé
+        script: |
+          echo "===== BUILD IPA SIGNE ====="
 
-          echo "Build iOS non signé terminé avec succès."
+          xcode-project build-ipa \
+            --project "$CM_BUILD_DIR/ios/App/App.xcodeproj" \
+            --scheme "$XCODE_SCHEME"
+
+          echo "IPA PartenaireFoyer générée."
           touch "$HOME/PARTENAIREFOYER_IOS_BUILD_SUCCESS"
 
     artifacts:
 
-      - ios-derived-data/Build/Products/**/*.app
+      - build/ios/ipa/*.ipa
       - ios/App/build/**/*.ipa
       - /tmp/xcodebuild_logs/*.log
+      - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.app
+      - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.dSYM
+
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+        submit_to_app_store: false
+
