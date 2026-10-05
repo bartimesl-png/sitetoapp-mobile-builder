@@ -1548,3 +1548,277 @@ workflows:
             echo ""
 
             echo "Enregistrement Supabase terminé."
+
+  # ============================================================
+  # WORKFLOW 3
+  # PARTENAIREFOYER IOS / TESTFLIGHT / APP STORE
+  # ============================================================
+
+  ios-release:
+
+    name: PartenaireFoyer iOS Release
+
+    instance_type: mac_mini_m2
+
+    max_build_duration: 45
+
+    environment:
+
+      node: 22
+
+      vars:
+
+        APP_NAME: "PartenaireFoyer"
+        APP_PACKAGE_ID: "com.partenairefoyer.app"
+        APP_WEBSITE_URL: "https://www.partenairefoyer.com/"
+        APP_ICON_URL: "https://static.wixstatic.com/media/476a15_d601a17fe7c4406aac35fac85d309948~mv2.jpg"
+        APP_THEME_COLOR: "#007AFF"
+
+        # À renseigner dans Codemagic dès que le compte Apple Developer est actif.
+        # Le workflow est prêt en amont mais la signature App Store nécessite Apple.
+        XCODE_SCHEME: "App"
+
+        # Facultatif pour l'instant. Quand Firebase iOS sera créé,
+        # ajouter dans Codemagic une variable sécurisée contenant le fichier
+        # GoogleService-Info.plist encodé en base64 sous ce nom.
+        # IOS_FIREBASE_PLIST_BASE64: "..."
+
+    scripts:
+
+      # ========================================================
+      # 1. DEPENDANCES
+      # ========================================================
+
+      - name: Installer les dépendances du projet
+        script: |
+          echo "===== INSTALLATION NPM IOS ====="
+          npm install
+          npm install --save-dev @capacitor/assets
+          node --version
+          npm --version
+          npx cap --version
+
+      # ========================================================
+      # 2. CREATION IOS
+      # ========================================================
+
+      - name: Créer le projet iOS Capacitor
+        script: |
+          echo "===== CREATION IOS ====="
+          rm -rf ios
+          npx cap add ios
+          test -d ios/App
+          echo "Projet iOS créé."
+
+      # ========================================================
+      # 3. SYNCHRONISATION CAPACITOR
+      # ========================================================
+
+      - name: Synchroniser Capacitor et les plugins iOS
+        script: |
+          echo "===== CAPACITOR SYNC IOS ====="
+          npx cap sync ios
+          npx cap ls || true
+
+      # ========================================================
+      # 4. FIREBASE IOS
+      # ========================================================
+
+      - name: Préparer Firebase iOS
+        script: |
+          echo "===== FIREBASE IOS ====="
+
+          if [ -n "${IOS_FIREBASE_PLIST_BASE64:-}" ]; then
+            echo "$IOS_FIREBASE_PLIST_BASE64" | base64 --decode > ios/App/App/GoogleService-Info.plist
+            test -s ios/App/App/GoogleService-Info.plist
+            echo "GoogleService-Info.plist installé."
+          else
+            echo "INFO : GoogleService-Info.plist pas encore configuré."
+            echo "Il sera ajouté après création de l'application iOS dans Firebase."
+          fi
+
+      # ========================================================
+      # 5. IDENTITE PARTENAIREFOYER
+      # ========================================================
+
+      - name: Configurer PartenaireFoyer iOS
+        script: |
+          echo "===== IDENTITE IOS ====="
+
+          PLIST="ios/App/App/Info.plist"
+          test -f "$PLIST"
+
+          /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName PartenaireFoyer" "$PLIST" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string PartenaireFoyer" "$PLIST"
+
+          /usr/libexec/PlistBuddy -c "Set :CFBundleName PartenaireFoyer" "$PLIST" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Add :CFBundleName string PartenaireFoyer" "$PLIST"
+
+          # Autorise l'affichage plein écran WebView en respectant les safe areas iPhone.
+          /usr/libexec/PlistBuddy -c "Set :UIViewControllerBasedStatusBarAppearance true" "$PLIST" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Add :UIViewControllerBasedStatusBarAppearance bool true" "$PLIST"
+
+          echo "Nom iOS configuré."
+
+      # ========================================================
+      # 6. USER AGENT IOS
+      # ========================================================
+
+      - name: Configurer le User-Agent PartenaireFoyer iOS
+        script: |
+          echo "===== USER AGENT IOS ====="
+
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path("capacitor.config.ts")
+          if not path.exists():
+              raise SystemExit("capacitor.config.ts introuvable")
+
+          text = path.read_text()
+
+          if "appendUserAgent: 'PartenaireFoyerApp iOS'" not in text:
+              marker = "  android: {"
+              ios_block = """  ios: {\n    appendUserAgent:\n      'PartenaireFoyerApp iOS',\n  },\n\n"""
+              if marker not in text:
+                  raise SystemExit("Bloc android introuvable dans capacitor.config.ts")
+              text = text.replace(marker, ios_block + marker, 1)
+              path.write_text(text)
+
+          print("Configuration iOS Capacitor prête.")
+          PY
+
+          npx cap sync ios
+
+      # ========================================================
+      # 7. LOGO IOS
+      # ========================================================
+
+      - name: Générer le logo PartenaireFoyer iOS
+        script: |
+          echo "===== LOGO IOS ====="
+
+          rm -rf assets
+          mkdir -p assets
+
+          curl \
+            --fail \
+            --location \
+            --retry 3 \
+            --retry-delay 2 \
+            "$APP_ICON_URL" \
+            -o assets/icon-source
+
+          test -s assets/icon-source
+
+          sips \
+            -s format png \
+            assets/icon-source \
+            --out assets/icon.png \
+            >/dev/null
+
+          WIDTH=$(sips -g pixelWidth assets/icon.png | awk '/pixelWidth/ {print $2}')
+          HEIGHT=$(sips -g pixelHeight assets/icon.png | awk '/pixelHeight/ {print $2}')
+
+          if [ -z "$WIDTH" ] || [ -z "$HEIGHT" ]; then
+            echo "ERREUR : dimensions du logo introuvables"
+            exit 1
+          fi
+
+          if [ "$WIDTH" -lt "$HEIGHT" ]; then
+            CROP_SIZE="$WIDTH"
+          else
+            CROP_SIZE="$HEIGHT"
+          fi
+
+          sips --cropToHeightWidth "$CROP_SIZE" "$CROP_SIZE" assets/icon.png >/dev/null
+          sips -z 1024 1024 assets/icon.png >/dev/null
+
+          npx @capacitor/assets generate \
+            --ios \
+            --assetPath assets
+
+          echo "Logo iOS généré."
+
+      # ========================================================
+      # 8. VERSION IOS
+      # ========================================================
+
+      - name: Configurer la version iOS
+        script: |
+          echo "===== VERSION IOS ====="
+
+          BUILD_NUMBER="${BUILD_NUMBER:-${PROJECT_BUILD_NUMBER:-1}}"
+
+          if ! [[ "$BUILD_NUMBER" =~ ^[0-9]+$ ]]; then
+            BUILD_NUMBER="1"
+          fi
+
+          if [ "$BUILD_NUMBER" -lt 1 ]; then
+            BUILD_NUMBER="1"
+          fi
+
+          cd ios/App
+
+          xcrun agvtool new-version -all "$BUILD_NUMBER" || true
+
+          /usr/libexec/PlistBuddy \
+            -c "Set :CFBundleVersion $BUILD_NUMBER" \
+            App/Info.plist 2>/dev/null || \
+          /usr/libexec/PlistBuddy \
+            -c "Add :CFBundleVersion string $BUILD_NUMBER" \
+            App/Info.plist
+
+          /usr/libexec/PlistBuddy \
+            -c "Set :CFBundleShortVersionString 1.0.$BUILD_NUMBER" \
+            App/Info.plist 2>/dev/null || \
+          /usr/libexec/PlistBuddy \
+            -c "Add :CFBundleShortVersionString string 1.0.$BUILD_NUMBER" \
+            App/Info.plist
+
+          echo "Version iOS : 1.0.$BUILD_NUMBER ($BUILD_NUMBER)"
+
+      # ========================================================
+      # 9. VERIFICATION XCODE
+      # ========================================================
+
+      - name: Vérifier le projet Xcode
+        script: |
+          echo "===== VERIFICATION XCODE ====="
+          test -f ios/App/App.xcodeproj/project.pbxproj
+          test -f ios/App/App/Info.plist
+
+          cd ios/App
+          xcodebuild -list -project App.xcodeproj
+
+          echo "Projet Xcode valide."
+
+      # ========================================================
+      # 10. BUILD IOS NON SIGNE
+      # Permet de valider le code avant activation Apple Developer.
+      # ========================================================
+
+      - name: Compiler PartenaireFoyer iOS sans signature
+        script: |
+          echo "===== BUILD IOS NON SIGNE ====="
+
+          cd ios/App
+
+          xcodebuild \
+            -project App.xcodeproj \
+            -scheme "$XCODE_SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath "$CM_BUILD_DIR/ios-derived-data" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            clean build
+
+          echo "Build iOS non signé terminé avec succès."
+          touch "$HOME/PARTENAIREFOYER_IOS_BUILD_SUCCESS"
+
+    artifacts:
+
+      - ios-derived-data/Build/Products/**/*.app
+      - ios/App/build/**/*.ipa
+      - /tmp/xcodebuild_logs/*.log
