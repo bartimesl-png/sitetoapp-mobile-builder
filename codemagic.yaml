@@ -1671,30 +1671,28 @@ workflows:
       # 6. USER AGENT IOS
       # ========================================================
 
-      - name: Configurer le User-Agent PartenaireFoyer iOS
+      - name: Conserver le User-Agent Safari natif sur iOS
         script: |
-          echo "===== USER AGENT IOS ====="
-
-          python3 <<'PY'
+          echo "===== AFFICHAGE IOS / USER AGENT NATIF ====="
+          # Ne pas injecter de User-Agent spécifique dans Capacitor.
+          # Le site distant doit utiliser la même détection mobile que Safari.
+          # Le projet iOS est déjà créé et synchronisé à l'étape précédente.
+          python3 <<'PYIOS'
           from pathlib import Path
+          import re
 
           path = Path("capacitor.config.ts")
-          if not path.exists():
-              raise SystemExit("capacitor.config.ts introuvable")
-
-          text = path.read_text()
-
-          if "appendUserAgent: 'PartenaireFoyerApp iOS'" not in text:
-              marker = "  android: {"
-              ios_block = """  ios: {\n    appendUserAgent:\n      'PartenaireFoyerApp iOS',\n  },\n\n"""
-              if marker not in text:
-                  raise SystemExit("Bloc android introuvable dans capacitor.config.ts")
-              text = text.replace(marker, ios_block + marker, 1)
-              path.write_text(text)
-
-          print("Configuration iOS Capacitor prête.")
-          PY
-
+          source = path.read_text()
+          # Retire seulement l'ancien bloc iOS généré par ce workflow,
+          # s'il a été conservé dans une branche précédente.
+          source = re.sub(
+              r"\n  ios: \{\s*appendUserAgent:\s*['\"]PartenaireFoyerApp iOS['\"],?\s*\},",
+              "",
+              source,
+          )
+          path.write_text(source)
+          print("User-Agent iOS natif conservé.")
+          PYIOS
           npx cap sync ios
 
       # ========================================================
@@ -1838,4 +1836,3 @@ workflows:
         auth: integration
         submit_to_testflight: true
         submit_to_app_store: false
-
