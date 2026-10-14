@@ -1,0 +1,28 @@
+workflows:
+  partenairefoyer-ios-native:
+    name: PartenaireFoyer iOS natif
+    max_build_duration: 120
+    instance_type: mac_mini_m2
+
+    environment:
+      xcode: latest
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.partenairefoyer.app
+      vars:
+        XCODE_PROJECT: "ios-native/PartenaireFoyer.xcodeproj"
+        XCODE_SCHEME: "PartenaireFoyer"
+
+    scripts:
+      - name: Configurer la signature Apple
+        script: xcode-project use-profiles
+
+      - name: Compiler l’IPA iOS
+        script: |
+          xcode-project build-ipa \
+            --project "$CM_BUILD_DIR/$XCODE_PROJECT" \
+            --scheme "$XCODE_SCHEME"
+
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
