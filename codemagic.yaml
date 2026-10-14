@@ -132,6 +132,9 @@ workflows:
     max_build_duration: 120
     instance_type: mac_mini_m2
 
+    integrations:
+      app_store_connect: "NOM EXACT DE L’INTÉGRATION"
+
     environment:
       xcode: latest
       ios_signing:
@@ -155,3 +158,9 @@ workflows:
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
+
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: false
+        submit_to_app_store: false
