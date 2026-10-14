@@ -6,7 +6,7 @@ final class FavoritesStore {
     private(set) var listings: [Listing] = []
 
     var ids: Set<String> {
-        Set(listings.map(\.?id))
+        Set(listings.map(\.id))
     }
 
     private let key = "partenairefoyer.favorite-listings.v1"
