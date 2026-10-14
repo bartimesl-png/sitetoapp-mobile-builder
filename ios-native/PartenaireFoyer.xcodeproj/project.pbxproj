@@ -1,22 +1,97 @@
-// Minimal xcodeproj pbxproj generated for PartenaireFoyer
-// This is a best-effort placeholder project file. It may need tuning in Xcode.
-// PRODUCT_BUNDLE_IDENTIFIER = com.partenairefoyer.app
-
-// PROJECT: PartenaireFoyer
+// !UTF8
+// Project file for PartenaireFoyer - minimal valid pbxproj with a single app target
+// Generated to add a native target, build configurations and a shared scheme
 {
 	archiveVersion = 1;
-	classes = {
-	};
+	classes = {};
 	objectVersion = 56;
 	objects = {
-		/* Begin PBXBuildFile section */
+
+/* Begin PBXBuildFile section */
 		/* End PBXBuildFile section */
 
-		/* Begin PBXFileReference section */
-		1D6058900D05DD3D006BFB54 /* PartenaireFoyer */ = { isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; name = "PartenaireFoyer"; path = "PartenaireFoyer.xcodeproj"; sourceTree = "<group>"; };
-		/* End PBXFileReference section */
+/* Begin PBXFileReference section */
+		FEED00000000000000000001 /* PartenaireFoyer.app */ = { isa = PBXFileReference; explicitFileType = "wrapper.application"; includeInIndex = 0; path = "PartenaireFoyer.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		FEED00000000000000000002 /* main.swift */ = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = main.swift; path = PartenaireFoyer/main.swift; sourceTree = "<group>"; };
+		FEED00000000000000000003 /* PartenaireFoyer.xcodeproj */ = { isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; name = "PartenaireFoyer"; path = "PartenaireFoyer.xcodeproj"; sourceTree = "<group>"; };
+/* End PBXFileReference section */
 
-		/* Begin PBXProject section */
+/* Begin PBXGroup section */
+		1D60588E0D05DD3D006BFB54 = {
+			isa = PBXGroup;
+			children = (
+				FEED00000000000000000002 /* main.swift */,
+				FEED00000000000000000003 /* PartenaireFoyer.xcodeproj */,
+			);
+			path = "";
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXSourcesBuildPhase section */
+		SOURCES_PHASE = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = ();
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXNativeTarget section */
+		TARGET_1 = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = BUILD_CFG_LIST_1;
+			buildPhases = (
+				SOURCES_PHASE,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "PartenaireFoyer";
+			productName = "PartenaireFoyer";
+			productReference = FEED00000000000000000001 /* PartenaireFoyer.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin XCBuildConfiguration section */
+		BUILD_CFG_DEBUG = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_BUNDLE_IDENTIFIER = "com.partenairefoyer.app";
+				CODE_SIGN_STYLE = Automatic;
+				IPHONEOS_DEPLOYMENT_TARGET = "15.0";
+				SDKROOT = iphoneos;
+			};
+			name = Debug;
+		};
+
+		BUILD_CFG_RELEASE = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_BUNDLE_IDENTIFIER = "com.partenairefoyer.app";
+				CODE_SIGN_STYLE = Automatic;
+				IPHONEOS_DEPLOYMENT_TARGET = "15.0";
+				SDKROOT = iphoneos;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		BUILD_CFG_LIST_1 = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				BUILD_CFG_DEBUG,
+				BUILD_CFG_RELEASE,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin PBXProject section */
 		PROJECT = {
 			isa = PBXProject;
 			attributes = {
@@ -25,12 +100,15 @@
 			compatibilityVersion = "Xcode 14.0";
 			hasScannedForEncodings = 0;
 			mainGroup = 1D60588E0D05DD3D006BFB54;
+			productRefGroup = 1D6058900D05DD3D006BFB54;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
+				TARGET_1,
 			);
 		};
-		/* End PBXProject section */
+/* End PBXProject section */
+
 	};
 	rootObject = PROJECT;
 }
