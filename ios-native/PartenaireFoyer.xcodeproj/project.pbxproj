@@ -1,6 +1,4 @@
-// !UTF8
-// Project file for PartenaireFoyer - minimal valid pbxproj with a single app target
-// Generated to add a native target, build configurations and a shared scheme
+// !$*UTF8*$!
 {
 	archiveVersion = 1;
 	classes = {};
@@ -8,107 +6,222 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		/* End PBXBuildFile section */
+		A10000000000000000000001 /* PartenaireFoyerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001 /* PartenaireFoyerApp.swift */; };
+		A10000000000000000000002 /* AppConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002 /* AppConfig.swift */; };
+		A10000000000000000000003 /* Listing.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000003 /* Listing.swift */; };
+		A10000000000000000000004 /* ListingsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000004 /* ListingsService.swift */; };
+		A10000000000000000000005 /* FavoritesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000005 /* FavoritesStore.swift */; };
+		A10000000000000000000006 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006 /* RootView.swift */; };
+/* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		FEED00000000000000000001 /* PartenaireFoyer.app */ = { isa = PBXFileReference; explicitFileType = "wrapper.application"; includeInIndex = 0; path = "PartenaireFoyer.app"; sourceTree = BUILT_PRODUCTS_DIR; };
-		FEED00000000000000000002 /* main.swift */ = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = main.swift; path = PartenaireFoyer/main.swift; sourceTree = "<group>"; };
-		FEED00000000000000000003 /* PartenaireFoyer.xcodeproj */ = { isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; name = "PartenaireFoyer"; path = "PartenaireFoyer.xcodeproj"; sourceTree = "<group>"; };
+		A20000000000000000000001 /* PartenaireFoyerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PartenaireFoyerApp.swift; sourceTree = "<group>"; };
+		A20000000000000000000002 /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
+		A20000000000000000000003 /* Listing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Listing.swift; sourceTree = "<group>"; };
+		A20000000000000000000004 /* ListingsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListingsService.swift; sourceTree = "<group>"; };
+		A20000000000000000000005 /* FavoritesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FavoritesStore.swift; sourceTree = "<group>"; };
+		A20000000000000000000006 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		A20000000000000000000007 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = PartenaireFoyer/Info.plist; sourceTree = "<group>"; };
+		A20000000000000000000008 /* PartenaireFoyer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PartenaireFoyer.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
-/* Begin PBXGroup section */
-		1D60588E0D05DD3D006BFB54 = {
-			isa = PBXGroup;
-			children = (
-				FEED00000000000000000002 /* main.swift */,
-				FEED00000000000000000003 /* PartenaireFoyer.xcodeproj */,
-			);
-			path = "";
-			sourceTree = "<group>";
-		};
-/* End PBXGroup section */
-
-/* Begin PBXSourcesBuildPhase section */
-		SOURCES_PHASE = {
-			isa = PBXSourcesBuildPhase;
+/* Begin PBXFrameworksBuildPhase section */
+		A30000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = ();
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-/* End PBXSourcesBuildPhase section */
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A40000000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				A40000000000000000000002 /* Sources */,
+				A20000000000000000000007 /* Info.plist */,
+				A40000000000000000000003 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+
+		A40000000000000000000002 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000001 /* PartenaireFoyerApp.swift */,
+				A20000000000000000000002 /* AppConfig.swift */,
+				A20000000000000000000003 /* Listing.swift */,
+				A20000000000000000000004 /* ListingsService.swift */,
+				A20000000000000000000005 /* FavoritesStore.swift */,
+				A20000000000000000000006 /* RootView.swift */,
+			);
+			path = .;
+			sourceTree = "<group>";
+		};
+
+		A40000000000000000000003 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000008 /* PartenaireFoyer.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		TARGET_1 = {
+		A50000000000000000000001 /* PartenaireFoyer */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = BUILD_CFG_LIST_1;
+			buildConfigurationList = A70000000000000000000002 /* Build configuration list for PBXNativeTarget "PartenaireFoyer" */;
 			buildPhases = (
-				SOURCES_PHASE,
+				A60000000000000000000001 /* Sources */,
+				A30000000000000000000001 /* Frameworks */,
+				A60000000000000000000002 /* Resources */,
 			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			name = "PartenaireFoyer";
-			productName = "PartenaireFoyer";
-			productReference = FEED00000000000000000001 /* PartenaireFoyer.app */;
+			buildRules = ();
+			dependencies = ();
+			name = PartenaireFoyer;
+			productName = PartenaireFoyer;
+			productReference = A20000000000000000000008 /* PartenaireFoyer.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
 
+/* Begin PBXProject section */
+		A80000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					A50000000000000000000001 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+				};
+			};
+			buildConfigurationList = A70000000000000000000001 /* Build configuration list for PBXProject "PartenaireFoyer" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = fr;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				fr,
+				en,
+				Base,
+			);
+			mainGroup = A40000000000000000000001;
+			productRefGroup = A40000000000000000000003 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A50000000000000000000001 /* PartenaireFoyer */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A60000000000000000000002 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = ();
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A60000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000001 /* PartenaireFoyerApp.swift in Sources */,
+				A10000000000000000000002 /* AppConfig.swift in Sources */,
+				A10000000000000000000003 /* Listing.swift in Sources */,
+				A10000000000000000000004 /* ListingsService.swift in Sources */,
+				A10000000000000000000005 /* FavoritesStore.swift in Sources */,
+				A10000000000000000000006 /* RootView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
 /* Begin XCBuildConfiguration section */
-		BUILD_CFG_DEBUG = {
+		A90000000000000000000001 /* Debug project */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				PRODUCT_BUNDLE_IDENTIFIER = "com.partenairefoyer.app";
-				CODE_SIGN_STYLE = Automatic;
-				IPHONEOS_DEPLOYMENT_TARGET = "15.0";
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
 			};
 			name = Debug;
 		};
 
-		BUILD_CFG_RELEASE = {
+		A90000000000000000000002 /* Release project */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				PRODUCT_BUNDLE_IDENTIFIER = "com.partenairefoyer.app";
-				CODE_SIGN_STYLE = Automatic;
-				IPHONEOS_DEPLOYMENT_TARGET = "15.0";
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+
+		A90000000000000000000003 /* Debug app */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = PartenaireFoyer/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.partenairefoyer.app;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+
+		A90000000000000000000004 /* Release app */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = PartenaireFoyer/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.partenairefoyer.app;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
 		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		BUILD_CFG_LIST_1 = {
+		A70000000000000000000001 /* Build configuration list for PBXProject "PartenaireFoyer" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				BUILD_CFG_DEBUG,
-				BUILD_CFG_RELEASE,
+				A90000000000000000000001 /* Debug project */,
+				A90000000000000000000002 /* Release project */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+
+		A70000000000000000000002 /* Build configuration list for PBXNativeTarget "PartenaireFoyer" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A90000000000000000000003 /* Debug app */,
+				A90000000000000000000004 /* Release app */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
-
-/* Begin PBXProject section */
-		PROJECT = {
-			isa = PBXProject;
-			attributes = {
-				LastUpgradeCheck = 1430;
-			};
-			compatibilityVersion = "Xcode 14.0";
-			hasScannedForEncodings = 0;
-			mainGroup = 1D60588E0D05DD3D006BFB54;
-			productRefGroup = 1D6058900D05DD3D006BFB54;
-			projectDirPath = "";
-			projectRoot = "";
-			targets = (
-				TARGET_1,
-			);
-		};
-/* End PBXProject section */
-
 	};
-	rootObject = PROJECT;
+	rootObject = A80000000000000000000001 /* Project object */;
 }
