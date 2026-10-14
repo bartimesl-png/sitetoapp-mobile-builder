@@ -1,4 +1,3 @@
-# Existing codemagic.yaml with native workflow appended
 workflows:
 
   # ============================================================
@@ -144,7 +143,8 @@ workflows:
 
     scripts:
       - name: Configurer la signature Apple
-        script: xcode-project use-profiles
+        script: |
+          xcode-project use-profiles --project "$CM_BUILD_DIR/$XCODE_PROJECT"
 
       - name: Compiler l’IPA iOS
         script: |
