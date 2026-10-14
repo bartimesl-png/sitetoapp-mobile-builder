@@ -32,37 +32,27 @@ workflows:
         script: |
           npm install
 
-
       - name: Créer le projet Android
         script: |
           rm -rf android
-
           npx cap add android
-
 
       - name: Synchroniser Capacitor
         script: |
           npx cap sync android
 
-
       - name: Compiler APK Android
         script: |
           cd android
-
           chmod +x gradlew
-
           ./gradlew assembleDebug
-
           touch "$HOME/SITETOAPP_BUILD_SUCCESS"
 
-
     artifacts:
-
       - android/app/build/outputs/**/*.apk
       - android/app/build/outputs/**/*.aab
       - android/app/build/outputs/**/mapping.txt
       - android/app/build/outputs/**/output-metadata.json
-
 
     publishing:
 
@@ -75,7 +65,6 @@ workflows:
             AAB_URL=""
 
             if [ -f "$HOME/SITETOAPP_BUILD_SUCCESS" ]; then
-
               STATUS="finished"
 
               APK_URL=$(echo "$CM_ARTIFACT_LINKS" | jq -r \
@@ -97,7 +86,6 @@ workflows:
               if [ -z "$APK_URL" ]; then
                 STATUS="failed"
               fi
-
             fi
 
             PAYLOAD=$(jq -n \
@@ -125,29 +113,39 @@ workflows:
               -H "Content-Type: application/json" \
               -d "$PAYLOAD"
 
-# ... (rest of original codemagic.yaml omitted here for brevity)
+
+  # ============================================================
+  # WORKFLOW iOS NATIF PARTENAIREFOYER
+  # ============================================================
 
   partenairefoyer-ios-native:
+
     name: PartenaireFoyer iOS natif
+
     max_build_duration: 120
+
     instance_type: mac_mini_m2
 
     integrations:
-      app_store_connect: "NOM EXACT DE L’INTÉGRATION"
+      app_store_connect: partenairefoyer_app_store_connect
 
     environment:
       xcode: latest
+
       ios_signing:
         distribution_type: app_store
         bundle_identifier: com.partenairefoyer.app
+
       vars:
         XCODE_PROJECT: "ios-native/PartenaireFoyer.xcodeproj"
         XCODE_SCHEME: "PartenaireFoyer"
 
     scripts:
+
       - name: Configurer la signature Apple
         script: |
-          xcode-project use-profiles --project "$CM_BUILD_DIR/$XCODE_PROJECT"
+          xcode-project use-profiles \
+            --project "$CM_BUILD_DIR/$XCODE_PROJECT"
 
       - name: Compiler l’IPA iOS
         script: |
