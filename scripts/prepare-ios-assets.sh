@@ -5,7 +5,7 @@ ROOT_DIR="${CM_BUILD_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 ASSETS_DIR="$ROOT_DIR/ios-native/PartenaireFoyer/Assets.xcassets"
 APPICON_DIR="$ASSETS_DIR/AppIcon.appiconset"
 ICON_PATH="$APPICON_DIR/AppIcon.png"
-LOGO_URL="https://static.wixstatic.com/media/476a15_d601a17fe7c4406aac35fac85d309948~mv2.jpg"
+LOGO_URL="${PARTENAIREFOYER_LOGO_URL:-https://static.wixstatic.com/media/476a15_d601a17fe7c4406aac35fac85d309948~mv2.jpg}"
 TMP_DIR="$(mktemp -d)"
 
 cleanup() {
