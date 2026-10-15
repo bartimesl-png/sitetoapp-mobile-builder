@@ -147,6 +147,11 @@ workflows:
           xcode-project use-profiles \
             --project "$CM_BUILD_DIR/$XCODE_PROJECT"
 
+      - name: Préparer la configuration Firebase iOS
+        script: |
+          chmod +x ./scripts/prepare-ios-firebase.sh
+          ./scripts/prepare-ios-firebase.sh
+
       - name: Préparer les assets iOS manquants
         script: |
           chmod +x ./scripts/prepare-ios-assets.sh
