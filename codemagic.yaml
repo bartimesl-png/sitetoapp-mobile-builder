@@ -131,6 +131,8 @@ workflows:
 
     environment:
       xcode: latest
+      groups:
+        - firebase_ios
 
       ios_signing:
         distribution_type: app_store
