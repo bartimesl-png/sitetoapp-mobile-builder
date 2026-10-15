@@ -17,6 +17,11 @@ workflows:
       - name: Configurer la signature Apple
         script: xcode-project use-profiles
 
+      - name: Préparer la configuration Firebase iOS
+        script: |
+          chmod +x ./scripts/prepare-ios-firebase.sh
+          ./scripts/prepare-ios-firebase.sh
+
       - name: Compiler l’IPA iOS
         script: |
           xcode-project build-ipa \
