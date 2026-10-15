@@ -11,7 +11,11 @@ import plistlib
 import sys
 
 destination = sys.argv[1]
-encoded = os.environ.get("GOOGLE_SERVICE_INFO_PLIST_BASE64", "")
+encoded = (
+    os.environ.get("GOOGLE_SERVICE_INFO_PLIST_BASE64")
+    or os.environ.get("IOS_FIREBASE_PLIST_BASE64")
+    or ""
+)
 raw_xml = os.environ.get("GOOGLE_SERVICE_INFO_PLIST", "")
 
 try:
@@ -24,8 +28,8 @@ try:
             raw = source.read()
     else:
         raise ValueError(
-            "Aucune configuration fournie. Définissez GOOGLE_SERVICE_INFO_PLIST_BASE64 "
-            "ou GOOGLE_SERVICE_INFO_PLIST dans l’environnement Codemagic."
+            "Aucune configuration fournie. Définissez GOOGLE_SERVICE_INFO_PLIST_BASE64, "
+            "IOS_FIREBASE_PLIST_BASE64 ou GOOGLE_SERVICE_INFO_PLIST dans Codemagic."
         )
     config = plistlib.loads(raw)
 except Exception as error:
