@@ -263,40 +263,81 @@ private struct HomeDashboardView: View {
     private var hero: some View {
         ZStack(alignment: .bottomLeading) {
             LinearGradient(
-                colors: [Color(red: 0.025, green: 0.22, blue: 0.25), Color(red: 0.02, green: 0.46, blue: 0.39)],
+                colors: [Color(red: 0.035, green: 0.12, blue: 0.19), Color(red: 0.02, green: 0.39, blue: 0.32)],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
             Circle()
-                .fill(.white.opacity(0.08))
-                .frame(width: 200, height: 200)
-                .offset(x: 240, y: -90)
-            VStack(alignment: .leading, spacing: 17) {
-                HStack {
-                    Label("PARTENAIREFOYER", systemImage: "house.and.flag.fill")
-                        .font(.caption.weight(.heavy))
-                        .tracking(1.2)
-                        .foregroundStyle(.white)
+                .fill(.white.opacity(0.07))
+                .frame(width: 230, height: 230)
+                .offset(x: 245, y: -85)
+            Circle()
+                .stroke(.white.opacity(0.10), lineWidth: 1)
+                .frame(width: 180, height: 180)
+                .offset(x: 260, y: -72)
+
+            VStack(alignment: .leading, spacing: 19) {
+                HStack(spacing: 11) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(.white)
+                        Image(systemName: "house.fill")
+                            .font(.system(size: 25, weight: .semibold))
+                            .foregroundStyle(Color(red: 0.035, green: 0.20, blue: 0.23))
+                        Image(systemName: "person.3.fill")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(Color(red: 0.12, green: 0.72, blue: 0.46))
+                            .offset(y: 7)
+                    }
+                    .frame(width: 46, height: 46)
+                    .accessibilityHidden(true)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 0) {
+                            Text("Partenaire")
+                                .foregroundStyle(.white)
+                            Text("Foyer")
+                                .foregroundStyle(Color(red: 0.35, green: 0.91, blue: 0.62))
+                        }
+                        .font(.system(size: 17, weight: .bold, design: .rounded))
+                        Text("PartenaireFoyer.com")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.72))
+                    }
+
                     Spacer()
+
                     Button { selectedTab = 4 } label: {
                         Image(systemName: "person.crop.circle")
                             .font(.title3)
                             .foregroundStyle(.white)
                             .frame(width: 42, height: 42)
-                            .background(.white.opacity(0.16), in: Circle())
+                            .background(.white.opacity(0.14), in: Circle())
                     }
                     .accessibilityLabel("Ouvrir mon compte")
                 }
-                Text("Votre prochain projet\ncommence ici.")
-                    .font(.system(size: 29, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                Text("Annonces, professionnels et outils pour avancer.")
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Réunir.")
+                        .foregroundStyle(.white)
+                    Text("Connecter.")
+                        .foregroundStyle(Color(red: 0.45, green: 0.94, blue: 0.67))
+                    Text("Avancer.")
+                        .foregroundStyle(.white)
+                }
+                .font(.system(size: 28, weight: .bold, design: .rounded))
+                .lineSpacing(-2)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Réunir. Connecter. Avancer.")
+
+                Text("Annonces, projets et professionnels réunis dans votre application.")
                     .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.86))
+                    .foregroundStyle(.white.opacity(0.84))
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .padding(22)
         }
-        .frame(height: 230)
+        .frame(maxWidth: .infinity, minHeight: 286, maxHeight: 286, alignment: .leading)
         .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
     }
 }
