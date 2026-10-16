@@ -7,12 +7,14 @@ struct RootView: View {
         TabView(selection: $selectedTab) {
             HomeDashboardView(selectedTab: $selectedTab)
                 .tabItem { Label("Accueil", systemImage: "house.fill") }.tag(0)
-            SearchView()
+            FullSiteRootView(initialSection: .listings)
                 .tabItem { Label("Annonces", systemImage: "magnifyingglass") }.tag(1)
+            SearchView()
+                .tabItem { Label("Recherche", systemImage: "slider.horizontal.3") }.tag(2)
             FavoritesView()
-                .tabItem { Label("Favoris", systemImage: "heart.fill") }.tag(2)
-            AccountView()
-                .tabItem { Label("Compte", systemImage: "person.crop.circle") }.tag(3)
+                .tabItem { Label("Favoris", systemImage: "heart.fill") }.tag(3)
+            FullSiteRootView(initialSection: .account)
+                .tabItem { Label("Compte", systemImage: "person.crop.circle") }.tag(4)
         }
         .tint(Color(red: 0.02, green: 0.38, blue: 0.34))
     }
