@@ -171,3 +171,11 @@ workflows:
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
+
+    # Téléverse l'IPA dans App Store Connect pour la sélection du build.
+    # Ne soumet pas à la bêta TestFlight et ne publie pas sur l'App Store.
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: false
+        submit_to_app_store: false
