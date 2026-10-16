@@ -439,10 +439,8 @@ struct ListingDetailView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    AsyncImage(url: listing.imageURL) { phase in
-                        if let image = phase.image {
-                            image.resizable().scaledToFill()
-                        } else {
+                    Group {
+                        if listing.imageURLs.isEmpty {
                             Rectangle()
                                 .fill(.quaternary)
                                 .overlay(
@@ -450,6 +448,23 @@ struct ListingDetailView: View {
                                         .font(.largeTitle)
                                         .foregroundStyle(.tertiary)
                                 )
+                        } else {
+                            TabView {
+                                ForEach(listing.imageURLs, id: \.absoluteString) { url in
+                                    AsyncImage(url: url) { phase in
+                                        if let image = phase.image {
+                                            image.resizable().scaledToFill()
+                                        } else {
+                                            Rectangle()
+                                                .fill(.quaternary)
+                                                .overlay(Image(systemName: "photo").foregroundStyle(.tertiary))
+                                        }
+                                    }
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                    .clipped()
+                                }
+                            }
+                            .tabViewStyle(.page(indexDisplayMode: listing.imageURLs.count > 1 ? .always : .never))
                         }
                     }
                     .frame(height: 260)
