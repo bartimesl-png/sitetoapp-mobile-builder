@@ -12,6 +12,7 @@ struct Listing: Identifiable, Codable, Hashable {
     let transactionType: String
     let summary: String
     let imageURL: URL?
+    let galleryImageURLs: [URL]
     let sourceURL: URL?
     let phone: String?
     let latitude: Double?
