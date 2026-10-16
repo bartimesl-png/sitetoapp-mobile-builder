@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RootView: View {
     @State private var selectedTab = 0
+    @StateObject private var listingsService = ListingsService()
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -9,11 +10,11 @@ struct RootView: View {
                 .tabItem { Label("Accueil", systemImage: "house.fill") }
                 .tag(0)
 
-            FullSiteRootView(initialSection: .listings)
+            NativeListingsView(service: listingsService)
                 .tabItem { Label("Annonces", systemImage: "magnifyingglass") }
                 .tag(1)
 
-            FullSiteRootView(initialSection: .favorites)
+            NativeFavoritesView(service: listingsService)
                 .tabItem { Label("Favoris", systemImage: "heart.fill") }
                 .tag(2)
 
@@ -26,6 +27,287 @@ struct RootView: View {
                 .tag(4)
         }
         .tint(Color(red: 0.02, green: 0.38, blue: 0.34))
+    }
+}
+
+private struct NativeListingsView: View {
+    @ObservedObject var service: ListingsService
+    @ObservedObject private var favorites = FavoritesStore.shared
+    @State private var searchText = ""
+
+    private var filtered: [Listing] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return service.listings }
+        return service.listings.filter {
+            ($0.title ?? "").localizedCaseInsensitiveContains(query) ||
+            ($0.city ?? "").localizedCaseInsensitiveContains(query) ||
+            ($0.postalCode ?? "").localizedCaseInsensitiveContains(query) ||
+            ($0.description ?? "").localizedCaseInsensitiveContains(query)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if service.isLoading && service.listings.isEmpty {
+                    ProgressView("Chargement des annonces…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let error = service.errorMessage, service.listings.isEmpty {
+                    ContentUnavailableView {
+                        Label("Annonces indisponibles", systemImage: "wifi.exclamationmark")
+                    } description: {
+                        Text(error)
+                    } actions: {
+                        Button("Réessayer") { Task { await service.reload() } }
+                            .buttonStyle(.borderedProminent)
+                    }
+                } else {
+                    List {
+                        Section {
+                            HStack(spacing: 10) {
+                                Image(systemName: "sparkles")
+                                    .foregroundStyle(.teal)
+                                Text("Annonces de professionnels actualisées depuis le catalogue PartenaireFoyer.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .listRowBackground(Color.teal.opacity(0.07))
+                        }
+
+                        if filtered.isEmpty {
+                            ContentUnavailableView.search(text: searchText)
+                        } else {
+                            ForEach(filtered) { listing in
+                                NavigationLink(value: listing) {
+                                    ListingRow(listing: listing, isFavorite: favorites.contains(listing)) {
+                                        favorites.toggle(listing)
+                                    }
+                                }
+                                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                            }
+                        }
+
+                        Section {
+                            NavigationLink {
+                                FullSiteRootView(initialSection: .listings)
+                            } label: {
+                                Label("Voir aussi les annonces de particuliers", systemImage: "arrow.up.right.square")
+                                    .font(.subheadline.weight(.semibold))
+                            }
+                        } footer: {
+                            Text("Les annonces importées sont affichées ici en natif. Les annonces de particuliers restent accessibles via leur espace Wix.")
+                        }
+                    }
+                    .listStyle(.plain)
+                    .refreshable { await service.reload() }
+                    .navigationDestination(for: Listing.self) { listing in
+                        ListingDetailView(listing: listing)
+                    }
+                }
+            }
+            .navigationTitle("Annonces")
+            .navigationBarTitleDisplayMode(.large)
+            .searchable(text: $searchText, prompt: "Ville, code postal, bien…")
+            .task { await service.loadIfNeeded() }
+        }
+    }
+}
+
+private struct NativeFavoritesView: View {
+    @ObservedObject var service: ListingsService
+    @ObservedObject private var favorites = FavoritesStore.shared
+    private var saved: [Listing] { service.listings.filter { favorites.contains($0) } }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if saved.isEmpty {
+                    ContentUnavailableView {
+                        Label("Aucun favori enregistré", systemImage: "heart")
+                    } description: {
+                        Text("Touchez le cœur d’une annonce pour la retrouver ici sur cet iPhone.")
+                    }
+                } else {
+                    List {
+                        ForEach(saved) { listing in
+                            NavigationLink(value: listing) {
+                                ListingRow(listing: listing, isFavorite: true) {
+                                    favorites.toggle(listing)
+                                }
+                            }
+                            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                        }
+                    }
+                    .listStyle(.plain)
+                    .navigationDestination(for: Listing.self) { listing in
+                        ListingDetailView(listing: listing)
+                    }
+                }
+            }
+            .navigationTitle("Favoris")
+            .task { await service.loadIfNeeded() }
+        }
+    }
+}
+
+private struct ListingRow: View {
+    let listing: Listing
+    let isFavorite: Bool
+    let onFavorite: () -> Void
+
+    var body: some View {
+        HStack(spacing: 13) {
+            ListingImage(url: listing.gallery.first)
+                .frame(width: 112, height: 98)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(listing.formattedPrice)
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(.primary)
+                Text(listing.title ?? "Annonce immobilière")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                if !listing.locationLabel.isEmpty {
+                    Label(listing.locationLabel, systemImage: "mappin.and.ellipse")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                if let surface = listing.formattedSurface {
+                    Text(surface).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            Spacer(minLength: 0)
+            Button(action: onFavorite) {
+                Image(systemName: isFavorite ? "heart.fill" : "heart")
+                    .font(.title3)
+                    .foregroundStyle(isFavorite ? .pink : .secondary)
+                    .frame(width: 40, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isFavorite ? "Retirer des favoris" : "Ajouter aux favoris")
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+    }
+}
+
+private struct ListingImage: View {
+    let url: URL?
+
+    var body: some View {
+        Group {
+            if let url {
+                AsyncImage(url: url) { phase in
+                    if let image = phase.image {
+                        image.resizable().scaledToFill()
+                    } else if phase.error != nil {
+                        placeholder
+                    } else {
+                        ZStack { placeholder; ProgressView() }
+                    }
+                }
+            } else {
+                placeholder
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
+    }
+
+    private var placeholder: some View {
+        Rectangle()
+            .fill(Color.teal.opacity(0.09))
+            .overlay(Image(systemName: "house.fill").font(.title2).foregroundStyle(.teal.opacity(0.6)))
+    }
+}
+
+private struct ListingDetailView: View {
+    let listing: Listing
+    @ObservedObject private var favorites = FavoritesStore.shared
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                if listing.gallery.isEmpty {
+                    ListingImage(url: nil).frame(height: 290)
+                } else {
+                    TabView {
+                        ForEach(Array(listing.gallery.enumerated()), id: \.offset) { entry in
+                            ListingImage(url: entry.element)
+                        }
+                    }
+                    .tabViewStyle(.page)
+                    .frame(height: 290)
+                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                }
+
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text(listing.formattedPrice).font(.title2.bold())
+                        if !listing.locationLabel.isEmpty {
+                            Label(listing.locationLabel, systemImage: "mappin.and.ellipse")
+                                .font(.subheadline).foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer()
+                    Button { favorites.toggle(listing) } label: {
+                        Image(systemName: favorites.contains(listing) ? "heart.fill" : "heart")
+                            .font(.title2)
+                            .foregroundStyle(favorites.contains(listing) ? .pink : .teal)
+                            .frame(width: 48, height: 48)
+                            .background(Color.teal.opacity(0.09), in: Circle())
+                    }
+                    .accessibilityLabel(favorites.contains(listing) ? "Retirer des favoris" : "Ajouter aux favoris")
+                }
+
+                Text(listing.title ?? "Annonce immobilière")
+                    .font(.title3.weight(.semibold))
+
+                HStack(spacing: 10) {
+                    if let surface = listing.formattedSurface { ListingFact(symbol: "square.dashed", text: surface) }
+                    if let rooms = listing.rooms { ListingFact(symbol: "door.left.hand.open", text: "\(rooms) pièces") }
+                    if let bedrooms = listing.bedrooms { ListingFact(symbol: "bed.double", text: "\(bedrooms) ch.") }
+                }
+
+                if let description = listing.description, !description.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Description").font(.headline)
+                        Text(description).font(.body).foregroundStyle(.secondary)
+                    }
+                }
+
+                if let source = listing.sourceUrl, let sourceURL = URL(string: source) {
+                    Link(destination: sourceURL) {
+                        Label("Contacter le professionnel", systemImage: "arrow.up.right.square")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 15)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color(red: 0.02, green: 0.38, blue: 0.34))
+                }
+            }
+            .padding(18)
+        }
+        .background(Color(uiColor: .systemGroupedBackground))
+        .navigationTitle("Détail de l’annonce")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct ListingFact: View {
+    let symbol: String
+    let text: String
+    var body: some View {
+        Label(text, systemImage: symbol)
+            .font(.caption.weight(.medium))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(Color.teal.opacity(0.09), in: Capsule())
     }
 }
 
