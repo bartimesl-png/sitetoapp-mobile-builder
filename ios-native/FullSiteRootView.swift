@@ -3,9 +3,8 @@ import WebKit
 import Combine
 import UIKit
 
-/// L'application utilise la plateforme publique PartenaireFoyer comme source
-/// unique pour les comptes, annonces (Wix + Supabase), favoris et dashboards.
-/// Pas de second compte, pas de copie partielle de la base des annonces.
+/// Les parcours fonctionnels chargent les pages publiées du site Wix PartenaireFoyer.
+/// Les comptes, annonces, favoris et tableaux de bord utilisent le CMS et les sessions Wix.
 enum PortalSection: String, CaseIterable, Identifiable {
     case home, listings, deposit, favorites, account
     case classifieds, professionals, proLogin, matching, estimate, becomeAgent
