@@ -106,6 +106,24 @@ struct Listing: Identifiable, Codable, Hashable {
         ])
         imageURL = imageValue.isEmpty ? nil : URL(string: imageValue)
 
+        var gallery: [URL] = []
+        for name in ["galleryImages", "gallery_images", "images", "photos", "photo_urls",
+                     "photo1", "photo2", "photo3", "photo4", "photo5"] {
+            guard let key = AnyKey(stringValue: name) else { continue }
+            if let strings = try? container.decode([String].self, forKey: key) {
+                gallery.append(contentsOf: strings.compactMap(URL.init(string:)))
+            } else if let objects = try? container.decode([[String: String]].self, forKey: key) {
+                gallery.append(contentsOf: objects.compactMap {
+                    URL(string: $0["url"] ?? $0["src"] ?? $0["imageUrl"] ?? "")
+                })
+            } else if let text = try? container.decode(String.self, forKey: key),
+                      let url = URL(string: text), !text.isEmpty {
+                gallery.append(url)
+            }
+        }
+        var seen = Set<String>()
+        galleryImageURLs = gallery.filter { seen.insert($0.absoluteString).inserted }
+
         let sourceValue = string([
             "source_url", "sourceUrl", "listing_url", "url", "permalink", "link"
         ])
@@ -116,6 +134,13 @@ struct Listing: Identifiable, Codable, Hashable {
 
         latitude = number(["latitude", "lat", "geo_lat"])
         longitude = number(["longitude", "lng", "lon", "geo_lng"])
+    }
+
+    var imageURLs: [URL] {
+        var values = [imageURL].compactMap { $0 } + galleryImageURLs
+        var seen = Set<String>()
+        values = values.filter { seen.insert($0.absoluteString).inserted }
+        return values
     }
 
     var locationLabel: String {
