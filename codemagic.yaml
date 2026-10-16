@@ -122,6 +122,16 @@ workflows:
 
     name: PartenaireFoyer iOS natif
 
+    # Uniquement la branche de validation iOS 1.0.15.
+    # La distribution TestFlight / App Store reste désactivée.
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: "feature/ios-full-partenairefoyer-portal"
+          include: true
+          source: true
+
     max_build_duration: 120
 
     instance_type: mac_mini_m2
