@@ -7,12 +7,12 @@ struct RootView: View {
         TabView(selection: $selectedTab) {
             HomeDashboardView(selectedTab: $selectedTab)
                 .tabItem { Label("Accueil", systemImage: "house.fill") }.tag(0)
-            FullSiteRootView(initialSection: .listings)
-                .tabItem { Label("Annonces", systemImage: "magnifyingglass") }.tag(1)
             SearchView()
-                .tabItem { Label("Recherche", systemImage: "slider.horizontal.3") }.tag(2)
+                .tabItem { Label("Annonces", systemImage: "magnifyingglass") }.tag(1)
             FavoritesView()
-                .tabItem { Label("Favoris", systemImage: "heart.fill") }.tag(3)
+                .tabItem { Label("Favoris", systemImage: "heart.fill") }.tag(2)
+            FullSiteRootView(initialSection: .deposit)
+                .tabItem { Label("Déposer", systemImage: "plus.app.fill") }.tag(3)
             FullSiteRootView(initialSection: .account)
                 .tabItem { Label("Compte", systemImage: "person.crop.circle") }.tag(4)
         }
@@ -636,6 +636,8 @@ private struct HomeFeature: Identifiable {
 struct HomeDashboardView: View {
     @Binding var selectedTab: Int
     @State private var selectedPage: PortalSection?
+    @State private var featuredListings: [Listing] = []
+    @State private var selectedListing: Listing?
 
     private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
     private let features: [HomeFeature] = [
@@ -646,7 +648,7 @@ struct HomeDashboardView: View {
         .init(id: "professionals", title: "Professionnels", detail: "Immobilier et habitat", symbol: "person.2.fill", color: .blue, page: .professionals),
         .init(id: "private", title: "Espace particulier", detail: "Connexion et tableau de bord", symbol: "person.crop.circle.fill", color: .green, page: .account),
         .init(id: "pro", title: "Espace professionnel", detail: "Activité et annonces", symbol: "building.2.fill", color: .brown, page: .proLogin),
-        .init(id: "web-favorites", title: "Favoris du compte", detail: "Vos biens enregistrés", symbol: "heart.circle.fill", color: .pink, page: .favorites)
+        .init(id: "native-favorites", title: "Mes favoris", detail: "Vos biens sauvegardés sur cet iPhone", symbol: "heart.circle.fill", color: .pink, page: nil)
     ]
 
     var body: some View {
@@ -654,6 +656,7 @@ struct HomeDashboardView: View {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 22) {
                     hero
+                    featuredSection
                     Button { selectedTab = 1 } label: {
                         HStack(spacing: 14) {
                             Image(systemName: "magnifyingglass")
@@ -681,7 +684,10 @@ struct HomeDashboardView: View {
                         }
                         LazyVGrid(columns: columns, spacing: 12) {
                             ForEach(features) { feature in
-                                Button { selectedPage = feature.page } label: {
+                                Button {
+                                    if feature.id == "native-favorites" { selectedTab = 2 }
+                                    else { selectedPage = feature.page }
+                                } label: {
                                     VStack(alignment: .leading, spacing: 11) {
                                         Image(systemName: feature.symbol)
                                             .font(.title3.weight(.semibold)).foregroundStyle(feature.color)
@@ -711,9 +717,74 @@ struct HomeDashboardView: View {
             }
             .background(Color(uiColor: .systemGroupedBackground))
             .toolbar(.hidden, for: .navigationBar)
+            .task { await loadFeaturedListings() }
             .sheet(item: $selectedPage) { page in
                 FullSiteRootView(initialSection: page).presentationDragIndicator(.visible)
             }
+            .sheet(item: $selectedListing) { listing in
+                ListingDetailView(listing: listing)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var featuredSection: some View {
+        if !featuredListings.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("À découvrir").font(.title2.bold())
+                    Spacer()
+                    Button("Toutes les annonces") { selectedTab = 1 }
+                        .font(.subheadline.weight(.semibold))
+                }
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(spacing: 12) {
+                        ForEach(featuredListings) { listing in
+                            Button { selectedListing = listing } label: {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    AsyncImage(url: listing.imageURL) { phase in
+                                        if let image = phase.image {
+                                            image.resizable().scaledToFill()
+                                        } else {
+                                            Rectangle().fill(.quaternary)
+                                                .overlay(Image(systemName: "house.fill").foregroundStyle(.tertiary))
+                                        }
+                                    }
+                                    .frame(height: 148)
+                                    .frame(maxWidth: .infinity)
+                                    .clipped()
+                                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                                    Text(listing.priceLabel)
+                                        .font(.headline.weight(.bold))
+                                        .foregroundStyle(Color.accentColor)
+                                    Text(listing.title)
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(.primary)
+                                        .lineLimit(2)
+                                    Text(listing.locationLabel)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(10)
+                                .frame(width: 248, alignment: .leading)
+                                .background(.background, in: RoundedRectangle(cornerRadius: 18))
+                                .overlay(RoundedRectangle(cornerRadius: 18).stroke(.quaternary, lineWidth: 1))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func loadFeaturedListings() async {
+        do {
+            let page = try await ListingsService().fetch(filters: ListingFilters())
+            featuredListings = Array(page.items.filter { $0.imageURL != nil }.prefix(8))
+        } catch {
+            featuredListings = []
         }
     }
 
