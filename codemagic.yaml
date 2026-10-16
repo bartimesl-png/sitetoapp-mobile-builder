@@ -140,6 +140,8 @@ workflows:
 
     environment:
       xcode: latest
+      groups:
+        - firebase_ios
 
       ios_signing:
         distribution_type: app_store
@@ -155,6 +157,11 @@ workflows:
         script: |
           xcode-project use-profiles \
             --project "$CM_BUILD_DIR/$XCODE_PROJECT"
+
+      - name: Préparer la configuration Firebase iOS
+        script: |
+          chmod +x ./scripts/prepare-ios-firebase.sh
+          ./scripts/prepare-ios-firebase.sh
 
       - name: Préparer les assets iOS manquants
         script: |

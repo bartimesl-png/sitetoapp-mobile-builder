@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct PartenaireFoyerApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var favorites = FavoritesStore()
 
     var body: some Scene {
