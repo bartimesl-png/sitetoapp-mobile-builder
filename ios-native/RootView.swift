@@ -38,9 +38,91 @@ private struct HomeFeature: Identifiable {
     let destination: PortalSection
 }
 
+private struct ServiceDestination: Identifiable {
+    let destination: PortalSection
+    let detail: String
+    var id: String { destination.rawValue }
+    var title: String { destination.title }
+    var symbol: String { destination.symbol }
+}
+
+private enum ServiceDirectoryData {
+    static let groups: [(title: String, items: [ServiceDestination])] = [
+        ("Immobilier", [
+            .init(destination: .listings, detail: "Annonces de particuliers et de professionnels"),
+            .init(destination: .deposit, detail: "Publier un bien depuis l’espace vendeur"),
+            .init(destination: .matching, detail: "Découvrir le matching immobilier"),
+            .init(destination: .estimate, detail: "Faire estimer un bien"),
+            .init(destination: .professionals, detail: "Trouver un professionnel"),
+            .init(destination: .becomeAgent, detail: "Rejoindre le réseau immobilier")
+        ]),
+        ("Particuliers", [
+            .init(destination: .account, detail: "Se connecter à son compte vendeur"),
+            .init(destination: .privateSignup, detail: "Créer un compte particulier"),
+            .init(destination: .privateDashboard, detail: "Biens, photos, favoris et matchings"),
+            .init(destination: .favorites, detail: "Retrouver ses annonces favorites"),
+            .init(destination: .privateLegal, detail: "CGU applicables aux particuliers"),
+            .init(destination: .privateSalesTerms, detail: "CGV applicables aux particuliers")
+        ]),
+        ("Professionnels de l’immobilier", [
+            .init(destination: .proLogin, detail: "Connexion professionnelle PartenaireFoyer"),
+            .init(destination: .proSignup, detail: "Créer un accès professionnel"),
+            .init(destination: .proDashboard, detail: "Tableau de bord professionnel"),
+            .init(destination: .proProperties, detail: "Biens importés et annonces"),
+            .init(destination: .proBuyers, detail: "Recherches acquéreurs et matching"),
+            .init(destination: .proRequests, detail: "Demandes reçues"),
+            .init(destination: .proMatchings, detail: "Matchings immobiliers"),
+            .init(destination: .proMessages, detail: "Messages liés aux annonces"),
+            .init(destination: .proProfile, detail: "Profil professionnel"),
+            .init(destination: .proLegal, detail: "CGU professionnelles"),
+            .init(destination: .proSalesTerms, detail: "CGV professionnelles")
+        ]),
+        ("Courtiers", [
+            .init(destination: .brokerLogin, detail: "Connexion courtier"),
+            .init(destination: .brokerSignup, detail: "Inscription courtier"),
+            .init(destination: .brokerDashboard, detail: "Tableau de bord et activité"),
+            .init(destination: .brokerMessages, detail: "Messagerie courtier"),
+            .init(destination: .brokerLegal, detail: "CGU courtiers"),
+            .init(destination: .brokerSalesTerms, detail: "CGV courtiers")
+        ]),
+        ("Artisans et diagnostiqueurs", [
+            .init(destination: .artisanLogin, detail: "Connexion artisan / diagnostiqueur"),
+            .init(destination: .artisanSignup, detail: "Inscription artisan / diagnostiqueur"),
+            .init(destination: .artisanDashboard, detail: "Tableau de bord et profil"),
+            .init(destination: .artisanMessages, detail: "Demandes et messages"),
+            .init(destination: .artisanLegal, detail: "CGU artisans"),
+            .init(destination: .artisanSalesTerms, detail: "CGV artisans")
+        ]),
+        ("Prestataires", [
+            .init(destination: .providerLogin, detail: "Connexion prestataire"),
+            .init(destination: .providerSignup, detail: "Inscription prestataire"),
+            .init(destination: .providerDashboard, detail: "Gérer sa fiche prestataire"),
+            .init(destination: .providerProfile, detail: "Créer ou modifier sa fiche"),
+            .init(destination: .providerPhotos, detail: "Galerie photos prestataire"),
+            .init(destination: .providerLegal, detail: "CGU prestataires"),
+            .init(destination: .providerSalesTerms, detail: "CGV prestataires")
+        ]),
+        ("Locations saisonnières", [
+            .init(destination: .seasonalListings, detail: "Consulter les hébergements"),
+            .init(destination: .hostLogin, detail: "Connexion hébergeur"),
+            .init(destination: .hostSignup, detail: "Inscription hébergeur"),
+            .init(destination: .hostDashboard, detail: "Gérer ses hébergements"),
+            .init(destination: .hostCalendar, detail: "Calendrier de disponibilités"),
+            .init(destination: .hostBookings, detail: "Demandes de réservation")
+        ]),
+        ("Informations légales", [
+            .init(destination: .terms, detail: "Conditions générales d’utilisation"),
+            .init(destination: .salesTerms, detail: "Conditions générales de vente"),
+            .init(destination: .privacy, detail: "Politique de confidentialité"),
+            .init(destination: .legalNotices, detail: "Mentions légales")
+        ])
+    ]
+}
+
 private struct HomeDashboardView: View {
     @Binding var selectedTab: Int
     @State private var selectedPage: PortalSection?
+    @State private var showServiceDirectory = false
 
     private let columns = [
         GridItem(.flexible(), spacing: 12),
@@ -126,6 +208,33 @@ private struct HomeDashboardView: View {
                         }
                     }
 
+                    Button { showServiceDirectory = true } label: {
+                        HStack(spacing: 14) {
+                            Image(systemName: "square.grid.2x2.fill")
+                                .font(.title3.weight(.semibold))
+                                .foregroundStyle(.teal)
+                                .frame(width: 46, height: 46)
+                                .background(Color.teal.opacity(0.11), in: RoundedRectangle(cornerRadius: 14))
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Tous les espaces et services")
+                                    .font(.headline)
+                                    .foregroundStyle(.primary)
+                                Text("Particuliers, pros, courtiers, artisans, prestataires et hébergeurs")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .multilineTextAlignment(.leading)
+                            }
+                            Spacer(minLength: 0)
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(16)
+                        .background(.background, in: RoundedRectangle(cornerRadius: 20))
+                        .overlay(RoundedRectangle(cornerRadius: 20).stroke(.quaternary, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+
                     Label("Pages et données du site PartenaireFoyer", systemImage: "link")
                         .font(.subheadline.weight(.medium))
                         .padding(17)
@@ -140,6 +249,11 @@ private struct HomeDashboardView: View {
             .toolbar(.hidden, for: .navigationBar)
             .sheet(item: $selectedPage) { page in
                 FullSiteRootView(initialSection: page)
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
+            }
+            .sheet(isPresented: $showServiceDirectory) {
+                ServiceDirectoryView()
                     .presentationDetents([.large])
                     .presentationDragIndicator(.visible)
             }
@@ -184,5 +298,61 @@ private struct HomeDashboardView: View {
         }
         .frame(height: 230)
         .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+    }
+}
+
+private struct ServiceDirectoryView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var searchText = ""
+
+    private var filteredGroups: [(title: String, items: [ServiceDestination])] {
+        guard !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return ServiceDirectoryData.groups
+        }
+        return ServiceDirectoryData.groups.compactMap { group in
+            let matches = group.items.filter {
+                $0.title.localizedCaseInsensitiveContains(searchText) ||
+                $0.detail.localizedCaseInsensitiveContains(searchText) ||
+                group.title.localizedCaseInsensitiveContains(searchText)
+            }
+            return matches.isEmpty ? nil : (group.title, matches)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(filteredGroups, id: \.title) { group in
+                    Section(group.title) {
+                        ForEach(group.items) { item in
+                            NavigationLink {
+                                FullSiteRootView(initialSection: item.destination)
+                            } label: {
+                                Label {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(item.title).font(.body.weight(.semibold))
+                                        Text(item.detail).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                } icon: {
+                                    Image(systemName: item.symbol)
+                                        .foregroundStyle(.teal)
+                                        .frame(width: 24)
+                                }
+                                .padding(.vertical, 3)
+                            }
+                        }
+                    }
+                }
+            }
+            .listStyle(.insetGrouped)
+            .searchable(text: $searchText, prompt: "Rechercher un espace ou service")
+            .navigationTitle("PartenaireFoyer")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Fermer") { dismiss() }
+                }
+            }
+        }
     }
 }

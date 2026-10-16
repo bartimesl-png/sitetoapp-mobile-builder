@@ -8,6 +8,14 @@ import UIKit
 enum PortalSection: String, CaseIterable, Identifiable {
     case home, listings, deposit, favorites, account
     case classifieds, professionals, proLogin, matching, estimate, becomeAgent
+    case privateDashboard, privateSignup, privateLegal, privateSalesTerms
+    case proDashboard, proProperties, proBuyers, proRequests, proMatchings, proMessages, proProfile, proSignup, proLegal, proSalesTerms
+    case brokerLogin, brokerSignup, brokerDashboard, brokerMessages, brokerLegal
+    case artisanLogin, artisanSignup, artisanDashboard, artisanMessages, artisanLegal
+    case providerLogin, providerSignup, providerDashboard, providerProfile, providerPhotos, providerLegal
+    case seasonalListings, hostLogin, hostSignup, hostDashboard, hostCalendar, hostBookings
+    case terms, salesTerms, privacy, legalNotices
+    case brokerSalesTerms, artisanSalesTerms, providerSalesTerms
 
     var id: String { rawValue }
 
@@ -24,6 +32,49 @@ enum PortalSection: String, CaseIterable, Identifiable {
         case .matching: return "Matching"
         case .estimate: return "Estimation"
         case .becomeAgent: return "Devenir mandataire"
+        case .privateDashboard: return "Espace particulier"
+        case .privateSignup: return "Créer un compte particulier"
+        case .privateLegal: return "Conditions particuliers"
+        case .privateSalesTerms: return "CGV particuliers"
+        case .proDashboard: return "Tableau de bord professionnel"
+        case .proProperties: return "Mes biens professionnels"
+        case .proBuyers: return "Acquéreurs professionnels"
+        case .proRequests: return "Demandes professionnelles"
+        case .proMatchings: return "Matchings professionnels"
+        case .proMessages: return "Messages professionnels"
+        case .proProfile: return "Profil professionnel"
+        case .proSignup: return "Inscription professionnelle"
+        case .proLegal: return "Conditions professionnels"
+        case .proSalesTerms: return "CGV professionnels"
+        case .brokerLogin: return "Connexion courtier"
+        case .brokerSignup: return "Inscription courtier"
+        case .brokerDashboard: return "Espace courtier"
+        case .brokerMessages: return "Messages courtier"
+        case .brokerLegal: return "Conditions courtier"
+        case .artisanLogin: return "Connexion artisan / diagnostiqueur"
+        case .artisanSignup: return "Inscription artisan / diagnostiqueur"
+        case .artisanDashboard: return "Espace artisan / diagnostiqueur"
+        case .artisanMessages: return "Messages artisan"
+        case .artisanLegal: return "Conditions artisan"
+        case .providerLogin: return "Connexion prestataire"
+        case .providerSignup: return "Inscription prestataire"
+        case .providerDashboard: return "Espace prestataire"
+        case .providerProfile: return "Fiche prestataire"
+        case .providerPhotos: return "Photos prestataire"
+        case .providerLegal: return "Conditions prestataire"
+        case .seasonalListings: return "Locations saisonnières"
+        case .hostLogin: return "Connexion hébergeur"
+        case .hostSignup: return "Inscription hébergeur"
+        case .hostDashboard: return "Espace hébergeur"
+        case .hostCalendar: return "Calendrier hébergeur"
+        case .hostBookings: return "Demandes de réservation"
+        case .terms: return "Conditions générales d’utilisation"
+        case .salesTerms: return "Conditions générales de vente"
+        case .privacy: return "Confidentialité"
+        case .legalNotices: return "Mentions légales"
+        case .brokerSalesTerms: return "CGV courtier"
+        case .artisanSalesTerms: return "CGV artisan"
+        case .providerSalesTerms: return "CGV prestataire"
         }
     }
 
@@ -40,6 +91,13 @@ enum PortalSection: String, CaseIterable, Identifiable {
         case .matching: return "arrow.left.arrow.right"
         case .estimate: return "chart.bar.xaxis"
         case .becomeAgent: return "person.badge.plus"
+        case .privateDashboard, .privateSignup: return "person.crop.circle"
+        case .privateLegal, .privateSalesTerms, .proLegal, .proSalesTerms, .brokerLegal, .artisanLegal, .providerLegal, .terms, .salesTerms, .privacy, .legalNotices, .brokerSalesTerms, .artisanSalesTerms, .providerSalesTerms: return "doc.text"
+        case .proDashboard, .proProperties, .proBuyers, .proRequests, .proMatchings, .proMessages, .proProfile, .proSignup: return "building.2"
+        case .brokerLogin, .brokerSignup, .brokerDashboard, .brokerMessages: return "briefcase"
+        case .artisanLogin, .artisanSignup, .artisanDashboard, .artisanMessages: return "wrench.and.screwdriver"
+        case .providerLogin, .providerSignup, .providerDashboard, .providerProfile, .providerPhotos: return "person.2"
+        case .seasonalListings, .hostLogin, .hostSignup, .hostDashboard, .hostCalendar, .hostBookings: return "sun.horizon"
         }
     }
 
@@ -51,13 +109,57 @@ enum PortalSection: String, CaseIterable, Identifiable {
         case .home: path = "/"
         case .listings: path = "/annonces"
         case .deposit: path = "/deposer-mon-bien"
-        case .favorites, .account: path = "/vendeur-login"
+        case .favorites: path = "/vendeur-favoris"
+        case .account: path = "/vendeur-login"
         case .classifieds: path = "/petites-annonces"
         case .professionals: path = "/professionnels"
         case .proLogin: path = "/pro-app-login"
         case .matching: path = "/matching-immobilier"
         case .estimate: path = "/estimation-bien"
         case .becomeAgent: path = "/devenir-mandataire-immobilier"
+        case .privateDashboard: path = "/vendeur-dashboard"
+        case .privateSignup: path = "/vendeur-signup"
+        case .privateLegal: path = "/cgu-particuliers"
+        case .privateSalesTerms: path = "/cgv-particuliers"
+        case .proDashboard: path = "/pro/dashboard"
+        case .proProperties: path = "/pro/biens"
+        case .proBuyers: path = "/pro/acquereurs"
+        case .proRequests: path = "/pro/demandes"
+        case .proMatchings: path = "/pro/mes-matchings"
+        case .proMessages: path = "/pro/messages"
+        case .proProfile: path = "/pro/profil"
+        case .proSignup: path = "/inscription-pro"
+        case .proLegal: path = "/pro-cgu"
+        case .proSalesTerms: path = "/pro-cgv"
+        case .brokerLogin: path = "/broker-login"
+        case .brokerSignup: path = "/broker-signup"
+        case .brokerDashboard: path = "/broker-dashboard"
+        case .brokerMessages: path = "/broker-messages"
+        case .brokerLegal: path = "/broker-cgu"
+        case .artisanLogin: path = "/artisan-login"
+        case .artisanSignup: path = "/artisan-signup"
+        case .artisanDashboard: path = "/artisan-dashboard"
+        case .artisanMessages: path = "/artisan-messages"
+        case .artisanLegal: path = "/artisan-cgu"
+        case .providerLogin: path = "/connexion-prestataire"
+        case .providerSignup: path = "/inscription-prestataire"
+        case .providerDashboard: path = "/espace-prestataire"
+        case .providerProfile: path = "/espace-prestataire/creer-fiche"
+        case .providerPhotos: path = "/espace-prestataire/photos"
+        case .providerLegal: path = "/prestataire-cgu"
+        case .seasonalListings: path = "/locations-saisonnieres"
+        case .hostLogin: path = "/hebergeur-connexion"
+        case .hostSignup: path = "/hebergeur-inscription"
+        case .hostDashboard: path = "/hebergeur-dashboard"
+        case .hostCalendar: path = "/hebergeur-calendrier"
+        case .hostBookings: path = "/hebergeur-demandes"
+        case .terms: path = "/cgu"
+        case .salesTerms: path = "/cgv"
+        case .privacy: path = "/confidentialite"
+        case .legalNotices: path = "/mentions-legales"
+        case .brokerSalesTerms: path = "/broker-cgv"
+        case .artisanSalesTerms: path = "/artisan-cgv"
+        case .providerSalesTerms: path = "/prestataire-cgv"
         }
         return URL(string: "https://www.partenairefoyer.com\(path)")!
     }
