@@ -6,6 +6,9 @@ enum AppConfig {
     static let listingsEndpoint = URL(
         string: "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/pf-imported-real-estate-listings-public"
     )!
+    static let matchingEndpoint = URL(
+        string: "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/pf-imported-real-estate-listings-match"
+    )!
     static let privacyURL = URL(
         string: "https://www.partenairefoyer.com/politique-de-confidentialite"
     )!
