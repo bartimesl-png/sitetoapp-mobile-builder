@@ -44,29 +44,23 @@ enum PortalSection: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Textes réels de la page d'accueil / des pages publiques Wix.
-    /// Ne pas inventer des URLs de dashboards : la session et les permissions
-    /// sont gérées par les liens de navigation du site.
-    var linksToFind: [String] {
-        switch self {
-        case .home, .professionals: return []
-        case .listings: return ["Voir toutes les annonces"]
-        case .deposit: return ["Déposez votre annonce gratuitement", "Déposer une annonce", "Connexion / Inscription"]
-        case .favorites: return ["Mes favoris", "Favoris"]
-        case .account: return ["Connexion / Inscription", "Mon espace particulier", "Mon compte"]
-        case .classifieds: return ["Voir toutes les petites annonces", "Voir les petites annonces"]
-        case .proLogin: return ["Connexion professionnel"]
-        case .matching: return ["Découvrir le matching immobilier"]
-        case .estimate: return ["Estimer"]
-        case .becomeAgent: return ["Devenir mandataire immobilier"]
-        }
-    }
-
+    /// Routes publiques vérifiées directement sur PartenaireFoyer.
+    /// Les parcours de compte restent opérés par le service Wix existant.
     var landingURL: URL {
-        if self == .professionals || self == .proLogin {
-            return URL(string: "https://www.partenairefoyer.com/pros")!
+        let path: String
+        switch self {
+        case .home: path = "/"
+        case .listings: path = "/annonces"
+        case .deposit: path = "/deposer-mon-bien"
+        case .favorites, .account: path = "/vendeur-login"
+        case .classifieds: path = "/petites-annonces"
+        case .professionals: path = "/professionnels"
+        case .proLogin: path = "/pro-app-login"
+        case .matching: path = "/matching-immobilier"
+        case .estimate: path = "/estimation-bien"
+        case .becomeAgent: path = "/devenir-mandataire-immobilier"
         }
-        return AppConfig.websiteURL
+        return URL(string: "https://www.partenairefoyer.com\\(path)")!
     }
 }
 
@@ -84,8 +78,6 @@ final class PortalBrowser: ObservableObject {
 
     let webView: WKWebView
     private var started = false
-    private var pendingLabels: [String]?
-    private var cachedURLs: [PortalSection: URL] = [:]
 
     init(initialSection: PortalSection = .home) {
         self.initialSection = initialSection
@@ -124,30 +116,10 @@ final class PortalBrowser: ObservableObject {
         section = destination
         navigationHint = nil
         errorMessage = nil
-        pendingLabels = nil
-
-        if destination == .home || destination == .professionals {
-            load(destination.landingURL)
-            return
-        }
-
-        if let cached = cachedURLs[destination] {
-            load(cached)
-            return
-        }
-
-        pendingLabels = destination.linksToFind
-        // On repart d'une page connue et publique ; les liens de connexion
-        // restent gérés par le site, avec l'authentification Wix existante.
-        if webView.url == destination.landingURL && !isLoading {
-            tryPendingAction(attempt: 0)
-        } else {
-            load(destination.landingURL)
-        }
+        load(destination.landingURL)
     }
 
     func goBack() {
-        pendingLabels = nil
         navigationHint = nil
         if webView.canGoBack { webView.goBack() }
         else { navigate(to: .home) }
@@ -169,83 +141,11 @@ final class PortalBrowser: ObservableObject {
         canGoBack = webView.canGoBack
         canGoForward = webView.canGoForward
         isLoading = webView.isLoading
-        rememberRoute(currentURL)
-    }
-
-    private func rememberRoute(_ url: URL) {
-        guard isPartenaireFoyer(url) else { return }
-        let path = url.path.lowercased()
-        if path.contains("favori") { cachedURLs[.favorites] = url }
-        if path.contains("petite") && path.contains("annonce") {
-            cachedURLs[.classifieds] = url
-        }
-        if path.contains("annonce") && !path.contains("petite")
-            && !path.contains("annonce-immobiliere/") {
-            cachedURLs[.listings] = url
-        }
     }
 
     func finishedNavigation() {
         didNavigate()
         errorMessage = nil
-        if pendingLabels != nil {
-            // Wix peut rendre ses liens après DOMContentLoaded.
-            tryPendingAction(attempt: 0)
-        }
-    }
-
-    private func tryPendingAction(attempt: Int) {
-        guard let labels = pendingLabels, !labels.isEmpty else { return }
-        guard !webView.isLoading else { return }
-
-        // Utilise seulement les liens/boutons réellement présents sur Wix.
-        // L'ordre des préférences évite de lancer un flux non demandé.
-        let encoded = (try? JSONSerialization.data(withJSONObject: labels))
-            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
-        let script = """
-        (function () {
-          const labels = \(encoded);
-          const norm = value => String(value || '').normalize('NFD')
-             .replace(/[\\u0300-\\u036f]/g, '')
-             .replace(/\\s+/g, ' ').trim().toLowerCase();
-          const targets = Array.from(document.querySelectorAll(
-             'a, button, [role="button"]'
-          )).filter(el => el.getClientRects().length > 0);
-          for (const wanted of labels) {
-            const goal = norm(wanted);
-            const exact = targets.find(el => norm(el.innerText || el.textContent) === goal);
-            const match = exact || targets.find(el => {
-              const label = norm(el.innerText || el.textContent);
-              return label.length < 95 && label.includes(goal);
-            });
-            if (match) {
-              const href = match.closest('a')?.href || match.getAttribute('href');
-              match.click();
-              return href || 'clicked';
-            }
-          }
-          return '';
-        })();
-        """
-        webView.evaluateJavaScript(script) { [weak self] result, _ in
-            DispatchQueue.main.async {
-                guard let self, self.pendingLabels == labels else { return }
-                if let value = result as? String, !value.isEmpty {
-                    self.pendingLabels = nil
-                    self.navigationHint = nil
-                    if let url = URL(string: value), self.isPartenaireFoyer(url) {
-                        self.cachedURLs[self.section] = url
-                    }
-                } else if attempt < 5 {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
-                        self.tryPendingAction(attempt: attempt + 1)
-                    }
-                } else {
-                    self.pendingLabels = nil
-                    self.navigationHint = "Utilisez le menu du site pour accéder à « \(self.section.title) »."
-                }
-            }
-        }
     }
 
     func isPartenaireFoyer(_ url: URL) -> Bool {
