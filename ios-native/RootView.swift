@@ -2,15 +2,19 @@ import SwiftUI
 import MapKit
 
 struct RootView: View {
+    @State private var selectedTab = 0
     var body: some View {
-        TabView {
+        TabView(selection: $selectedTab) {
+            HomeDashboardView(selectedTab: $selectedTab)
+                .tabItem { Label("Accueil", systemImage: "house.fill") }.tag(0)
             SearchView()
-                .tabItem { Label("Annonces", systemImage: "magnifyingglass") }
+                .tabItem { Label("Annonces", systemImage: "magnifyingglass") }.tag(1)
             FavoritesView()
-                .tabItem { Label("Favoris", systemImage: "heart") }
+                .tabItem { Label("Favoris", systemImage: "heart.fill") }.tag(2)
             AccountView()
-                .tabItem { Label("Aide", systemImage: "questionmark.circle") }
+                .tabItem { Label("Compte", systemImage: "person.crop.circle") }.tag(3)
         }
+        .tint(Color(red: 0.02, green: 0.38, blue: 0.34))
     }
 }
 
@@ -90,7 +94,7 @@ struct SearchView: View {
                                 .padding(.bottom)
                             }
 
-                            if let error, response != nil {
+                            if let error {
                                 VStack(spacing: 8) {
                                     Text(error)
                                         .font(.footnote)
@@ -614,5 +618,125 @@ struct AccountView: View {
             }
             .navigationTitle("Aide et informations")
         }
+    }
+}
+
+
+private struct HomeFeature: Identifiable {
+    let id: String
+    let title: String
+    let detail: String
+    let symbol: String
+    let color: Color
+    let page: PortalSection?
+}
+
+struct HomeDashboardView: View {
+    @Binding var selectedTab: Int
+    @State private var selectedPage: PortalSection?
+
+    private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
+    private let features: [HomeFeature] = [
+        .init(id: "deposit", title: "Déposer une annonce", detail: "Publier un bien", symbol: "plus.app.fill", color: .teal, page: .deposit),
+        .init(id: "matching", title: "Matching immobilier", detail: "Biens et projets compatibles", symbol: "arrow.left.arrow.right", color: .indigo, page: .matching),
+        .init(id: "estimate", title: "Estimation", detail: "Préparer votre projet", symbol: "chart.bar.xaxis", color: .orange, page: .estimate),
+        .init(id: "classifieds", title: "Petites annonces", detail: "Acheter, vendre, donner", symbol: "shippingbox.fill", color: .purple, page: .classifieds),
+        .init(id: "professionals", title: "Professionnels", detail: "Immobilier et habitat", symbol: "person.2.fill", color: .blue, page: .professionals),
+        .init(id: "private", title: "Espace particulier", detail: "Connexion et tableau de bord", symbol: "person.crop.circle.fill", color: .green, page: .account),
+        .init(id: "pro", title: "Espace professionnel", detail: "Activité et annonces", symbol: "building.2.fill", color: .brown, page: .proLogin),
+        .init(id: "web-favorites", title: "Favoris du compte", detail: "Vos biens enregistrés", symbol: "heart.circle.fill", color: .pink, page: .favorites)
+    ]
+
+    var body: some View {
+        NavigationStack {
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 22) {
+                    hero
+                    Button { selectedTab = 1 } label: {
+                        HStack(spacing: 14) {
+                            Image(systemName: "magnifyingglass")
+                                .font(.title3.weight(.semibold)).foregroundStyle(.teal)
+                                .frame(width: 46, height: 46)
+                                .background(Color.teal.opacity(0.11), in: RoundedRectangle(cornerRadius: 14))
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Trouver un bien").font(.headline).foregroundStyle(.primary)
+                                Text("Acheter ou louer partout en France").font(.subheadline).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "arrow.right").foregroundStyle(.secondary)
+                        }
+                        .padding(16).background(.background, in: RoundedRectangle(cornerRadius: 20))
+                        .overlay(RoundedRectangle(cornerRadius: 20).stroke(.quaternary, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Ouvre la recherche native d’annonces immobilières")
+
+                    VStack(alignment: .leading, spacing: 14) {
+                        HStack {
+                            Text("Tous vos services").font(.title2.bold())
+                            Spacer()
+                            Text("PARTENAIREFOYER").font(.caption2.bold()).tracking(0.8).foregroundStyle(.secondary)
+                        }
+                        LazyVGrid(columns: columns, spacing: 12) {
+                            ForEach(features) { feature in
+                                Button { selectedPage = feature.page } label: {
+                                    VStack(alignment: .leading, spacing: 11) {
+                                        Image(systemName: feature.symbol)
+                                            .font(.title3.weight(.semibold)).foregroundStyle(feature.color)
+                                            .frame(width: 43, height: 43)
+                                            .background(feature.color.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
+                                        Text(feature.title).font(.headline).foregroundStyle(.primary)
+                                            .multilineTextAlignment(.leading).frame(maxWidth: .infinity, alignment: .leading)
+                                        Text(feature.detail).font(.caption).foregroundStyle(.secondary)
+                                            .multilineTextAlignment(.leading).frame(maxWidth: .infinity, alignment: .leading)
+                                        Spacer(minLength: 0)
+                                    }
+                                    .padding(14).frame(maxWidth: .infinity, minHeight: 142, alignment: .topLeading)
+                                    .background(.background, in: RoundedRectangle(cornerRadius: 20))
+                                    .overlay(RoundedRectangle(cornerRadius: 20).stroke(.quaternary, lineWidth: 1))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+
+                    Label("Une application pensée pour iPhone", systemImage: "iphone")
+                        .font(.headline)
+                        .padding(17).frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.teal.opacity(0.09), in: RoundedRectangle(cornerRadius: 18))
+                }
+                .padding(.horizontal, 17).padding(.top, 14).padding(.bottom, 28)
+            }
+            .background(Color(uiColor: .systemGroupedBackground))
+            .toolbar(.hidden, for: .navigationBar)
+            .sheet(item: $selectedPage) { page in
+                FullSiteRootView(initialSection: page).presentationDragIndicator(.visible)
+            }
+        }
+    }
+
+    private var hero: some View {
+        ZStack(alignment: .bottomLeading) {
+            LinearGradient(colors: [Color(red: 0.025, green: 0.22, blue: 0.25), Color(red: 0.02, green: 0.46, blue: 0.39)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+            Circle().fill(.white.opacity(0.08)).frame(width: 200, height: 200).offset(x: 240, y: -90)
+            VStack(alignment: .leading, spacing: 17) {
+                HStack {
+                    Label("PARTENAIREFOYER", systemImage: "house.and.flag.fill")
+                        .font(.caption.weight(.heavy)).tracking(1.2).foregroundStyle(.white)
+                    Spacer()
+                    Button { selectedTab = 3 } label: {
+                        Image(systemName: "person.crop.circle").font(.title3).foregroundStyle(.white)
+                            .frame(width: 42, height: 42).background(.white.opacity(0.16), in: Circle())
+                    }.accessibilityLabel("Ouvrir mon compte")
+                }
+                Text("Votre prochain projet\ncommence ici.")
+                    .font(.system(size: 29, weight: .bold, design: .rounded)).foregroundStyle(.white)
+                Text("Annonces, professionnels et outils pour avancer.")
+                    .font(.subheadline).foregroundStyle(.white.opacity(0.86))
+            }
+            .padding(22)
+        }
+        .frame(height: 230).clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
     }
 }

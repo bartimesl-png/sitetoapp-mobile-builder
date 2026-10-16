@@ -6,7 +6,7 @@ struct PartenaireFoyerApp: App {
 
     var body: some Scene {
         WindowGroup {
-            FullSiteRootView()
+            RootView()
                 .environment(favorites)
                 .tint(Color(red: 0.02, green: 0.38, blue: 0.34))
         }

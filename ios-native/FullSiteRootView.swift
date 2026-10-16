@@ -51,9 +51,9 @@ enum PortalSection: String, CaseIterable, Identifiable {
         switch self {
         case .home, .professionals: return []
         case .listings: return ["Voir toutes les annonces"]
-        case .deposit: return ["Connexion / Inscription", "Déposez votre annonce gratuitement"]
+        case .deposit: return ["Déposez votre annonce gratuitement", "Déposer une annonce", "Connexion / Inscription"]
         case .favorites: return ["Mes favoris", "Favoris"]
-        case .account: return ["Connexion / Inscription"]
+        case .account: return ["Connexion / Inscription", "Mon espace particulier", "Mon compte"]
         case .classifieds: return ["Voir toutes les petites annonces", "Voir les petites annonces"]
         case .proLogin: return ["Connexion professionnel"]
         case .matching: return ["Découvrir le matching immobilier"]
@@ -72,7 +72,8 @@ enum PortalSection: String, CaseIterable, Identifiable {
 
 @MainActor
 final class PortalBrowser: ObservableObject {
-    @Published var section: PortalSection = .home
+    @Published var section: PortalSection
+    private let initialSection: PortalSection
     @Published var isLoading = true
     @Published var progress: Double = 0
     @Published var canGoBack = false
@@ -86,7 +87,9 @@ final class PortalBrowser: ObservableObject {
     private var pendingLabels: [String]?
     private var cachedURLs: [PortalSection: URL] = [:]
 
-    init() {
+    init(initialSection: PortalSection = .home) {
+        self.initialSection = initialSection
+        _section = Published(initialValue: initialSection)
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default() // Cookies et connexion persistants.
         configuration.allowsInlineMediaPlayback = true
@@ -102,7 +105,11 @@ final class PortalBrowser: ObservableObject {
     func startIfNeeded() {
         guard !started else { return }
         started = true
-        load(AppConfig.websiteURL)
+        if initialSection == .home {
+            load(AppConfig.websiteURL)
+        } else {
+            navigate(to: initialSection)
+        }
     }
 
     private func load(_ url: URL) {
@@ -361,9 +368,15 @@ struct PortalWebView: UIViewRepresentable {
 }
 
 struct FullSiteRootView: View {
-    @StateObject private var browser = PortalBrowser()
+    let initialSection: PortalSection
+    @StateObject private var browser: PortalBrowser
 
-    private let tabs: [PortalSection] = [.home, .listings, .deposit, .favorites, .account]
+    init(initialSection: PortalSection = .home) {
+        self.initialSection = initialSection
+        _browser = StateObject(wrappedValue: PortalBrowser(initialSection: initialSection))
+    }
+
+    private let tabs: [PortalSection] = [.listings, .deposit, .favorites, .account]
 
     var body: some View {
         VStack(spacing: 0) {
