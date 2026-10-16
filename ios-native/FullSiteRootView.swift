@@ -60,7 +60,7 @@ enum PortalSection: String, CaseIterable, Identifiable {
         case .estimate: path = "/estimation-bien"
         case .becomeAgent: path = "/devenir-mandataire-immobilier"
         }
-        return URL(string: "https://www.partenairefoyer.com\\(path)")!
+        return URL(string: "https://www.partenairefoyer.com\(path)")!
     }
 }
 
