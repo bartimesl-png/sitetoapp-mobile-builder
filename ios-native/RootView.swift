@@ -639,6 +639,357 @@ struct AccountView: View {
 }
 
 
+private struct MatchingRequest: Encodable {
+    let transactionType: String
+    let propertyType: String?
+    let priceMin: Double?
+    let priceMax: Double?
+    let surfaceMin: Double?
+    let surfaceMax: Double?
+    let roomsMin: Double?
+    let city: String?
+    let postalCode: String?
+    let threshold: Int
+    let limit: Int
+}
+
+private struct MatchingResponse: Decodable {
+    let success: Bool
+    let threshold: Int?
+    let total: Int?
+    let items: [MatchingResult]
+    let error: String?
+}
+
+private struct MatchingResult: Decodable, Identifiable {
+    let score: Int
+    let listing: MatchingListing
+    let publisher: MatchingPublisher
+    var id: String { listing.id }
+}
+
+private struct MatchingListing: Decodable {
+    let id: String
+    let title: String
+    let transactionType: String?
+    let propertyType: String?
+    let price: Double?
+    let surface: Double?
+    let landSurface: Double?
+    let rooms: Int?
+    let bedrooms: Int?
+    let bathrooms: Int?
+    let postalCode: String?
+    let city: String?
+    let sourceUrl: URL?
+    let imageUrl: URL?
+    let priceVerified: Bool?
+}
+
+private struct MatchingPublisher: Decodable {
+    let displayName: String?
+    let companyName: String?
+    let professionalType: String?
+    let website: URL?
+    let phone: String?
+    let photoUrl: URL?
+}
+
+private struct MatchingService {
+    func find(_ criteria: MatchingRequest) async throws -> MatchingResponse {
+        var request = URLRequest(url: AppConfig.matchingEndpoint, timeoutInterval: 30)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.httpBody = try JSONEncoder().encode(criteria)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw ListingsError.invalidResponse
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            let payload = (try? JSONDecoder().decode([String: String].self, from: data)) ?? [:]
+            throw ListingsError.server(payload["error"] ?? "Le matching est momentanément indisponible.")
+        }
+        let result = try JSONDecoder().decode(MatchingResponse.self, from: data)
+        guard result.success else {
+            throw ListingsError.server(result.error ?? "Le matching n’a pas pu être calculé.")
+        }
+        return result
+    }
+}
+
+struct MatchingView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var transactionType = "SALE"
+    @State private var propertyType = "ANY"
+    @State private var city = ""
+    @State private var postalCode = ""
+    @State private var maxBudget = ""
+    @State private var minSurface = ""
+    @State private var minRooms = ""
+    @State private var isLoading = false
+    @State private var hasSearched = false
+    @State private var errorMessage: String?
+    @State private var matches: [MatchingResult] = []
+    @State private var selectedMatch: MatchingResult?
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Picker("Projet", selection: $transactionType) {
+                        Text("Acheter").tag("SALE")
+                        Text("Louer").tag("RENT")
+                    }
+                    Picker("Type de bien", selection: $propertyType) {
+                        Text("Tous les biens").tag("ANY")
+                        Text("Maison").tag("HOUSE")
+                        Text("Appartement").tag("APARTMENT")
+                        Text("Terrain").tag("LAND")
+                        Text("Local commercial").tag("COMMERCIAL")
+                    }
+                    TextField("Ville", text: $city)
+                        .textInputAutocapitalization(.words)
+                    TextField("Code postal", text: $postalCode)
+                        .keyboardType(.numberPad)
+                    TextField("Budget maximum (€)", text: $maxBudget)
+                        .keyboardType(.numberPad)
+                    TextField("Surface minimum (m²)", text: $minSurface)
+                        .keyboardType(.numberPad)
+                    TextField("Nombre de pièces minimum", text: $minRooms)
+                        .keyboardType(.numberPad)
+                } header: {
+                    Text("Votre projet")
+                } footer: {
+                    Text("Le moteur compare ces critères aux annonces professionnelles éligibles et calcule un score de compatibilité.")
+                }
+
+                Section {
+                    Button {
+                        Task { await search() }
+                    } label: {
+                        HStack {
+                            Spacer()
+                            if isLoading {
+                                ProgressView().padding(.trailing, 8)
+                            }
+                            Text(isLoading ? "Calcul en cours…" : "Trouver mes correspondances")
+                                .fontWeight(.semibold)
+                            Spacer()
+                        }
+                    }
+                    .disabled(isLoading || (city.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && postalCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
+                }
+
+                if let errorMessage {
+                    Section {
+                        Text(errorMessage)
+                            .foregroundStyle(.red)
+                    }
+                }
+
+                if hasSearched && matches.isEmpty && errorMessage == nil {
+                    Section {
+                        ContentUnavailableView(
+                            "Aucune correspondance",
+                            systemImage: "arrow.left.arrow.right",
+                            description: Text("Essayez d’élargir votre budget, votre ville ou vos critères.")
+                        )
+                    }
+                }
+
+                if !matches.isEmpty {
+                    Section("Correspondances · \(matches.count)") {
+                        ForEach(matches) { match in
+                            Button { selectedMatch = match } label: {
+                                MatchingResultRow(match: match)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Matching immobilier")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Fermer") { dismiss() }
+                }
+            }
+            .sheet(item: $selectedMatch) { match in
+                MatchingDetailView(match: match)
+            }
+        }
+    }
+
+    @MainActor
+    private func search() async {
+        isLoading = true
+        hasSearched = false
+        errorMessage = nil
+        matches = []
+        defer { isLoading = false }
+
+        func number(_ text: String) -> Double? {
+            Double(text.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: ",", with: "."))
+        }
+
+        let trimmedCity = city.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedPostalCode = postalCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        let request = MatchingRequest(
+            transactionType: transactionType,
+            propertyType: propertyType == "ANY" ? nil : propertyType,
+            priceMin: nil,
+            priceMax: number(maxBudget),
+            surfaceMin: number(minSurface),
+            surfaceMax: nil,
+            roomsMin: number(minRooms),
+            city: trimmedCity.isEmpty ? nil : trimmedCity,
+            postalCode: trimmedPostalCode.isEmpty ? nil : trimmedPostalCode,
+            threshold: 60,
+            limit: 50
+        )
+
+        do {
+            let response = try await MatchingService().find(request)
+            matches = response.items
+            hasSearched = true
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+
+private struct MatchingResultRow: View {
+    let match: MatchingResult
+
+    var body: some View {
+        HStack(spacing: 12) {
+            AsyncImage(url: match.listing.imageUrl) { phase in
+                if let image = phase.image {
+                    image.resizable().scaledToFill()
+                } else {
+                    Rectangle().fill(.quaternary)
+                        .overlay(Image(systemName: "house.fill").foregroundStyle(.tertiary))
+                }
+            }
+            .frame(width: 104, height: 92)
+            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+
+            VStack(alignment: .leading, spacing: 5) {
+                HStack {
+                    Text("\(match.score)%")
+                        .font(.caption.weight(.bold))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.teal.opacity(0.13), in: Capsule())
+                        .foregroundStyle(.teal)
+                    Spacer(minLength: 0)
+                    if match.listing.priceVerified == true {
+                        Image(systemName: "checkmark.seal.fill")
+                            .foregroundStyle(.green)
+                            .accessibilityLabel("Prix vérifié")
+                    }
+                }
+                Text(match.listing.price.map {
+                    $0.formatted(.currency(code: "EUR").locale(Locale(identifier: "fr_FR")))
+                } ?? "Prix sur demande")
+                    .font(.headline)
+                    .foregroundStyle(Color.accentColor)
+                Text(match.listing.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                Text([match.listing.postalCode, match.listing.city].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " "))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.vertical, 5)
+    }
+}
+
+private struct MatchingDetailView: View {
+    let match: MatchingResult
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    AsyncImage(url: match.listing.imageUrl) { phase in
+                        if let image = phase.image {
+                            image.resizable().scaledToFill()
+                        } else {
+                            Rectangle().fill(.quaternary)
+                                .overlay(Image(systemName: "house.fill").font(.largeTitle).foregroundStyle(.tertiary))
+                        }
+                    }
+                    .frame(height: 250)
+                    .frame(maxWidth: .infinity)
+                    .clipped()
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("\(match.score)% compatible")
+                            .font(.title3.bold())
+                            .foregroundStyle(.teal)
+                        Text(match.listing.price.map {
+                            $0.formatted(.currency(code: "EUR").locale(Locale(identifier: "fr_FR")))
+                        } ?? "Prix sur demande")
+                            .font(.largeTitle.bold())
+                            .foregroundStyle(Color.accentColor)
+                        Text(match.listing.title)
+                            .font(.title2.bold())
+                        Text([match.listing.postalCode, match.listing.city].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " "))
+                            .foregroundStyle(.secondary)
+
+                        if let surface = match.listing.surface {
+                            Label("\(surface.formatted(.number.precision(.fractionLength(0...1)))) m²", systemImage: "square.dashed")
+                        }
+                        if let rooms = match.listing.rooms {
+                            Label("\(rooms) pièces", systemImage: "bed.double")
+                        }
+
+                        Divider()
+                        Text("Publié par")
+                            .font(.headline)
+                        Text(match.publisher.companyName ?? match.publisher.displayName ?? "Professionnel PartenaireFoyer")
+                            .font(.subheadline.weight(.semibold))
+                        if let type = match.publisher.professionalType, !type.isEmpty {
+                            Text(type).font(.caption).foregroundStyle(.secondary)
+                        }
+                        if let phone = match.publisher.phone,
+                           let callURL = URL(string: "tel:\(phone.filter { $0.isNumber || $0 == "+" })") {
+                            Link(destination: callURL) {
+                                Label("Appeler le professionnel", systemImage: "phone.fill")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
+                        if let url = match.listing.sourceUrl {
+                            Link(destination: url) {
+                                Label("Voir l’annonce", systemImage: "safari")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
+                    .padding(.horizontal)
+                }
+            }
+            .ignoresSafeArea(edges: .top)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Fermer") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
 private struct HomeFeature: Identifiable {
     let id: String
     let title: String
@@ -653,6 +1004,7 @@ struct HomeDashboardView: View {
     @State private var selectedPage: PortalSection?
     @State private var featuredListings: [Listing] = []
     @State private var selectedListing: Listing?
+    @State private var showMatching = false
 
     private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
     private let features: [HomeFeature] = [
@@ -701,6 +1053,7 @@ struct HomeDashboardView: View {
                             ForEach(features) { feature in
                                 Button {
                                     if feature.id == "native-favorites" { selectedTab = 2 }
+                                    else if feature.id == "matching" { showMatching = true }
                                     else { selectedPage = feature.page }
                                 } label: {
                                     VStack(alignment: .leading, spacing: 11) {
@@ -738,6 +1091,9 @@ struct HomeDashboardView: View {
             }
             .sheet(item: $selectedListing) { listing in
                 ListingDetailView(listing: listing)
+            }
+            .sheet(isPresented: $showMatching) {
+                MatchingView().presentationDetents([.large])
             }
         }
     }
