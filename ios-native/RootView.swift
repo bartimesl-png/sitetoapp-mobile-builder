@@ -727,7 +727,7 @@ struct HomeDashboardView: View {
                     Label("PARTENAIREFOYER", systemImage: "house.and.flag.fill")
                         .font(.caption.weight(.heavy)).tracking(1.2).foregroundStyle(.white)
                     Spacer()
-                    Button { selectedTab = 3 } label: {
+                    Button { selectedTab = 4 } label: {
                         Image(systemName: "person.crop.circle").font(.title3).foregroundStyle(.white)
                             .frame(width: 42, height: 42).background(.white.opacity(0.16), in: Circle())
                     }.accessibilityLabel("Ouvrir mon compte")
