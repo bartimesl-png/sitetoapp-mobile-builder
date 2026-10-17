@@ -1347,6 +1347,8 @@ private struct RoleEntryView: View {
     @State private var isCreatingAccount = false
     let role: AccountRole
     let onSignedIn: () -> Void
+    var initialProfile: [String: Any]? = nil
+    var isEditing: Bool = false
 
     var body: some View {
         NavigationStack {
@@ -1360,27 +1362,31 @@ private struct RoleEntryView: View {
                 }
 
                 if isCreatingAccount {
-                    Section("Créer votre compte Wix") {
-                        TextField("Prénom", text: $firstName)
-                            .textContentType(.givenName)
-                            .textInputAutocapitalization(.words)
-                        TextField("Nom", text: $lastName)
-                            .textContentType(.familyName)
-                            .textInputAutocapitalization(.words)
-                        TextField("Adresse e-mail", text: $email)
-                            .textContentType(.emailAddress)
-                            .keyboardType(.emailAddress)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                        SecureField("Mot de passe (8 caractères minimum)", text: $password)
-                            .textContentType(.newPassword)
+                    Section(isEditing ? "Modifier mon profil Wix" : "Créer votre compte Wix") {
+                        if !isEditing {
+                            TextField("Prénom", text: $firstName)
+                                .textContentType(.givenName)
+                                .textInputAutocapitalization(.words)
+                            TextField("Nom", text: $lastName)
+                                .textContentType(.familyName)
+                                .textInputAutocapitalization(.words)
+                            TextField("Adresse e-mail", text: $email)
+                                .textContentType(.emailAddress)
+                                .keyboardType(.emailAddress)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                            SecureField("Mot de passe (8 caractères minimum)", text: $password)
+                                .textContentType(.newPassword)
+                        }
                         TextField("Téléphone", text: $phone)
                             .textContentType(.telephoneNumber)
                             .keyboardType(.phonePad)
                         roleRegistrationFields
-                        Toggle("J’accepte les conditions générales de PartenaireFoyer et sa politique de confidentialité.", isOn: $acceptedTerms)
-                        Link(destination: AppConfig.privacyURL) {
-                            Label("Consulter la politique de confidentialité", systemImage: "hand.raised")
+                        if !isEditing {
+                            Toggle("J’accepte les conditions générales de PartenaireFoyer et sa politique de confidentialité.", isOn: $acceptedTerms)
+                            Link(destination: AppConfig.privacyURL) {
+                                Label("Consulter la politique de confidentialité", systemImage: "hand.raised")
+                            }
                         }
                     }
                 } else {
@@ -1445,31 +1451,63 @@ private struct RoleEntryView: View {
                     } label: {
                         HStack {
                             Spacer()
-                            Label(isCreatingAccount ? "Créer mon compte" : "Se connecter",
-                                  systemImage: isCreatingAccount ? "person.badge.plus" : "lock.shield")
+                                    Label(isEditing ? "Enregistrer les modifications" : (isCreatingAccount ? "Créer mon compte" : "Se connecter"),
+                                  systemImage: isEditing ? "checkmark.circle" : (isCreatingAccount ? "person.badge.plus" : "lock.shield"))
                                 .font(.headline)
                             Spacer()
                         }
                     }
-                    .disabled(email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || password.isEmpty || auth.isSigningIn || (isCreatingAccount && !acceptedTerms))
+                    .disabled(email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (!isEditing && password.isEmpty) || auth.isSigningIn || (isCreatingAccount && !isEditing && !acceptedTerms))
 
-                    Button {
-                        isCreatingAccount.toggle()
-                        auth.errorMessage = nil
-                    } label: {
-                        Label(isCreatingAccount ? "J’ai déjà un compte : me connecter" : "Créer un compte", systemImage: "person.crop.circle.badge.plus")
+                    if !isEditing {
+                        Button {
+                            isCreatingAccount.toggle()
+                            auth.errorMessage = nil
+                        } label: {
+                            Label(isCreatingAccount ? "J’ai déjà un compte : me connecter" : "Créer un compte", systemImage: "person.crop.circle.badge.plus")
+                        }
+                        .disabled(auth.isSigningIn)
                     }
-                    .disabled(auth.isSigningIn)
                 } footer: {
-                    Text(isCreatingAccount
+                    Text(isEditing
+                         ? "Les informations sont mises à jour dans la fiche Wix associée à votre espace."
+                         : (isCreatingAccount
                          ? "Votre compte est créé par l’authentification Wix sécurisée. Le mot de passe n’est pas conservé par l’application."
-                         : "La connexion passe par l’authentification Wix sécurisée. Le mot de passe n’est pas conservé par l’application.")
+                         : "La connexion passe par l’authentification Wix sécurisée. Le mot de passe n’est pas conservé par l’application."))
                 }
             }
             .navigationTitle("Accès à l’espace")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { Button("Fermer") { dismiss() } }
+            }
+            .onAppear {
+                guard let initialProfile else { return }
+                isCreatingAccount = isEditing
+                email = auth.member?.loginEmail ?? (initialProfile["email"] as? String ?? "")
+                let profileName = (initialProfile["contactName"] as? String)
+                    ?? (initialProfile["fullName"] as? String)
+                    ?? (initialProfile["companyName"] as? String)
+                    ?? (initialProfile["businessName"] as? String)
+                    ?? ""
+                let nameParts = profileName.split(separator: " ", maxSplits: 1).map(String.init)
+                firstName = auth.member?.firstName ?? (initialProfile["firstName"] as? String ?? nameParts.first ?? "")
+                lastName = auth.member?.lastName ?? (initialProfile["lastName"] as? String ?? nameParts.dropFirst().first ?? "")
+                phone = (initialProfile["phone"] as? String) ?? (initialProfile["phoneNumber"] as? String ?? "")
+                city = initialProfile["city"] as? String ?? ""
+                postalCode = initialProfile["postalCode"] as? String ?? ""
+                companyName = (initialProfile["companyName"] as? String)
+                    ?? (initialProfile["businessName"] as? String)
+                    ?? (role == .hebergeur ? (initialProfile["fullName"] as? String) : nil)
+                    ?? ""
+                category = initialProfile["category"] as? String ?? ""
+                subcategory = initialProfile["subcategory"] as? String ?? ""
+                description = (initialProfile["description"] as? String) ?? (initialProfile["biography"] as? String ?? "")
+                website = (initialProfile["website"] as? String) ?? (initialProfile["websiteUrl"] as? String ?? "")
+                professionalTitle = initialProfile["professionalTitle"] as? String ?? ""
+                if let years = initialProfile["yearsOfExperience"] { yearsOfExperience = String(describing: years) }
+                professionalType = initialProfile["professionalType"] as? String ?? "mandataire"
+                acceptedTerms = true
             }
         }
     }
@@ -1528,6 +1566,7 @@ private struct NativeRoleDashboardView: View {
     @State private var showReferralCenter = false
     @State private var showImportCenter = false
     @State private var showBuyerSearchForm = false
+    @State private var showProfileEditor = false
     let role: AccountRole
     let member: WixMember
     let onSignOut: () -> Void
@@ -1596,6 +1635,11 @@ private struct NativeRoleDashboardView: View {
                         NativeProfileShowcase(profile: profile, role: role)
                         ForEach(Array(profileKeys(for: role).filter { profile[$0.1] != nil }.enumerated()), id: \.offset) { _, field in
                             LabeledContent(field.0, value: display(profile[field.1]))
+                        }
+                        Button {
+                            showProfileEditor = true
+                        } label: {
+                            Label("Modifier mon profil", systemImage: "pencil")
                         }
                     }
                 }
@@ -1762,6 +1806,14 @@ private struct NativeRoleDashboardView: View {
             }
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showProfileEditor) {
+            RoleEntryView(role: role, onSignedIn: {
+                showProfileEditor = false
+                Task { await auth.loadDashboard(role: role.dashboardQueryRole) }
+            }, initialProfile: profile, isEditing: true)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showImportCenter) {
             NavigationStack {
