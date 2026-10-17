@@ -371,6 +371,62 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         }
     }
 
+    func submitEstimationRequest(
+        firstName: String,
+        lastName: String,
+        email: String,
+        phone: String,
+        address: String,
+        city: String,
+        postalCode: String,
+        propertyType: String,
+        propertyCondition: String,
+        occupancyStatus: String,
+        projectTimeline: String,
+        livingArea: Double?,
+        landArea: Double?,
+        rooms: Double?,
+        bedrooms: Double?,
+        budget: Double?
+    ) async throws {
+        let visitor = try await requestToken([
+            "clientId": clientID,
+            "grantType": "anonymous"
+        ])
+        var data: [String: Any] = [
+            "firstName": firstName.trimmingCharacters(in: .whitespacesAndNewlines),
+            "lastName": lastName.trimmingCharacters(in: .whitespacesAndNewlines),
+            "requesterEmail": email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+            "phoneNumber": phone.trimmingCharacters(in: .whitespacesAndNewlines),
+            "address": address.trimmingCharacters(in: .whitespacesAndNewlines),
+            "city": city.trimmingCharacters(in: .whitespacesAndNewlines),
+            "postalCode": postalCode.trimmingCharacters(in: .whitespacesAndNewlines),
+            "propertyType": propertyType,
+            "propertyCondition": propertyCondition,
+            "occupancyStatus": occupancyStatus,
+            "projectTimeline": projectTimeline,
+            "requestDate": ISO8601DateFormatter().string(from: Date())
+        ]
+        if let livingArea { data["livingArea"] = livingArea }
+        if let landArea { data["landArea"] = landArea }
+        if let rooms { data["numberOfRooms"] = rooms }
+        if let bedrooms { data["numberOfBedrooms"] = bedrooms }
+        if let budget { data["budget"] = budget }
+
+        let result = try await post(
+            "https://www.wixapis.com/wix-data/v2/items",
+            bearer: visitor.accessToken,
+            body: [
+                "dataCollectionId": "demandesestimation",
+                "dataItem": ["data": data]
+            ],
+            as: WixInsertDataItemResponse.self
+        )
+        guard let id = result.dataItem?.id, !id.isEmpty else {
+            throw AuthError.invalidResponse
+        }
+    }
+
     func fetchPublicPrivateListings() async throws -> [Listing] {
         let visitor = try await requestToken([
             "clientId": clientID,
@@ -676,4 +732,12 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
                                     kSecAttrAccount as String: "member-session"]
         SecItemDelete(query as CFDictionary)
     }
+}
+
+private struct WixInsertDataItemResponse: Decodable {
+    let dataItem: WixInsertedDataItem?
+}
+
+private struct WixInsertedDataItem: Decodable {
+    let id: String?
 }
