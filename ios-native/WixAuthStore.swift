@@ -219,6 +219,49 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         }
     }
 
+    func registerPushDevice(role: String) async {
+        // The host dashboard has no push owner type in the current notification
+        // service. Do not register a token against an unrelated Wix profile.
+        guard ["particulier", "professionnel", "courtier", "artisan", "diagnostiqueur", "prestataire"].contains(role),
+              let fcmToken = UserDefaults.standard.string(forKey: "partenairefoyer.fcmRegistrationToken"),
+              !fcmToken.isEmpty else { return }
+
+        let defaults = UserDefaults.standard
+        let installationID: String
+        if let existingID = defaults.string(forKey: "partenairefoyer.pushDeviceID.v1"), !existingID.isEmpty {
+            installationID = existingID
+        } else {
+            installationID = UUID().uuidString.lowercased()
+            defaults.set(installationID, forKey: "partenairefoyer.pushDeviceID.v1")
+        }
+
+        do {
+            let token = try await validAccessToken()
+            let endpoint = URL(string: "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/ios-native-push-registration")!
+            var request = URLRequest(url: endpoint, timeoutInterval: 25)
+            request.httpMethod = "POST"
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            request.httpBody = try JSONSerialization.data(withJSONObject: [
+                "role": role,
+                "deviceId": "\(installationID)-\(role)",
+                "fcmToken": fcmToken
+            ])
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else { throw AuthError.invalidResponse }
+            guard (200..<300).contains(http.statusCode) else {
+                let payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+                throw AuthError.api(payload?["error"] as? String ?? "Enregistrement des notifications impossible.")
+            }
+            NSLog("Notifications iOS : appareil associé à l’espace %@.", role)
+        } catch {
+            // Push is an optional capability; it must never block dashboard use.
+            NSLog("Notifications iOS : enregistrement différé (%@).", error.localizedDescription)
+        }
+    }
+
     func loadProfessionalConversation(id: String) async throws -> [[String: Any]] {
         let conversationID = id.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !conversationID.isEmpty, conversationID.count <= 160 else {
