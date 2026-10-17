@@ -105,3 +105,88 @@ final class ProfessionalsService: ObservableObject {
         }
     }
 }
+
+/// Client for the existing referral workflow. Candidate creation is a live,
+/// rate-limited operation; it is only invoked from the user's submit action.
+@MainActor
+final class ReferralService: ObservableObject {
+    @Published private(set) var candidates: [[String: Any]] = []
+    @Published private(set) var isLoading = false
+    @Published private(set) var errorMessage: String?
+    @Published private(set) var statusMessage: String?
+
+    private let endpoint = URL(string: "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/pf-mandataire-opportunities")!
+
+    private enum ServiceError: LocalizedError {
+        case invalidResponse
+        case rejected(String)
+        var errorDescription: String? {
+            switch self {
+            case .invalidResponse: "Réponse invalide du service de parrainage."
+            case .rejected(let message): message
+            }
+        }
+    }
+
+    func load() async {
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+        do {
+            let token = try await WixAuthStore.shared.validAccessToken()
+            let payload = try await send(["action": "list"], token: token)
+            candidates = (payload["candidates"] as? [[String: Any]]) ?? (payload["data"] as? [[String: Any]]) ?? []
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func create(firstName: String, lastName: String, email: String, phone: String,
+                city: String, postalCode: String, experience: String, project: String,
+                message: String, consent: Bool) async -> Bool {
+        errorMessage = nil
+        statusMessage = nil
+        do {
+            _ = try await send([
+                "action": "create", "firstName": firstName, "lastName": lastName,
+                "email": email, "phone": phone, "city": city, "postalCode": postalCode,
+                "experience": experience, "project": project, "message": message,
+                "consent": consent
+            ], token: nil)
+            statusMessage = "Votre proposition a été transmise."
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    func update(action: String, candidateID: String) async {
+        errorMessage = nil
+        statusMessage = nil
+        do {
+            let token = try await WixAuthStore.shared.validAccessToken()
+            _ = try await send(["action": action, "candidateId": candidateID], token: token)
+            statusMessage = action == "claim" ? "Contact attribué à votre espace." : "Profil masqué de votre liste."
+            await load()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func send(_ body: [String: Any], token: String?) async throws -> [String: Any] {
+        var request = URLRequest(url: endpoint, timeoutInterval: 30)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw ServiceError.invalidResponse }
+        let payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+        guard (200..<300).contains(http.statusCode) else {
+            throw ServiceError.rejected(payload["error"] as? String ?? "Le service de parrainage a refusé la demande (\(http.statusCode)).")
+        }
+        return payload
+    }
+}

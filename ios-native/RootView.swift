@@ -805,7 +805,9 @@ private struct RoleEntryView: View {
 
 private struct NativeRoleDashboardView: View {
     @StateObject private var auth = WixAuthStore.shared
+    @StateObject private var referralService = ReferralService()
     @State private var selectedItem: DashboardItemSelection?
+    @State private var showReferralCenter = false
     let role: AccountRole
     let member: WixMember
     let onSignOut: () -> Void
@@ -881,6 +883,17 @@ private struct NativeRoleDashboardView: View {
                         Label("\(section.0) (\(section.2.count))", systemImage: section.1)
                     }
                 }
+                if role == .professionnel {
+                    Section("Développer mon réseau") {
+                        Button {
+                            showReferralCenter = true
+                        } label: {
+                            Label("Parrainage de mandataires", systemImage: "person.3.sequence.fill")
+                        }
+                        Text("Consultez les candidatures, attribuez un contact ou recommandez un futur mandataire.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
                 if role == .hebergeur {
                     Section("Mon activité") {
                         Text("Votre fiche hébergeur est reliée à Wix. Les réservations apparaîtront ici lorsque la collection correspondante sera associée à ce compte.")
@@ -919,6 +932,11 @@ private struct NativeRoleDashboardView: View {
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
         }
+        .sheet(isPresented: $showReferralCenter) {
+            NavigationStack {
+                ReferralCenterView(service: referralService)
+            }
+        }
         .refreshable { await auth.loadDashboard(role: role.rawValue) }
         .task(id: role.rawValue) { await auth.loadDashboard(role: role.rawValue) }
     }
@@ -948,7 +966,14 @@ private struct WixDashboardItem: View {
     let onOpen: () -> Void
 
     private var title: String {
-        ["title", "itemName", "businessName", "senderName", "fullName"].compactMap { item[$0] as? String }.first ?? fallbackTitle
+        if let score = item["matchingScore"] {
+            return "Matching immobilier · \(String(describing: score)) %"
+        }
+        if let demand = item["demandType"] as? String, !demand.isEmpty {
+            return "Demande · \(demand)"
+        }
+        return ["title", "itemName", "businessName", "senderName", "fullName"]
+            .compactMap { item[$0] as? String }.first ?? fallbackTitle
     }
     private var subtitle: String {
         ["city", "postalCode", "propertyType", "category", "status", "matchingType", "demandType"].compactMap { item[$0] as? String }.filter { !$0.isEmpty }.joined(separator: " · ")
@@ -987,6 +1012,193 @@ private struct WixDashboardItem: View {
         }
         .buttonStyle(.plain)
         .accessibilityHint("Afficher le détail")
+    }
+}
+
+private struct ReferralCenterView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var service: ReferralService
+    @State private var showForm = false
+    @State private var confirmCandidate: [String: Any]?
+
+    var body: some View {
+        List {
+            Section {
+                Button { showForm = true } label: {
+                    Label("Recommander un candidat", systemImage: "person.badge.plus")
+                        .font(.headline)
+                }
+                Text("La candidature est envoyée au programme de parrainage existant. Le candidat sera contacté selon le processus PartenaireFoyer.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+
+            if service.isLoading {
+                Section { HStack { Spacer(); ProgressView("Chargement des candidatures…"); Spacer() } }
+            }
+            if let error = service.errorMessage {
+                Section("Information") {
+                    Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+                    Button("Réessayer") { Task { await service.load() } }
+                }
+            }
+            if let status = service.statusMessage {
+                Section { Label(status, systemImage: "checkmark.circle.fill").foregroundStyle(.green) }
+            }
+
+            Section("Candidatures disponibles (\(service.candidates.count))") {
+                if service.candidates.isEmpty && !service.isLoading && service.errorMessage == nil {
+                    Text("Aucune candidature disponible pour votre espace.")
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(Array(service.candidates.enumerated()), id: \.offset) { _, candidate in
+                    ReferralCandidateRow(candidate: candidate) {
+                        confirmCandidate = candidate
+                    } onHide: {
+                        Task { await service.update(action: "hide", candidateID: candidate["id"] as? String ?? "") }
+                    }
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .navigationTitle("Parrainage")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) { Button("Fermer") { dismiss() } }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { Task { await service.load() } } label: { Image(systemName: "arrow.clockwise") }
+                    .accessibilityLabel("Actualiser les candidatures")
+            }
+        }
+        .task { await service.load() }
+        .sheet(isPresented: $showForm) {
+            NavigationStack { ReferralCandidateForm(service: service) }
+        }
+        .confirmationDialog("Attribuer ce contact à votre espace ?", isPresented: Binding(
+            get: { confirmCandidate != nil }, set: { if !$0 { confirmCandidate = nil } }
+        ), titleVisibility: .visible) {
+            Button("Attribuer le contact") {
+                guard let candidate = confirmCandidate,
+                      let id = candidate["id"] as? String else { return }
+                Task { await service.update(action: "claim", candidateID: id) }
+                confirmCandidate = nil
+            }
+            Button("Annuler", role: .cancel) { confirmCandidate = nil }
+        } message: {
+            Text("Une attribution réussie affichera les coordonnées transmises par le candidat dans ce programme.")
+        }
+    }
+}
+
+private struct ReferralCandidateRow: View {
+    let candidate: [String: Any]
+    let onClaim: () -> Void
+    let onHide: () -> Void
+
+    private func text(_ key: String, fallback: String = "") -> String {
+        (candidate[key] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? fallback
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack {
+                Text(text("city", fallback: "Candidat immobilier"))
+                    .font(.headline)
+                Spacer()
+                Text("\(candidate["placesRemaining"] as? Int ?? 0) places")
+                    .font(.caption.weight(.semibold)).foregroundStyle(.teal)
+            }
+            Text([text("postalCode"), text("experience"), text("project")].filter { !$0.isEmpty }.joined(separator: " · "))
+                .font(.subheadline).foregroundStyle(.secondary)
+            if candidate["mine"] as? Bool == true {
+                Text([text("firstName"), text("lastName")].filter { !$0.isEmpty }.joined(separator: " "))
+                    .font(.subheadline.weight(.semibold))
+                if !text("email").isEmpty { Label(text("email"), systemImage: "envelope").font(.caption) }
+                if !text("phone").isEmpty { Label(text("phone"), systemImage: "phone").font(.caption) }
+                if !text("message").isEmpty { Text(text("message")).font(.caption).foregroundStyle(.secondary) }
+            } else {
+                HStack {
+                    Button("Attribuer", action: onClaim).buttonStyle(.borderedProminent)
+                    Button("Masquer", action: onHide).buttonStyle(.bordered)
+                }
+                .font(.caption)
+            }
+        }
+        .padding(.vertical, 5)
+    }
+}
+
+private struct ReferralCandidateForm: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var service: ReferralService
+    @State private var firstName = ""
+    @State private var lastName = ""
+    @State private var email = ""
+    @State private var phone = ""
+    @State private var city = ""
+    @State private var postalCode = ""
+    @State private var experience = "debutant"
+    @State private var project = "decouvrir"
+    @State private var message = ""
+    @State private var consent = false
+    @State private var isSubmitting = false
+
+    private var canSubmit: Bool {
+        firstName.trimmingCharacters(in: .whitespaces).count >= 2 &&
+        lastName.trimmingCharacters(in: .whitespaces).count >= 2 &&
+        email.contains("@") && phone.filter(\.isNumber).count >= 8 &&
+        city.trimmingCharacters(in: .whitespaces).count >= 2 && postalCode.count == 5 && consent
+    }
+
+    var body: some View {
+        Form {
+            Section("Coordonnées du candidat") {
+                TextField("Prénom", text: $firstName).textContentType(.givenName)
+                TextField("Nom", text: $lastName).textContentType(.familyName)
+                TextField("Adresse e-mail", text: $email).textContentType(.emailAddress).keyboardType(.emailAddress).textInputAutocapitalization(.never).autocorrectionDisabled()
+                TextField("Téléphone", text: $phone).keyboardType(.phonePad)
+                TextField("Ville", text: $city)
+                TextField("Code postal", text: $postalCode).keyboardType(.numberPad).onChange(of: postalCode) { _, value in postalCode = String(value.filter(\.isNumber).prefix(5)) }
+            }
+            Section("Projet immobilier") {
+                Picker("Expérience", selection: $experience) {
+                    Text("Débutant").tag("debutant")
+                    Text("Déjà dans l’immobilier").tag("immobilier")
+                    Text("Mandataire").tag("mandataire")
+                }
+                Picker("Projet", selection: $project) {
+                    Text("Découvrir").tag("decouvrir")
+                    Text("Démarrer").tag("demarrer")
+                    Text("Changer de réseau").tag("changer-reseau")
+                }
+                TextField("Message (facultatif)", text: $message, axis: .vertical).lineLimit(3...6)
+            }
+            Section {
+                Toggle("J’ai l’accord du candidat pour transmettre ses coordonnées.", isOn: $consent)
+            } footer: {
+                Text("Les coordonnées seront transmises au programme de parrainage pour recontacter le candidat.")
+            }
+            if let error = service.errorMessage {
+                Section { Text(error).foregroundStyle(.red).font(.footnote) }
+            }
+            Section {
+                Button {
+                    isSubmitting = true
+                    Task {
+                        let success = await service.create(firstName: firstName, lastName: lastName, email: email,
+                            phone: phone, city: city, postalCode: postalCode, experience: experience,
+                            project: project, message: message, consent: consent)
+                        isSubmitting = false
+                        if success { dismiss() }
+                    }
+                } label: {
+                    HStack { Spacer(); if isSubmitting { ProgressView() } else { Text("Envoyer la recommandation") }; Spacer() }
+                }
+                .disabled(!canSubmit || isSubmitting)
+            }
+        }
+        .navigationTitle("Nouveau parrainage")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Annuler") { dismiss() } } }
     }
 }
 
