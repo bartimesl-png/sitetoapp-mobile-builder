@@ -76,3 +76,32 @@ final class ListingsService: ObservableObject {
         return allItems
     }
 }
+
+@MainActor
+final class ProfessionalsService: ObservableObject {
+    @Published private(set) var professionals: [WixPublicProfessional] = []
+    @Published private(set) var isLoading = false
+    @Published private(set) var errorMessage: String?
+    @Published private(set) var hasLoaded = false
+
+    func loadIfNeeded() async {
+        guard !hasLoaded else { return }
+        await reload()
+    }
+
+    func reload() async {
+        guard !isLoading else { return }
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+        do {
+            let results = try await WixAuthStore.shared.fetchPublicProfessionals()
+            professionals = results.sorted {
+                $0.resolvedName.localizedStandardCompare($1.resolvedName) == .orderedAscending
+            }
+            hasLoaded = true
+        } catch {
+            errorMessage = "L’annuaire des professionnels n’est pas disponible pour le moment."
+        }
+    }
+}

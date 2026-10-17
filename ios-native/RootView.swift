@@ -4,6 +4,7 @@ import CoreFoundation
 struct RootView: View {
     @State private var selectedTab = 0
     @StateObject private var listingsService = ListingsService()
+    @StateObject private var professionalsService = ProfessionalsService()
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -15,15 +16,141 @@ struct RootView: View {
                 .tabItem { Label("Annonces", systemImage: "magnifyingglass") }
                 .tag(1)
 
+            NativeProfessionalsView(service: professionalsService)
+                .tabItem { Label("Professionnels", systemImage: "person.2") }
+                .tag(2)
+
             NativeFavoritesView(service: listingsService)
                 .tabItem { Label("Favoris", systemImage: "heart.fill") }
-                .tag(2)
+                .tag(3)
 
             NativeSpacePickerView()
                 .tabItem { Label("Menu", systemImage: "line.3.horizontal") }
-                .tag(3)
+                .tag(4)
         }
         .tint(Color(red: 0.02, green: 0.38, blue: 0.34))
+    }
+}
+
+private struct NativeProfessionalsView: View {
+    @ObservedObject var service: ProfessionalsService
+    @State private var searchText = ""
+
+    private var filtered: [WixPublicProfessional] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return service.professionals }
+        return service.professionals.filter {
+            $0.resolvedName.localizedCaseInsensitiveContains(query) ||
+            ($0.city ?? "").localizedCaseInsensitiveContains(query) ||
+            ($0.postalCode ?? "").localizedCaseInsensitiveContains(query) ||
+            ($0.resolvedActivity ?? "").localizedCaseInsensitiveContains(query) ||
+            ($0.description ?? "").localizedCaseInsensitiveContains(query)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if service.isLoading && service.professionals.isEmpty {
+                    ProgressView("Chargement des professionnels…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let error = service.errorMessage, service.professionals.isEmpty {
+                    ContentUnavailableView {
+                        Label("Annuaire indisponible", systemImage: "wifi.exclamationmark")
+                    } description: {
+                        Text(error)
+                    } actions: {
+                        Button("Réessayer") { Task { await service.reload() } }
+                            .buttonStyle(.borderedProminent)
+                    }
+                } else if filtered.isEmpty {
+                    ContentUnavailableView.search(text: searchText)
+                } else {
+                    List(filtered) { professional in
+                        NavigationLink(value: professional.id) {
+                            ProfessionalRow(professional: professional)
+                        }
+                        .listRowInsets(EdgeInsets(top: 7, leading: 16, bottom: 7, trailing: 16))
+                    }
+                    .listStyle(.plain)
+                    .refreshable { await service.reload() }
+                    .navigationDestination(for: String.self) { id in
+                        if let professional = service.professionals.first(where: { $0.id == id }) {
+                            ProfessionalDetailView(professional: professional)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Professionnels")
+            .searchable(text: $searchText, prompt: "Métier, ville, code postal…")
+            .task { await service.loadIfNeeded() }
+        }
+    }
+}
+
+private struct ProfessionalRow: View {
+    let professional: WixPublicProfessional
+
+    private var initials: String {
+        professional.resolvedName.split(separator: " ").prefix(2).compactMap(\.first).map(String.init).joined()
+    }
+
+    var body: some View {
+        HStack(spacing: 13) {
+            Text(initials.isEmpty ? "PF" : initials.uppercased())
+                .font(.headline.weight(.bold))
+                .foregroundStyle(.teal)
+                .frame(width: 58, height: 58)
+                .background(Color.teal.opacity(0.1), in: RoundedRectangle(cornerRadius: 15))
+            VStack(alignment: .leading, spacing: 5) {
+                Text(professional.resolvedName).font(.headline).foregroundStyle(.primary).lineLimit(2)
+                if let activity = professional.resolvedActivity {
+                    Text(activity).font(.subheadline).foregroundStyle(.teal).lineLimit(1)
+                }
+                if !professional.locationLabel.isEmpty {
+                    Label(professional.locationLabel, systemImage: "mappin.and.ellipse")
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 5)
+        .contentShape(Rectangle())
+    }
+}
+
+private struct ProfessionalDetailView: View {
+    let professional: WixPublicProfessional
+
+    var body: some View {
+        List {
+            Section {
+                VStack(alignment: .leading, spacing: 12) {
+                    Image(systemName: "building.2.crop.circle.fill")
+                        .font(.system(size: 50)).foregroundStyle(.teal)
+                    Text(professional.resolvedName).font(.title2.bold())
+                    if let activity = professional.resolvedActivity {
+                        Label(activity, systemImage: "briefcase")
+                            .font(.subheadline.weight(.medium)).foregroundStyle(.teal)
+                    }
+                    if !professional.locationLabel.isEmpty {
+                        Label(professional.locationLabel, systemImage: "mappin.and.ellipse")
+                            .font(.subheadline).foregroundStyle(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 8)
+            }
+
+            if let description = professional.description, !description.isEmpty {
+                Section("Présentation") {
+                    Text(description).textSelection(.enabled)
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .navigationTitle("Fiche professionnelle")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -326,6 +453,26 @@ private struct HomeDashboardView: View {
                     }
                     .buttonStyle(.plain)
 
+                    Button { selectedTab = 2 } label: {
+                        HStack(spacing: 14) {
+                            Image(systemName: "person.2")
+                                .font(.title3.weight(.semibold))
+                                .foregroundStyle(.teal)
+                                .frame(width: 46, height: 46)
+                                .background(Color.teal.opacity(0.11), in: RoundedRectangle(cornerRadius: 14))
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Trouver un professionnel").font(.headline).foregroundStyle(.primary)
+                                Text("Des profils actifs et visibles sur Wix").font(.subheadline).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "arrow.right").foregroundStyle(.secondary)
+                        }
+                        .padding(16)
+                        .background(.background, in: RoundedRectangle(cornerRadius: 20))
+                        .overlay(RoundedRectangle(cornerRadius: 20).stroke(.quaternary, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Votre projet immobilier, au même endroit")
                             .font(.title3.bold())
@@ -338,7 +485,7 @@ private struct HomeDashboardView: View {
                     .background(.background, in: RoundedRectangle(cornerRadius: 20))
                     .overlay(RoundedRectangle(cornerRadius: 20).stroke(.quaternary, lineWidth: 1))
 
-                    Button { selectedTab = 3 } label: {
+                    Button { selectedTab = 4 } label: {
                         Label("Vous êtes… ? Choisir mon espace", systemImage: "person.crop.circle.badge.questionmark")
                             .font(.headline)
                             .frame(maxWidth: .infinity)
@@ -397,7 +544,7 @@ private struct HomeDashboardView: View {
 
                     Spacer()
 
-                    Button { selectedTab = 3 } label: {
+                    Button { selectedTab = 4 } label: {
                         Image(systemName: "person.crop.circle")
                             .font(.title3)
                             .foregroundStyle(.white)

@@ -263,6 +263,47 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         return properties.map(\.listing)
     }
 
+    func fetchPublicProfessionals() async throws -> [WixPublicProfessional] {
+        let visitor = try await requestToken([
+            "clientId": clientID,
+            "grantType": "anonymous"
+        ])
+        let pageSize = 100
+        var offset = 0
+        var profiles: [WixPublicProfessional] = []
+        let fields = [
+            "companyName", "contactName", "city", "postalCode", "professionalType",
+            "category", "description", "website", "slug", "isVisiblePublicly", "isActive"
+        ]
+
+        // Only profiles that Wix explicitly marks public and active are eligible.
+        for _ in 0..<10 {
+            let response = try await post(
+                "https://www.wixapis.com/wix-data/v2/items/query",
+                bearer: visitor.accessToken,
+                body: [
+                    "dataCollectionId": "prosprofiles",
+                    "query": [
+                        "filter": [
+                            "isVisiblePublicly": ["$eq": true],
+                            "isActive": ["$eq": true]
+                        ],
+                        "paging": ["limit": pageSize, "offset": offset],
+                        "fields": fields
+                    ]
+                ],
+                as: WixPublicProfessionalsResponse.self
+            )
+            let visible = response.dataItems.filter {
+                $0.data.isVisiblePublicly == true && $0.data.isActive == true
+            }
+            profiles.append(contentsOf: visible.map { $0.data.professional(id: $0.id) })
+            guard response.dataItems.count == pageSize else { break }
+            offset += pageSize
+        }
+        return profiles
+    }
+
     func validAccessToken() async throws -> String {
         guard var session = readStoredSession() else { throw AuthError.login("Connectez-vous pour accéder à cet espace.") }
         guard session.expiresAt <= Date().addingTimeInterval(60) else { return session.accessToken }
