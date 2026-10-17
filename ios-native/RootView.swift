@@ -730,6 +730,12 @@ private enum AccountRole: String, CaseIterable, Identifiable {
     var signupURL: URL {
         URL(string: "https://www.partenairefoyer.com\(signupPath)")!
     }
+    var dashboardQueryRole: String {
+        switch self {
+        case .diagnostiqueur: "artisan"
+        default: rawValue
+        }
+    }
     private var loginPath: String {
         switch self {
         case .particulier: "/vendeur-login"
@@ -879,7 +885,7 @@ private struct NativeRoleDashboardView: View {
                     Label(error, systemImage: "exclamationmark.triangle")
                         .font(.subheadline)
                         .foregroundStyle(.orange)
-                    Button("Réessayer") { Task { await auth.loadDashboard(role: role.rawValue) } }
+                    Button("Réessayer") { Task { await auth.loadDashboard(role: role.dashboardQueryRole) } }
                 }
             } else if let data = auth.dashboardData {
                 if let profile {
@@ -975,7 +981,7 @@ private struct NativeRoleDashboardView: View {
             }
         }
         .refreshable { await auth.loadDashboard(role: role.rawValue) }
-        .task(id: role.rawValue) { await auth.loadDashboard(role: role.rawValue) }
+        .task(id: role.rawValue) { await auth.loadDashboard(role: role.dashboardQueryRole) }
     }
 
     private func profileKeys(for role: AccountRole) -> [(String, String)] {
