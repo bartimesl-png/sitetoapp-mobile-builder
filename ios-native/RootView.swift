@@ -1056,7 +1056,13 @@ private struct NativeRoleDashboardView: View {
         let keys: [(String, String, String)]
         switch role {
         case .particulier:
-            keys = [("Mes biens", "house", "properties"), ("Mes petites annonces", "tag", "classifieds"), ("Mes favoris", "heart", "favorites")]
+            keys = [
+                ("Mes biens", "house", "properties"),
+                ("Mes petites annonces", "tag", "classifieds"),
+                ("Mes favoris", "heart", "favorites"),
+                ("Mes recherches", "magnifyingglass", "savedSearches"),
+                ("Matchings reçus", "sparkles", "buyerMatchings")
+            ]
         case .professionnel:
             keys = [("Mes biens", "house", "properties"), ("Mes matchings", "sparkles", "matchings"), ("Demandes reçues", "person.2", "demands"), ("Messages", "bubble.left.and.bubble.right", "messages")]
         case .courtier:
@@ -1737,7 +1743,7 @@ private struct WixDashboardItem: View {
         if let demand = item["demandType"] as? String, !demand.isEmpty {
             return "Demande · \(demand)"
         }
-        return ["title", "itemName", "businessName", "senderName", "fullName"]
+        return ["title", "itemName", "propertyTitle", "searchName", "businessName", "professionalName", "senderName", "fullName"]
             .compactMap { item[$0] as? String }.first ?? fallbackTitle
     }
     private var subtitle: String {
@@ -1978,15 +1984,20 @@ private struct DashboardItemDetailView: View {
     private let displayFields: [(String, String)] = [
         ("description", "Description"), ("itemDescription", "Description"),
         ("message", "Message"), ("messageContent", "Message"), ("content", "Message"),
-        ("city", "Ville"), ("postalCode", "Code postal"),
-        ("propertyType", "Type de bien"), ("transactionType", "Transaction"),
+        ("searchName", "Nom de la recherche"), ("propertyTitle", "Bien correspondant"),
+        ("city", "Ville"), ("propertyCity", "Ville du bien"), ("postalCode", "Code postal"),
+        ("propertyType", "Type de bien"), ("propertyTypes", "Types recherchés"), ("transactionType", "Transaction"),
+        ("propertySurface", "Surface du bien"), ("minSurface", "Surface minimale"), ("maxSurface", "Surface maximale"),
+        ("propertyPrice", "Prix du bien"), ("minBudget", "Budget minimum"), ("maxBudget", "Budget maximum"),
+        ("radius", "Rayon (km)"), ("minRooms", "Pièces minimum"), ("minBedrooms", "Chambres minimum"),
+        ("emailAlertsEnabled", "Alertes e-mail"), ("professionalName", "Professionnel"), ("professionalEmail", "E-mail du professionnel"),
         ("category", "Catégorie"), ("condition", "État"), ("status", "Statut"),
         ("matchingType", "Type de matching"), ("matchingScore", "Compatibilité"),
         ("demandType", "Type de demande"), ("seen", "Consulté"),
         ("senderEmail", "E-mail du contact"), ("senderPhone", "Téléphone du contact"),
         ("contactEmail", "E-mail"), ("phoneNumber", "Téléphone"),
         ("propertyId", "Bien associé"), ("acquereurId", "Acquéreur associé"),
-        ("createdAt", "Reçu le")
+        ("createdAt", "Reçu le"), ("notifiedAt", "Notification envoyée le")
     ]
 
     private var title: String {
