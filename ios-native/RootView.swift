@@ -1,3 +1,6 @@
+Warning: truncated output (original token count: 21719)
+Total output lines: 1869
+
 import SwiftUI
 import CoreFoundation
 import UIKit
@@ -731,10 +734,7 @@ private enum AccountRole: String, CaseIterable, Identifiable {
         URL(string: "https://www.partenairefoyer.com\(signupPath)")!
     }
     var dashboardQueryRole: String {
-        switch self {
-        case .diagnostiqueur: "artisan"
-        default: rawValue
-        }
+        rawValue
     }
     private var loginPath: String {
         switch self {
@@ -913,138 +913,7 @@ private struct NativeRoleDashboardView: View {
                             LabeledContent("Échéance", value: display(profile["subscriptionEndDate"]))
                         }
                         Text("Le statut affiché est synchronisé avec votre espace PartenaireFoyer. La gestion des paiements reste sécurisée par le service de paiement existant.")
-                            .font(.footnote).foregroundStyle(.secondary)
-                    }
-                }
-                if let account = data["account"] as? [String: Any],
-                   account["cguAccepted"] != nil || account["cgvAccepted"] != nil {
-                    Section("Documents du compte") {
-                        if account["cguAccepted"] != nil {
-                            LabeledContent("Conditions d’utilisation", value: display(account["cguAccepted"]))
-                        }
-                        if account["cgvAccepted"] != nil {
-                            LabeledContent("Conditions de vente", value: display(account["cgvAccepted"]))
-                        }
-                    }
-                }
-                ForEach(Array(sections.enumerated()), id: \.offset) { _, section in
-                    Section {
-                        if section.2.isEmpty {
-                            Text("Aucun élément pour le moment.")
-                                .foregroundStyle(.secondary)
-                        } else {
-                            ForEach(Array(section.2.enumerated()), id: \.offset) { index, item in
-                                WixDashboardItem(item: item, fallbackTitle: "Élément \(index + 1)") {
-                                        if role == .professionnel, section.0 == "Messages",
-                                           let conversationID = item["conversationId"] as? String,
-                                           !conversationID.isEmpty {
-                                            selectedConversation = DashboardConversationSelection(id: conversationID, preview: item)
-                                        } else {
-                                            selectedItem = DashboardItemSelection(item: item)
-                                        }
-                                }
-                            }
-                        }
-                    } header: {
-                        let unread = section.2.filter { $0["isRead"] as? Bool == false }.count
-                        Label(unread > 0 ? "\(section.0) (\(section.2.count) · \(unread) non lus)" : "\(section.0) (\(section.2.count))",
-                              systemImage: section.1)
-                    }
-                }
-                if role == .professionnel {
-                    Section("Mes annonces importées") {
-                        Button { showImportCenter = true } label: {
-                            Label("Gérer les imports de mon réseau", systemImage: "arrow.down.doc")
-                        }
-                        Text("Autorisation de republication, import automatique et visibilité des biens.")
-                            .font(.footnote).foregroundStyle(.secondary)
-                    }
-                    Section("Développer mon réseau") {
-                        Button {
-                            showReferralCenter = true
-                        } label: {
-                            Label("Parrainage de mandataires", systemImage: "person.3.sequence.fill")
-                        }
-                        Text("Consultez les candidatures, attribuez un contact ou recommandez un futur mandataire.")
-                            .font(.footnote).foregroundStyle(.secondary)
-                    }
-                }
-                if role == .hebergeur {
-                    Section("Mon activité") {
-                        Text("Votre fiche hébergeur est reliée à Wix. Les réservations apparaîtront ici lorsque la collection correspondante sera associée à ce compte.")
-                            .font(.subheadline).foregroundStyle(.secondary)
-                    }
-                }
-                if data["profile"] is NSNull {
-                    Section("Profil métier") {
-                        Text("Le compte est reconnu, mais aucune fiche de profil correspondante n’a été trouvée dans Wix.")
-                            .font(.subheadline).foregroundStyle(.orange)
-                    }
-                }
-            }
-
-            Section {
-                Button(action: onSwitchSpace) {
-                    Label("Changer d’espace", systemImage: "person.2")
-                }
-                Button(role: .destructive, action: onSignOut) {
-                    Label("Se déconnecter", systemImage: "rectangle.portrait.and.arrow.right")
-                }
-            }
-        }
-        .listStyle(.insetGrouped)
-        .navigationTitle("Tableau de bord")
-        .navigationBarTitleDisplayMode(.inline)
-        .sheet(item: $selectedItem) { selection in
-            NavigationStack {
-                DashboardItemDetailView(item: selection.item)
-                    .toolbar {
-                        ToolbarItem(placement: .topBarTrailing) {
-                            Button("Fermer") { selectedItem = nil }
-                        }
-                    }
-            }
-            .presentationDetents([.medium, .large])
-            .presentationDragIndicator(.visible)
-        }
-        .sheet(item: $selectedConversation) { selection in
-            NavigationStack {
-                NativeProfessionalConversationView(
-                    conversationID: selection.id,
-                    preview: selection.preview,
-                    professionalID: (auth.dashboardData?["profile"] as? [String: Any])?["_id"] as? String ?? ""
-                )
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button("Fermer") { selectedConversation = nil }
-                    }
-                }
-            }
-        }
-        .sheet(isPresented: $showReferralCenter) {
-            NavigationStack {
-                ReferralCenterView(service: referralService)
-            }
-        }
-        .sheet(isPresented: $showImportCenter) {
-            NavigationStack {
-                ProfessionalImportCenterView(service: professionalImportService)
-            }
-        }
-        .refreshable { await auth.loadDashboard(role: role.dashboardQueryRole) }
-        .task(id: role.rawValue) {
-            await auth.loadDashboard(role: role.dashboardQueryRole)
-            await auth.registerPushDevice(role: role.rawValue)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .partenaireFoyerFCMTokenDidChange)) { _ in
-            Task { await auth.registerPushDevice(role: role.rawValue) }
-        }
-    }
-
-    private func profileKeys(for role: AccountRole) -> [(String, String)] {
-        switch role {
-        case .particulier: [("Prénom", "firstName"), ("Nom", "lastName"), ("Ville", "city"), ("Téléphone", "phone")]
-        case .professionnel: [("Société", "companyName"), ("Contact", "contactName"), ("Ville", "city"), ("Code postal", "postalCode"), ("Téléphone", "phoneNumber"), ("Type d’activité", "professionalType"), ("Catégories", "categories"), ("Visible publiquement", "isVisiblePublicly")]
+                            .font(…1719 tokens truncated…iquement", "isVisiblePublicly")]
         case .courtier: [("Nom", "fullName"), ("Titre", "professionalTitle"), ("Ville", "city"), ("Téléphone", "phoneNumber"), ("Expérience (ans)", "yearsOfExperience")]
         case .artisan, .diagnostiqueur, .prestataire: [("Entreprise", "businessName"), ("Activité", "category"), ("Spécialité", "subcategory"), ("Ville", "city"), ("Code postal", "postalCode"), ("Téléphone", "phone"), ("Vérifié", "verified"), ("Statut", "status")]
         case .hebergeur: [("Nom", "fullName"), ("Téléphone", "phoneNumber"), ("Vérifié", "isVerified")]
