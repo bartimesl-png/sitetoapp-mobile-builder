@@ -978,6 +978,142 @@ private struct NativeEstimationRequestView: View {
     }
 }
 
+private struct NativeBuyerSearchForm: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var service: BuyerSearchService
+    @State private var searchName = ""
+    @State private var transactionType = "buy"
+    @State private var selectedTypes: Set<String> = ["Maison"]
+    @State private var city = ""
+    @State private var postalCode = ""
+    @State private var radius = 10.0
+    @State private var minBudget = ""
+    @State private var maxBudget = ""
+    @State private var minSurface = ""
+    @State private var maxSurface = ""
+    @State private var minRooms = ""
+    @State private var minBedrooms = ""
+    @State private var emailAlertsEnabled = false
+    private let propertyTypes = ["Maison", "Appartement", "Immeuble", "Terrain", "Commerce", "Bureau", "Mas", "Autre"]
+
+    private var canSubmit: Bool {
+        searchName.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 &&
+        (!city.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || postalCode.count == 5) &&
+        !selectedTypes.isEmpty && radius >= 1 && radius <= 100 &&
+        validRange(minBudget, maxBudget) && validRange(minSurface, maxSurface)
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                Label("Nouvelle recherche immobilière", systemImage: "sparkles")
+                    .font(.title3.bold())
+                Text("Cette recherche sera enregistrée dans votre compte Wix et alimentera les matchings liés aux biens correspondants.")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            }
+            Section("Recherche") {
+                TextField("Nom de la recherche", text: $searchName)
+                    .textInputAutocapitalization(.sentences)
+                Picker("Projet", selection: $transactionType) {
+                    Text("Acheter").tag("buy")
+                    Text("Louer").tag("rent")
+                }
+                TextField("Ville", text: $city).textContentType(.addressCity)
+                TextField("Code postal", text: $postalCode)
+                    .keyboardType(.numberPad)
+                    .onChange(of: postalCode) { _, value in
+                        postalCode = String(value.filter(\.isNumber).prefix(5))
+                    }
+                Stepper("Rayon : \(Int(radius)) km", value: $radius, in: 1...100, step: 1)
+            }
+            Section("Types de biens") {
+                ForEach(propertyTypes, id: \.self) { type in
+                    Toggle(type, isOn: Binding(
+                        get: { selectedTypes.contains(type) },
+                        set: { enabled in
+                            if enabled { selectedTypes.insert(type) }
+                            else { selectedTypes.remove(type) }
+                        }
+                    ))
+                }
+            }
+            Section("Critères (facultatifs)") {
+                TextField("Budget minimum (€)", text: $minBudget).keyboardType(.decimalPad)
+                TextField("Budget maximum (€)", text: $maxBudget).keyboardType(.decimalPad)
+                TextField("Surface minimale (m²)", text: $minSurface).keyboardType(.decimalPad)
+                TextField("Surface maximale (m²)", text: $maxSurface).keyboardType(.decimalPad)
+                TextField("Pièces minimum", text: $minRooms).keyboardType(.numberPad)
+                TextField("Chambres minimum", text: $minBedrooms).keyboardType(.numberPad)
+            }
+            Section {
+                Toggle("Recevoir les alertes par e-mail", isOn: $emailAlertsEnabled)
+                Text("Vous pourrez désactiver cette recherche depuis le tableau de bord.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            if let error = service.errorMessage {
+                Section("Enregistrement impossible") {
+                    Text(error).font(.footnote).foregroundStyle(.red)
+                }
+            }
+            Section {
+                Button {
+                    Task { await submit() }
+                } label: {
+                    HStack {
+                        Spacer()
+                        if service.isSubmitting { ProgressView("Enregistrement…") }
+                        else { Label("Créer ma recherche", systemImage: "checkmark.circle.fill").font(.headline) }
+                        Spacer()
+                    }
+                }
+                .disabled(!canSubmit || service.isSubmitting)
+            }
+        }
+        .navigationTitle("Nouvelle recherche")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fermer") { dismiss() } } }
+    }
+
+    private func number(_ value: String, defaultValue: Double = 0) -> Double {
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: ",", with: ".")
+        return normalized.isEmpty ? defaultValue : (Double(normalized) ?? -1)
+    }
+
+    private func optionalNumber(_ value: String) -> Double? {
+        let parsed = number(value, defaultValue: -1)
+        return parsed < 0 ? nil : parsed
+    }
+
+    private func validRange(_ low: String, _ high: String) -> Bool {
+        let lower = number(low)
+        let upper = optionalNumber(high)
+        return lower >= 0 && (upper == nil || upper! == 0 || lower <= upper!)
+    }
+
+    @MainActor
+    private func submit() async {
+        guard canSubmit else { return }
+        let success = await service.create(
+            searchName: searchName,
+            transactionType: transactionType,
+            propertyTypes: propertyTypes.filter { selectedTypes.contains($0) },
+            city: city,
+            postalCode: postalCode,
+            radius: radius,
+            minBudget: number(minBudget),
+            maxBudget: number(maxBudget),
+            minSurface: number(minSurface),
+            maxSurface: optionalNumber(maxSurface),
+            minRooms: number(minRooms),
+            minBedrooms: number(minBedrooms),
+            emailAlertsEnabled: emailAlertsEnabled
+        )
+        if success { dismiss() }
+    }
+}
+
 private struct NativeSpacePickerView: View {
     @State private var selectedRole: AccountRole?
     @StateObject private var auth = WixAuthStore.shared
@@ -1212,10 +1348,12 @@ private struct NativeRoleDashboardView: View {
     @StateObject private var auth = WixAuthStore.shared
     @StateObject private var referralService = ReferralService()
     @StateObject private var professionalImportService = ProfessionalImportService()
+    @StateObject private var buyerSearchService = BuyerSearchService()
     @State private var selectedItem: DashboardItemSelection?
     @State private var selectedConversation: DashboardConversationSelection?
     @State private var showReferralCenter = false
     @State private var showImportCenter = false
+    @State private var showBuyerSearchForm = false
     let role: AccountRole
     let member: WixMember
     let onSignOut: () -> Void
@@ -1316,6 +1454,20 @@ private struct NativeRoleDashboardView: View {
                 }
                 ForEach(Array(sections.enumerated()), id: \.offset) { _, section in
                     Section {
+                        if role == .particulier, section.0 == "Mes recherches" {
+                            Button { showBuyerSearchForm = true } label: {
+                                Label("Créer une recherche", systemImage: "plus.circle.fill")
+                                    .font(.headline)
+                            }
+                            if let message = buyerSearchService.statusMessage {
+                                Label(message, systemImage: "checkmark.circle.fill")
+                                    .font(.footnote).foregroundStyle(.green)
+                            }
+                            if let error = buyerSearchService.errorMessage {
+                                Label(error, systemImage: "exclamationmark.triangle")
+                                    .font(.footnote).foregroundStyle(.orange)
+                            }
+                        }
                         if section.2.isEmpty {
                             Text("Aucun élément pour le moment.")
                                 .foregroundStyle(.secondary)
@@ -1329,6 +1481,14 @@ private struct NativeRoleDashboardView: View {
                                         } else {
                                             selectedItem = DashboardItemSelection(item: item)
                                         }
+                                }
+                                .swipeActions {
+                                    if role == .particulier, section.0 == "Mes recherches",
+                                       let searchID = (item["_id"] as? String) ?? (item["id"] as? String) {
+                                        Button("Désactiver", role: .destructive) {
+                                            Task { await buyerSearchService.deactivate(searchID: searchID) }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1412,6 +1572,13 @@ private struct NativeRoleDashboardView: View {
             NavigationStack {
                 ReferralCenterView(service: referralService)
             }
+        }
+        .sheet(isPresented: $showBuyerSearchForm) {
+            NavigationStack {
+                NativeBuyerSearchForm(service: buyerSearchService)
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showImportCenter) {
             NavigationStack {
