@@ -70,8 +70,13 @@ async function loadDashboard(role: string, email: string, token: string) {
     const account = first(await query("prosaccounts", emailFilter(email), ["email", "isActive", "cguAccepted", "cgvAccepted"], token, 2));
     if (!account || account.isActive === false) return null;
     const accountId = String(account._id ?? "");
-    const profile = first(await query("prosprofiles", { accountId: { $eq: accountId } }, ["accountId", "companyName", "contactName", "phoneNumber", "email", "city", "postalCode", "professionalType", "category", "categories", "description", "logo", "photo", "website", "slug", "isActive", "isVisiblePublicly", "hasActiveSubscription", "subscriptionStatus"], token, 2));
-    if (!profile) return { role, account: { id: accountId }, profile: null, properties: [], matchings: [], messages: [] };
+    const profile = first(await query("prosprofiles", { accountId: { $eq: accountId } }, ["accountId", "companyName", "contactName", "phoneNumber", "email", "city", "postalCode", "professionalType", "category", "categories", "description", "logo", "photo", "website", "slug", "isActive", "isVisiblePublicly", "hasActiveSubscription", "subscriptionStatus", "subscriptionStartDate", "subscriptionEndDate"], token, 2));
+    const accountSummary = {
+      id: accountId,
+      cguAccepted: account.cguAccepted === true,
+      cgvAccepted: account.cgvAccepted === true,
+    };
+    if (!profile) return { role, account: accountSummary, profile: null, properties: [], matchings: [], messages: [] };
     const professionalId = String(profile._id ?? "");
     const [properties, matchings, demands, messages] = await Promise.all([
       query("biensprofessionnels", { professionalId: { $eq: professionalId } }, ["professionalId", "title", "description", "propertyType", "transactionType", "price", "surface", "surfaceLand", "landSurface", "rooms", "bedrooms", "bathrooms", "city", "postalCode", "mainImageUrl", "galleryImages", "status", "commercialStatus", "updatedAt"], token),
@@ -79,7 +84,7 @@ async function loadDashboard(role: string, email: string, token: string) {
       query("demandespromatchings", { proId: { $eq: professionalId } }, ["proId", "demandId", "demandType", "postalCode", "status", "seen", "isViewed", "createdAt"], token),
       query("messages", { receiverId: { $eq: professionalId } }, ["conversationId", "senderId", "receiverId", "content", "createdAt", "isRead", "readAt"], token),
     ]);
-    return { role, account: { id: accountId }, profile, properties, matchings, demands, messages };
+    return { role, account: accountSummary, profile, properties, matchings, demands, messages };
   }
 
   if (role === "courtier") {
@@ -88,7 +93,7 @@ async function loadDashboard(role: string, email: string, token: string) {
     const accountId = String(account._id ?? "");
     const profile = first(await query("brokerprofiles", { accountId: { $eq: accountId } }, ["accountId", "fullName", "professionalTitle", "profilePicture", "bio", "contactEmail", "phoneNumber", "city", "websiteUrl", "yearsOfExperience"], token, 2));
     const messages = profile ? await query("brokermessages", { brokerProfileId: { $eq: String(profile._id ?? "") } }, ["brokerProfileId", "senderName", "senderEmail", "senderPhone", "message", "isRead", "createdAt"], token) : [];
-    return { role, account: { id: accountId }, profile, messages };
+    return { role, account: { id: accountId, cguAccepted: account.cguAccepted === true, cgvAccepted: account.cgvAccepted === true }, profile, messages };
   }
 
   if (role === "prestataire" || role === "artisan" || role === "diagnostiqueur") {

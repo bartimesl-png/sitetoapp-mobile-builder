@@ -888,11 +888,41 @@ private struct NativeRoleDashboardView: View {
                     Button("Réessayer") { Task { await auth.loadDashboard(role: role.dashboardQueryRole) } }
                 }
             } else if let data = auth.dashboardData {
+                Section("Vue d’ensemble") {
+                    DashboardOverview(data: data, role: role)
+                }
                 if let profile {
                     Section("Mon profil") {
                         NativeProfileShowcase(profile: profile, role: role)
                         ForEach(Array(profileKeys(for: role).filter { profile[$0.1] != nil }.enumerated()), id: \.offset) { _, field in
                             LabeledContent(field.0, value: display(profile[field.1]))
+                        }
+                    }
+                }
+                if role == .professionnel, let profile {
+                    Section("Abonnement professionnel") {
+                        let active = (profile["hasActiveSubscription"] as? Bool) == true
+                        Label(active ? "Abonnement actif" : display(profile["subscriptionStatus"]),
+                              systemImage: active ? "checkmark.seal.fill" : "creditcard")
+                            .foregroundStyle(active ? Color.green : Color.secondary)
+                        if profile["subscriptionStartDate"] != nil {
+                            LabeledContent("Début", value: display(profile["subscriptionStartDate"]))
+                        }
+                        if profile["subscriptionEndDate"] != nil {
+                            LabeledContent("Échéance", value: display(profile["subscriptionEndDate"]))
+                        }
+                        Text("Le statut affiché est synchronisé avec votre espace PartenaireFoyer. La gestion des paiements reste sécurisée par le service de paiement existant.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
+                if let account = data["account"] as? [String: Any],
+                   account["cguAccepted"] != nil || account["cgvAccepted"] != nil {
+                    Section("Documents du compte") {
+                        if account["cguAccepted"] != nil {
+                            LabeledContent("Conditions d’utilisation", value: display(account["cguAccepted"]))
+                        }
+                        if account["cgvAccepted"] != nil {
+                            LabeledContent("Conditions de vente", value: display(account["cgvAccepted"]))
                         }
                     }
                 }
@@ -980,14 +1010,14 @@ private struct NativeRoleDashboardView: View {
                 ProfessionalImportCenterView(service: professionalImportService)
             }
         }
-        .refreshable { await auth.loadDashboard(role: role.rawValue) }
+        .refreshable { await auth.loadDashboard(role: role.dashboardQueryRole) }
         .task(id: role.rawValue) { await auth.loadDashboard(role: role.dashboardQueryRole) }
     }
 
     private func profileKeys(for role: AccountRole) -> [(String, String)] {
         switch role {
         case .particulier: [("Prénom", "firstName"), ("Nom", "lastName"), ("Ville", "city"), ("Téléphone", "phone")]
-        case .professionnel: [("Société", "companyName"), ("Contact", "contactName"), ("Ville", "city"), ("Code postal", "postalCode"), ("Téléphone", "phoneNumber"), ("Type d’activité", "professionalType"), ("Catégories", "categories"), ("Abonnement", "subscriptionStatus"), ("Visible publiquement", "isVisiblePublicly")]
+        case .professionnel: [("Société", "companyName"), ("Contact", "contactName"), ("Ville", "city"), ("Code postal", "postalCode"), ("Téléphone", "phoneNumber"), ("Type d’activité", "professionalType"), ("Catégories", "categories"), ("Visible publiquement", "isVisiblePublicly")]
         case .courtier: [("Nom", "fullName"), ("Titre", "professionalTitle"), ("Ville", "city"), ("Téléphone", "phoneNumber"), ("Expérience (ans)", "yearsOfExperience")]
         case .artisan, .diagnostiqueur, .prestataire: [("Entreprise", "businessName"), ("Activité", "category"), ("Spécialité", "subcategory"), ("Ville", "city"), ("Code postal", "postalCode"), ("Téléphone", "phone"), ("Vérifié", "verified"), ("Statut", "status")]
         case .hebergeur: [("Nom", "fullName"), ("Téléphone", "phoneNumber"), ("Vérifié", "isVerified")]
@@ -1000,6 +1030,57 @@ private struct NativeRoleDashboardView: View {
         if let values = value as? [String] { return values.joined(separator: ", ") }
         if let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() { return number.boolValue ? "Oui" : "Non" }
         return String(describing: value)
+    }
+}
+
+private struct DashboardOverview: View {
+    let data: [String: Any]
+    let role: AccountRole
+
+    private var metrics: [(String, String, String)] {
+        switch role {
+        case .particulier:
+            [("Biens", "properties", "house.fill"), ("Petites annonces", "classifieds", "tag.fill"), ("Favoris", "favorites", "heart.fill")]
+        case .professionnel:
+            [("Biens", "properties", "house.fill"), ("Matchings", "matchings", "sparkles"), ("Demandes", "demands", "person.2.fill"), ("Messages", "messages", "bubble.left.and.bubble.right.fill")]
+        case .courtier:
+            [("Messages", "messages", "bubble.left.and.bubble.right.fill")]
+        case .artisan:
+            [("Demandes", "messages", "wrench.and.screwdriver.fill")]
+        case .diagnostiqueur:
+            [("Demandes", "messages", "doc.text.magnifyingglass")]
+        case .prestataire:
+            [("Contacts", "messages", "person.2.fill")]
+        case .hebergeur:
+            [("Réservations", "reservations", "bed.double.fill")]
+        }
+    }
+
+    var body: some View {
+        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+            ForEach(Array(metrics.enumerated()), id: \.offset) { _, metric in
+                let items = data[metric.1] as? [[String: Any]] ?? []
+                VStack(alignment: .leading, spacing: 7) {
+                    Label(metric.0, systemImage: metric.2)
+                        .font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                        .lineLimit(1).minimumScaleFactor(0.8)
+                    Text(items.count.formatted())
+                        .font(.title2.bold()).contentTransition(.numericText())
+                    if metric.1 == "messages" {
+                        let unread = items.filter { $0["isRead"] as? Bool == false || $0["seen"] as? Bool == false }.count
+                        Text(unread == 0 ? "À jour" : "\(unread) non lu(s)")
+                            .font(.caption2).foregroundStyle(unread == 0 ? .secondary : .orange)
+                    } else {
+                        Text(items.isEmpty ? "Aucun élément" : "Données Wix")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, minHeight: 88, alignment: .leading)
+                .padding(12)
+                .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
+            }
+        }
+        .padding(.vertical, 3)
     }
 }
 
