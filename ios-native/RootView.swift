@@ -843,6 +843,1111 @@ private struct HomeDashboardView: View {
     }
 }
 
+private struct NativeEstimationRequestView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var firstName = ""
+    @State private var lastName = ""
+    @State private var email = ""
+    @State private var phone = ""
+    @State private var address = ""
+    @State private var city = ""
+    @State private var postalCode = ""
+    @State private var propertyType = "Maison"
+    @State private var propertyCondition = "Bon état"
+    @State private var occupancyStatus = "Occupé par le propriétaire"
+    @State private var projectTimeline = "Dans les 3 mois"
+    @State private var livingArea = ""
+    @State private var landArea = ""
+    @State private var rooms = ""
+    @State private var bedrooms = ""
+    @State private var budget = ""
+    @State private var consent = false
+    @State private var isSubmitting = false
+    @State private var didSubmit = false
+    @State private var errorMessage: String?
+
+    private var canSubmit: Bool {
+        firstName.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 &&
+        lastName.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 &&
+        email.contains("@") && email.contains(".") &&
+        phone.filter(\.isNumber).count >= 8 &&
+        !address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        !city.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        postalCode.count == 5 && postalCode.allSatisfy(\.isNumber) &&
+        (number(livingArea) ?? 0) > 0 && consent
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                Label("Demande d’estimation", systemImage: "chart.line.uptrend.xyaxis")
+                    .font(.title3.bold())
+                Text("Décrivez votre bien. Votre demande sera transmise à PartenaireFoyer pour être traitée selon le parcours d’estimation existant.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Vos coordonnées") {
+                TextField("Prénom", text: $firstName).textContentType(.givenName)
+                TextField("Nom", text: $lastName).textContentType(.familyName)
+                TextField("Adresse e-mail", text: $email)
+                    .textContentType(.emailAddress)
+                    .keyboardType(.emailAddress)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                TextField("Téléphone", text: $phone)
+                    .textContentType(.telephoneNumber)
+                    .keyboardType(.phonePad)
+            }
+
+            Section("Le bien à estimer") {
+                Picker("Type de bien", selection: $propertyType) {
+                    ForEach(["Maison", "Appartement", "Terrain", "Immeuble", "Autre"], id: \.self) { Text($0) }
+                }
+                TextField("Adresse", text: $address)
+                    .textContentType(.fullStreetAddress)
+                TextField("Ville", text: $city)
+                    .textContentType(.addressCity)
+                TextField("Code postal", text: $postalCode)
+                    .keyboardType(.numberPad)
+                    .onChange(of: postalCode) { _, value in
+                        postalCode = String(value.filter(\.isNumber).prefix(5))
+                    }
+                TextField("Surface habitable (m²)", text: $livingArea)
+                    .keyboardType(.decimalPad)
+                TextField("Surface du terrain (m²), facultatif", text: $landArea)
+                    .keyboardType(.decimalPad)
+                TextField("Nombre de pièces, facultatif", text: $rooms)
+                    .keyboardType(.numberPad)
+                TextField("Nombre de chambres, facultatif", text: $bedrooms)
+                    .keyboardType(.numberPad)
+                Picker("État général", selection: $propertyCondition) {
+                    ForEach(["Neuf", "Très bon état", "Bon état", "À rafraîchir", "À rénover"], id: \.self) { Text($0) }
+                }
+                Picker("Occupation", selection: $occupancyStatus) {
+                    ForEach(["Occupé par le propriétaire", "Loué", "Vacant"], id: \.self) { Text($0) }
+                }
+                Picker("Délai du projet", selection: $projectTimeline) {
+                    ForEach(["Au plus vite", "Dans les 3 mois", "Dans les 6 mois", "Plus tard / information"], id: \.self) { Text($0) }
+                }
+                TextField("Budget souhaité, facultatif (€)", text: $budget)
+                    .keyboardType(.decimalPad)
+            }
+
+            Section {
+                Toggle("J’accepte que mes coordonnées et les informations du bien soient transmises pour traiter cette demande.", isOn: $consent)
+                Text("Les informations sont envoyées à la collection Wix existante des demandes d’estimation. L’application n’affiche pas de valeur automatique et ne remplace pas l’avis d’un professionnel.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let errorMessage {
+                Section("Envoi impossible") {
+                    Text(errorMessage).foregroundStyle(.red).font(.footnote)
+                }
+            }
+            if didSubmit {
+                Section {
+                    Label("Votre demande a été transmise.", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                    Text("Vous pouvez fermer cet écran. L’équipe PartenaireFoyer pourra vous recontacter avec les coordonnées fournies.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+
+            Section {
+                Button {
+                    Task { await submit() }
+                } label: {
+                    HStack {
+                        Spacer()
+                        if isSubmitting { ProgressView("Envoi…") }
+                        else { Label("Envoyer ma demande", systemImage: "paperplane.fill").font(.headline) }
+                        Spacer()
+                    }
+                }
+                .disabled(!canSubmit || isSubmitting || didSubmit)
+            } footer: {
+                Text("Les champs marqués facultatifs peuvent rester vides. Le code postal doit comporter 5 chiffres.")
+            }
+        }
+        .navigationTitle("Estimation")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(didSubmit ? "Terminé" : "Fermer") { dismiss() }
+            }
+        }
+    }
+
+    private func number(_ value: String) -> Double? {
+        let normalized = value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: ",", with: ".")
+        guard !normalized.isEmpty else { return nil }
+        return Double(normalized)
+    }
+
+    @MainActor
+    private func submit() async {
+        guard canSubmit else { return }
+        isSubmitting = true
+        errorMessage = nil
+        defer { isSubmitting = false }
+        do {
+            try await WixAuthStore.shared.submitEstimationRequest(
+                firstName: firstName,
+                lastName: lastName,
+                email: email,
+                phone: phone,
+                address: address,
+                city: city,
+                postalCode: postalCode,
+                propertyType: propertyType,
+                propertyCondition: propertyCondition,
+                occupancyStatus: occupancyStatus,
+                projectTimeline: projectTimeline,
+                livingArea: number(livingArea),
+                landArea: number(landArea),
+                rooms: number(rooms),
+                bedrooms: number(bedrooms),
+                budget: number(budget)
+            )
+            didSubmit = true
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+
+private struct NativeBuyerSearchForm: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var service: BuyerSearchService
+    @State private var searchName = ""
+    @State private var transactionType = "buy"
+    @State private var selectedTypes: Set<String> = ["Maison"]
+    @State private var city = ""
+    @State private var postalCode = ""
+    @State private var radius = 10.0
+    @State private var minBudget = ""
+    @State private var maxBudget = ""
+    @State private var minSurface = ""
+    @State private var maxSurface = ""
+    @State private var minRooms = ""
+    @State private var minBedrooms = ""
+    @State private var emailAlertsEnabled = false
+    private let propertyTypes = ["Maison", "Appartement", "Immeuble", "Terrain", "Commerce", "Bureau", "Mas", "Autre"]
+
+    private var canSubmit: Bool {
+        searchName.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 &&
+        (!city.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || postalCode.count == 5) &&
+        !selectedTypes.isEmpty && radius >= 1 && radius <= 100 &&
+        validRange(minBudget, maxBudget) && validRange(minSurface, maxSurface)
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                Label("Nouvelle recherche immobilière", systemImage: "sparkles")
+                    .font(.title3.bold())
+                Text("Cette recherche sera enregistrée dans votre compte Wix et alimentera les matchings liés aux biens correspondants.")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            }
+            Section("Recherche") {
+                TextField("Nom de la recherche", text: $searchName)
+                    .textInputAutocapitalization(.sentences)
+                Picker("Projet", selection: $transactionType) {
+                    Text("Acheter").tag("buy")
+                    Text("Louer").tag("rent")
+                }
+                TextField("Ville", text: $city).textContentType(.addressCity)
+                TextField("Code postal", text: $postalCode)
+                    .keyboardType(.numberPad)
+                    .onChange(of: postalCode) { _, value in
+                        postalCode = String(value.filter(\.isNumber).prefix(5))
+                    }
+                Stepper("Rayon : \(Int(radius)) km", value: $radius, in: 1...100, step: 1)
+            }
+            Section("Types de biens") {
+                ForEach(propertyTypes, id: \.self) { type in
+                    Toggle(type, isOn: Binding(
+                        get: { selectedTypes.contains(type) },
+                        set: { enabled in
+                            if enabled { selectedTypes.insert(type) }
+                            else { selectedTypes.remove(type) }
+                        }
+                    ))
+                }
+            }
+            Section("Critères (facultatifs)") {
+                TextField("Budget minimum (€)", text: $minBudget).keyboardType(.decimalPad)
+                TextField("Budget maximum (€)", text: $maxBudget).keyboardType(.decimalPad)
+                TextField("Surface minimale (m²)", text: $minSurface).keyboardType(.decimalPad)
+                TextField("Surface maximale (m²)", text: $maxSurface).keyboardType(.decimalPad)
+                TextField("Pièces minimum", text: $minRooms).keyboardType(.numberPad)
+                TextField("Chambres minimum", text: $minBedrooms).keyboardType(.numberPad)
+            }
+            Section {
+                Toggle("Recevoir les alertes par e-mail", isOn: $emailAlertsEnabled)
+                Text("Vous pourrez désactiver cette recherche depuis le tableau de bord.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            if let error = service.errorMessage {
+                Section("Enregistrement impossible") {
+                    Text(error).font(.footnote).foregroundStyle(.red)
+                }
+            }
+            Section {
+                Button {
+                    Task { await submit() }
+                } label: {
+                    HStack {
+                        Spacer()
+                        if service.isSubmitting { ProgressView("Enregistrement…") }
+                        else { Label("Créer ma recherche", systemImage: "checkmark.circle.fill").font(.headline) }
+                        Spacer()
+                    }
+                }
+                .disabled(!canSubmit || service.isSubmitting)
+            }
+        }
+        .navigationTitle("Nouvelle recherche")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fermer") { dismiss() } } }
+    }
+
+    private func number(_ value: String, defaultValue: Double = 0) -> Double {
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: ",", with: ".")
+        return normalized.isEmpty ? defaultValue : (Double(normalized) ?? -1)
+    }
+
+    private func optionalNumber(_ value: String) -> Double? {
+        let parsed = number(value, defaultValue: -1)
+        return parsed < 0 ? nil : parsed
+    }
+
+    private func validRange(_ low: String, _ high: String) -> Bool {
+        let lower = number(low)
+        let upper = optionalNumber(high)
+        return lower >= 0 && (upper == nil || upper! == 0 || lower <= upper!)
+    }
+
+    @MainActor
+    private func submit() async {
+        guard canSubmit else { return }
+        let success = await service.create(
+            searchName: searchName,
+            transactionType: transactionType,
+            propertyTypes: propertyTypes.filter { selectedTypes.contains($0) },
+            city: city,
+            postalCode: postalCode,
+            radius: radius,
+            minBudget: number(minBudget),
+            maxBudget: number(maxBudget),
+            minSurface: number(minSurface),
+            maxSurface: optionalNumber(maxSurface),
+            minRooms: number(minRooms),
+            minBedrooms: number(minBedrooms),
+            emailAlertsEnabled: emailAlertsEnabled
+        )
+        if success { dismiss() }
+    }
+}
+
+private struct NativeSpacePickerView: View {
+    @State private var selectedRole: AccountRole?
+    @StateObject private var auth = WixAuthStore.shared
+    @AppStorage("partenairefoyer.activeRole") private var activeRoleRaw = ""
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let member = auth.member, let role = AccountRole(rawValue: activeRoleRaw) {
+                    NativeRoleDashboardView(role: role, member: member) {
+                        auth.signOut()
+                        activeRoleRaw = ""
+                    } onSwitchSpace: {
+                        auth.resetDashboard()
+                        activeRoleRaw = ""
+                    }
+                } else {
+                    rolePicker
+                }
+            }
+            .navigationTitle("Mon espace")
+            .navigationBarTitleDisplayMode(.inline)
+            .task(id: activeRoleRaw) {
+                guard activeRoleRaw == AccountRole.particulier.rawValue,
+                      auth.member != nil else { return }
+                await FavoritesStore.shared.syncFromWix()
+            }
+            .sheet(item: $selectedRole) { role in
+                RoleEntryView(role: role) {
+                    activeRoleRaw = role.rawValue
+                    selectedRole = nil
+                }
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+            }
+        }
+    }
+
+    private var rolePicker: some View {
+        List {
+                Section {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text("Vous êtes… ?")
+                            .font(.largeTitle.bold())
+                        Text("Choisissez votre profil. Chaque espace reste séparé ; les fonctions d’un compte ne s’affichent qu’après connexion à cet espace.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 8)
+                    .listRowBackground(Color.clear)
+                }
+
+                Section("Choisir un espace") {
+                    ForEach(AccountRole.allCases) { role in
+                        Button { select(role) } label: {
+                            HStack(spacing: 13) {
+                                Image(systemName: role.symbol)
+                                    .font(.title3)
+                                    .foregroundStyle(.teal)
+                                    .frame(width: 42, height: 42)
+                                    .background(Color.teal.opacity(0.1), in: RoundedRectangle(cornerRadius: 13))
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(role.title).font(.headline).foregroundStyle(.primary)
+                                    Text(role.subtitle).font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption.weight(.bold)).foregroundStyle(.tertiary)
+                            }
+                            .padding(.vertical, 5)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+        }
+        .listStyle(.insetGrouped)
+        .overlay {
+            if auth.isSigningIn {
+                ProgressView("Connexion sécurisée Wix…")
+                    .padding(22)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
+            }
+        }
+    }
+
+    private func select(_ role: AccountRole) {
+        // Keep the role spaces distinct while allowing a signed-in Wix member to
+        // move between their own linked spaces without entering their password again.
+        if auth.member != nil {
+            auth.resetDashboard()
+            activeRoleRaw = role.rawValue
+            selectedRole = nil
+        } else {
+            selectedRole = role
+        }
+    }
+}
+
+private enum AccountRole: String, CaseIterable, Identifiable {
+    case particulier, professionnel, courtier, artisan, diagnostiqueur, prestataire, hebergeur
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .particulier: "Particulier"
+        case .professionnel: "Professionnel de l’immobilier"
+        case .courtier: "Courtier"
+        case .artisan: "Artisan / diagnostiqueur"
+        case .diagnostiqueur: "Diagnostiqueur"
+        case .prestataire: "Prestataire"
+        case .hebergeur: "Hébergeur"
+        }
+    }
+    var subtitle: String {
+        switch self {
+        case .particulier: "Mes annonces, recherches et favoris"
+        case .professionnel: "Mes biens, acquéreurs et matchings"
+        case .courtier: "Mon espace et mes demandes"
+        case .artisan: "Mes services et demandes de diagnostic"
+        case .diagnostiqueur: "Mes diagnostics et demandes reçues"
+        case .prestataire: "Ma fiche, mes photos et mes contacts"
+        case .hebergeur: "Mes hébergements et réservations"
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .particulier: "person.crop.circle"
+        case .professionnel: "building.2"
+        case .courtier: "briefcase"
+        case .artisan: "wrench.and.screwdriver"
+        case .diagnostiqueur: "doc.text.magnifyingglass"
+        case .prestataire: "person.2"
+        case .hebergeur: "bed.double"
+        }
+    }
+    var loginURL: URL {
+        URL(string: "https://www.partenairefoyer.com\(loginPath)")!
+    }
+    var signupURL: URL {
+        URL(string: "https://www.partenairefoyer.com\(signupPath)")!
+    }
+    var dashboardQueryRole: String {
+        rawValue
+    }
+    private var loginPath: String {
+        switch self {
+        case .particulier: "/vendeur-login"
+        case .professionnel: "/pro-app-login"
+        case .courtier: "/broker-login"
+        case .artisan: "/artisan-login"
+        case .diagnostiqueur: "/artisan-login"
+        case .prestataire: "/connexion-prestataire"
+        case .hebergeur: "/hebergeur-connexion"
+        }
+    }
+    private var signupPath: String {
+        switch self {
+        case .particulier: "/vendeur-signup"
+        case .professionnel: "/inscription-pro"
+        case .courtier: "/broker-signup"
+        case .artisan: "/artisan-signup"
+        case .diagnostiqueur: "/artisan-signup"
+        case .prestataire: "/inscription-prestataire"
+        case .hebergeur: "/hebergeur-inscription"
+        }
+    }
+}
+
+private struct RoleEntryView: View {
+    @Environment(\.dismiss) private var dismiss
+    @StateObject private var auth = WixAuthStore.shared
+    @State private var email = ""
+    @State private var password = ""
+    @State private var firstName = ""
+    @State private var lastName = ""
+    @State private var phone = ""
+    @State private var city = ""
+    @State private var postalCode = ""
+    @State private var companyName = ""
+    @State private var category = ""
+    @State private var subcategory = ""
+    @State private var description = ""
+    @State private var website = ""
+    @State private var professionalTitle = ""
+    @State private var yearsOfExperience = ""
+    @State private var professionalType = "mandataire"
+    @State private var acceptedTerms = false
+    @State private var isCreatingAccount = false
+    let role: AccountRole
+    let onSignedIn: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Label(role.title, systemImage: role.symbol)
+                        .font(.title3.bold())
+                    Text(role.subtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+
+                if isCreatingAccount {
+                    Section("Créer votre compte Wix") {
+                        TextField("Prénom", text: $firstName)
+                            .textContentType(.givenName)
+                            .textInputAutocapitalization(.words)
+                        TextField("Nom", text: $lastName)
+                            .textContentType(.familyName)
+                            .textInputAutocapitalization(.words)
+                        TextField("Adresse e-mail", text: $email)
+                            .textContentType(.emailAddress)
+                            .keyboardType(.emailAddress)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        SecureField("Mot de passe (8 caractères minimum)", text: $password)
+                            .textContentType(.newPassword)
+                        TextField("Téléphone", text: $phone)
+                            .textContentType(.telephoneNumber)
+                            .keyboardType(.phonePad)
+                        roleRegistrationFields
+                        Toggle("J’accepte les conditions générales de PartenaireFoyer et sa politique de confidentialité.", isOn: $acceptedTerms)
+                        Link(destination: AppConfig.privacyURL) {
+                            Label("Consulter la politique de confidentialité", systemImage: "hand.raised")
+                        }
+                    }
+                } else {
+                    Section("Connexion à votre compte") {
+                    TextField("Adresse e-mail", text: $email)
+                        .textContentType(.username)
+                        .keyboardType(.emailAddress)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    SecureField("Mot de passe", text: $password)
+                        .textContentType(.password)
+                    }
+                }
+
+                if let error = auth.errorMessage {
+                    Section {
+                        Text(error).font(.footnote).foregroundStyle(.red)
+                    }
+                }
+
+                if let message = auth.infoMessage {
+                    Section {
+                        Label(message, systemImage: "envelope.badge")
+                            .font(.footnote).foregroundStyle(.teal)
+                    }
+                }
+
+                Section {
+                    Button {
+                        Task {
+                            if isCreatingAccount {
+                                let profile: [String: String] = [
+                                    "firstName": firstName,
+                                    "lastName": lastName,
+                                    "phone": phone,
+                                    "city": city,
+                                    "postalCode": postalCode,
+                                    "companyName": companyName,
+                                    "contactName": "\(firstName) \(lastName)",
+                                    "category": category,
+                                    "subcategory": subcategory,
+                                    "description": description,
+                                    "website": website,
+                                    "professionalTitle": professionalTitle,
+                                    "yearsOfExperience": yearsOfExperience,
+                                    "professionalType": professionalType
+                                ]
+                                let didComplete = await auth.signUp(
+                                    email: email,
+                                    password: password,
+                                    firstName: firstName,
+                                    lastName: lastName,
+                                    role: role.rawValue,
+                                    profile: profile
+                                )
+                                if didComplete { onSignedIn() }
+                            } else {
+                                await auth.signIn(email: email, password: password)
+                                if auth.member != nil { onSignedIn() }
+                            }
+                        }
+                    } label: {
+                        HStack {
+                            Spacer()
+                            Label(isCreatingAccount ? "Créer mon compte" : "Se connecter",
+                                  systemImage: isCreatingAccount ? "person.badge.plus" : "lock.shield")
+                                .font(.headline)
+                            Spacer()
+                        }
+                    }
+                    .disabled(email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || password.isEmpty || auth.isSigningIn || (isCreatingAccount && !acceptedTerms))
+
+                    Button {
+                        isCreatingAccount.toggle()
+                        auth.errorMessage = nil
+                    } label: {
+                        Label(isCreatingAccount ? "J’ai déjà un compte : me connecter" : "Créer un compte", systemImage: "person.crop.circle.badge.plus")
+                    }
+                    .disabled(auth.isSigningIn)
+                } footer: {
+                    Text(isCreatingAccount
+                         ? "Votre compte est créé par l’authentification Wix sécurisée. Le mot de passe n’est pas conservé par l’application."
+                         : "La connexion passe par l’authentification Wix sécurisée. Le mot de passe n’est pas conservé par l’application.")
+                }
+            }
+            .navigationTitle("Accès à l’espace")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { Button("Fermer") { dismiss() } }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var roleRegistrationFields: some View {
+        switch role {
+        case .particulier:
+            TextField("Ville (facultatif)", text: $city).textContentType(.addressCity)
+            TextField("Code postal (facultatif)", text: $postalCode).keyboardType(.numberPad)
+        case .professionnel:
+            TextField("Société / réseau", text: $companyName)
+            Picker("Profil professionnel", selection: $professionalType) {
+                Text("Mandataire immobilier").tag("mandataire")
+                Text("Agence immobilière").tag("agency")
+            }
+            TextField("Activité", text: $category)
+            TextField("Ville", text: $city).textContentType(.addressCity)
+            TextField("Code postal", text: $postalCode).keyboardType(.numberPad)
+            TextField("Site internet (facultatif)", text: $website).keyboardType(.URL).textInputAutocapitalization(.never)
+        case .courtier:
+            TextField("Spécialité / titre professionnel", text: $professionalTitle)
+            TextField("Ville", text: $city).textContentType(.addressCity)
+            TextField("Années d’expérience (facultatif)", text: $yearsOfExperience).keyboardType(.numberPad)
+            TextField("Site internet (facultatif)", text: $website).keyboardType(.URL).textInputAutocapitalization(.never)
+        case .artisan, .diagnostiqueur, .prestataire:
+            TextField("Entreprise", text: $companyName)
+            if role == .artisan {
+                TextField("Activité artisanale", text: $subcategory)
+                TextField("Activité", text: $category).disabled(true).onAppear { category = "Artisan" }
+            } else if role == .diagnostiqueur {
+                TextField("Spécialité (DPE, amiante…)", text: $subcategory)
+                TextField("Activité", text: $category).disabled(true).onAppear { category = "Diagnostiqueur" }
+            } else {
+                TextField("Activité", text: $category)
+                TextField("Spécialité (facultatif)", text: $subcategory)
+            }
+            TextField("Ville", text: $city).textContentType(.addressCity)
+            TextField("Code postal", text: $postalCode).keyboardType(.numberPad)
+            TextField("Présentation (facultatif)", text: $description, axis: .vertical).lineLimit(3...6)
+            TextField("Site internet (facultatif)", text: $website).keyboardType(.URL).textInputAutocapitalization(.never)
+        case .hebergeur:
+            TextField("Nom de l’hébergement / activité", text: $companyName)
+            TextField("Présentation (facultatif)", text: $description, axis: .vertical).lineLimit(3...6)
+        }
+    }
+}
+
+private struct NativeRoleDashboardView: View {
+    @StateObject private var auth = WixAuthStore.shared
+    @StateObject private var referralService = ReferralService()
+    @StateObject private var professionalImportService = ProfessionalImportService()
+    @StateObject private var buyerSearchService = BuyerSearchService()
+    @State private var selectedItem: DashboardItemSelection?
+    @State private var selectedConversation: DashboardConversationSelection?
+    @State private var showReferralCenter = false
+    @State private var showImportCenter = false
+    @State private var showBuyerSearchForm = false
+    let role: AccountRole
+    let member: WixMember
+    let onSignOut: () -> Void
+    let onSwitchSpace: () -> Void
+
+    private var sections: [(String, String, [[String: Any]])] {
+        guard let data = auth.dashboardData else { return [] }
+        let keys: [(String, String, String)]
+        switch role {
+        case .particulier:
+            keys = [
+                ("Mes biens", "house", "properties"),
+                ("Mes petites annonces", "tag", "classifieds"),
+                ("Mes favoris", "heart", "favorites"),
+                ("Mes recherches", "magnifyingglass", "savedSearches"),
+                ("Matchings reçus", "sparkles", "buyerMatchings")
+            ]
+        case .professionnel:
+            keys = [("Mes biens", "house", "properties"), ("Mes matchings", "sparkles", "matchings"), ("Demandes reçues", "person.2", "demands"), ("Messages", "bubble.left.and.bubble.right", "messages")]
+        case .courtier:
+            keys = [("Messages", "bubble.left.and.bubble.right", "messages")]
+        case .artisan:
+            keys = [("Demandes d’intervention", "bubble.left.and.bubble.right", "messages")]
+        case .diagnostiqueur:
+            keys = [("Demandes de diagnostic", "doc.text.magnifyingglass", "messages")]
+        case .prestataire:
+            keys = [("Demandes et messages", "bubble.left.and.bubble.right", "messages")]
+        case .hebergeur:
+            keys = []
+        }
+        return keys.compactMap { title, icon, key in
+            guard let items = data[key] as? [[String: Any]] else { return nil }
+            return (title, icon, items)
+        }
+    }
+
+    private var profile: [String: Any]? { auth.dashboardData?["profile"] as? [String: Any] }
+
+    var body: some View {
+        List {
+            Section {
+                Label(role.title, systemImage: role.symbol)
+                    .font(.title3.bold())
+                LabeledContent("Compte connecté", value: member.loginEmail)
+                if member.loginEmailVerified == false {
+                    Label("Adresse e-mail à confirmer", systemImage: "exclamationmark.circle")
+                        .foregroundStyle(.orange)
+                }
+            }
+
+            if auth.isLoadingDashboard && auth.dashboardData == nil {
+                Section { HStack { Spacer(); ProgressView("Chargement de vos données Wix…"); Spacer() } }
+            } else if let error = auth.dashboardError {
+                Section("Données du compte") {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .font(.subheadline)
+                        .foregroundStyle(.orange)
+                    Button("Réessayer") { Task { await auth.loadDashboard(role: role.dashboardQueryRole) } }
+                }
+            } else if let data = auth.dashboardData {
+                Section("Vue d’ensemble") {
+                    DashboardOverview(data: data, role: role)
+                }
+                if let profile {
+                    Section("Mon profil") {
+                        NativeProfileShowcase(profile: profile, role: role)
+                        ForEach(Array(profileKeys(for: role).filter { profile[$0.1] != nil }.enumerated()), id: \.offset) { _, field in
+                            LabeledContent(field.0, value: display(profile[field.1]))
+                        }
+                    }
+                }
+                if role == .professionnel, let profile {
+                    Section("Abonnement professionnel") {
+                        let active = (profile["hasActiveSubscription"] as? Bool) == true
+                        Label(active ? "Abonnement actif" : display(profile["subscriptionStatus"]),
+                              systemImage: active ? "checkmark.seal.fill" : "creditcard")
+                            .foregroundStyle(active ? Color.green : Color.secondary)
+                        if profile["subscriptionStartDate"] != nil {
+                            LabeledContent("Début", value: display(profile["subscriptionStartDate"]))
+                        }
+                        if profile["subscriptionEndDate"] != nil {
+                            LabeledContent("Échéance", value: display(profile["subscriptionEndDate"]))
+                        }
+                        Text("Le statut affiché est synchronisé avec votre espace PartenaireFoyer. La gestion des paiements reste sécurisée par le service de paiement existant.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
+                if let account = data["account"] as? [String: Any],
+                   account["cguAccepted"] != nil || account["cgvAccepted"] != nil {
+                    Section("Documents du compte") {
+                        if account["cguAccepted"] != nil {
+                            LabeledContent("Conditions d’utilisation", value: display(account["cguAccepted"]))
+                        }
+                        if account["cgvAccepted"] != nil {
+                            LabeledContent("Conditions de vente", value: display(account["cgvAccepted"]))
+                        }
+                    }
+                }
+                ForEach(Array(sections.enumerated()), id: \.offset) { _, section in
+                    Section {
+                        if role == .particulier, section.0 == "Mes recherches" {
+                            Button { showBuyerSearchForm = true } label: {
+                                Label("Créer une recherche", systemImage: "plus.circle.fill")
+                                    .font(.headline)
+                            }
+                            if let message = buyerSearchService.statusMessage {
+                                Label(message, systemImage: "checkmark.circle.fill")
+                                    .font(.footnote).foregroundStyle(.green)
+                            }
+                            if let error = buyerSearchService.errorMessage {
+                                Label(error, systemImage: "exclamationmark.triangle")
+                                    .font(.footnote).foregroundStyle(.orange)
+                            }
+                        }
+                        if section.2.isEmpty {
+                            Text("Aucun élément pour le moment.")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(Array(section.2.enumerated()), id: \.offset) { index, item in
+                                WixDashboardItem(item: item, fallbackTitle: "Élément \(index + 1)") {
+                                        if role == .professionnel, section.0 == "Messages",
+                                           let conversationID = item["conversationId"] as? String,
+                                           !conversationID.isEmpty {
+                                            selectedConversation = DashboardConversationSelection(id: conversationID, preview: item)
+                                        } else {
+                                            selectedItem = DashboardItemSelection(item: item)
+                                        }
+                                }
+                                .swipeActions {
+                                    if role == .particulier, section.0 == "Mes recherches",
+                                       let searchID = (item["_id"] as? String) ?? (item["id"] as? String) {
+                                        Button("Désactiver", role: .destructive) {
+                                            Task { await buyerSearchService.deactivate(searchID: searchID) }
+                                        }
+                                    }
+                                    if [.courtier, .artisan, .diagnostiqueur, .prestataire].contains(role),
+                                       section.0.contains("Messages") || section.0.contains("Demandes"),
+                                       let messageID = (item["_id"] as? String) ?? (item["id"] as? String),
+                                       item["isRead"] as? Bool != true {
+                                        Button("Marquer comme lu", systemImage: "envelope.open") {
+                                            Task { await auth.markInquiryRead(role: role.rawValue, messageID: messageID) }
+                                        }
+                                        .tint(.teal)
+                                    }
+                                }
+                            }
+                        }
+                    } header: {
+                        let unread = section.2.filter { $0["isRead"] as? Bool == false }.count
+                        Label(unread > 0 ? "\(section.0) (\(section.2.count) · \(unread) non lus)" : "\(section.0) (\(section.2.count))",
+                              systemImage: section.1)
+                    }
+                }
+                if role == .professionnel {
+                    Section("Mes annonces importées") {
+                        Button { showImportCenter = true } label: {
+                            Label("Gérer les imports de mon réseau", systemImage: "arrow.down.doc")
+                        }
+                        Text("Autorisation de republication, import automatique et visibilité des biens.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                    Section("Développer mon réseau") {
+                        Button {
+                            showReferralCenter = true
+                        } label: {
+                            Label("Parrainage de mandataires", systemImage: "person.3.sequence.fill")
+                        }
+                        Text("Consultez les candidatures, attribuez un contact ou recommandez un futur mandataire.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
+                if role == .hebergeur {
+                    Section("Mon activité") {
+                        Text("Votre fiche hébergeur est reliée à Wix. Les réservations apparaîtront ici lorsque la collection correspondante sera associée à ce compte.")
+                            .font(.subheadline).foregroundStyle(.secondary)
+                    }
+                }
+                if data["profile"] is NSNull {
+                    Section("Profil métier") {
+                        Text("Le compte est reconnu, mais aucune fiche de profil correspondante n’a été trouvée dans Wix.")
+                            .font(.subheadline).foregroundStyle(.orange)
+                    }
+                }
+            }
+
+            Section {
+                Button(action: onSwitchSpace) {
+                    Label("Changer d’espace", systemImage: "person.2")
+                }
+                Button(role: .destructive, action: onSignOut) {
+                    Label("Se déconnecter", systemImage: "rectangle.portrait.and.arrow.right")
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .navigationTitle("Tableau de bord")
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $selectedItem) { selection in
+            NavigationStack {
+                DashboardItemDetailView(item: selection.item)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Fermer") { selectedItem = nil }
+                        }
+                    }
+            }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $selectedConversation) { selection in
+            NavigationStack {
+                NativeProfessionalConversationView(
+                    conversationID: selection.id,
+                    preview: selection.preview,
+                    professionalID: (auth.dashboardData?["profile"] as? [String: Any])?["_id"] as? String ?? ""
+                )
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Fermer") { selectedConversation = nil }
+                    }
+                }
+            }
+        }
+        .sheet(isPresented: $showReferralCenter) {
+            NavigationStack {
+                ReferralCenterView(service: referralService)
+            }
+        }
+        .sheet(isPresented: $showBuyerSearchForm) {
+            NavigationStack {
+                NativeBuyerSearchForm(service: buyerSearchService)
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showImportCenter) {
+            NavigationStack {
+                ProfessionalImportCenterView(service: professionalImportService)
+            }
+        }
+        .refreshable { await auth.loadDashboard(role: role.dashboardQueryRole) }
+        .task(id: role.rawValue) {
+            await auth.loadDashboard(role: role.dashboardQueryRole)
+            await auth.registerPushDevice(role: role.rawValue)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .partenaireFoyerFCMTokenDidChange)) { _ in
+            Task { await auth.registerPushDevice(role: role.rawValue) }
+        }
+    }
+
+    private func profileKeys(for role: AccountRole) -> [(String, String)] {
+        switch role {
+        case .particulier: [("Prénom", "firstName"), ("Nom", "lastName"), ("Ville", "city"), ("Téléphone", "phone")]
+        case .professionnel: [("Société", "companyName"), ("Contact", "contactName"), ("Ville", "city"), ("Code postal", "postalCode"), ("Téléphone", "phoneNumber"), ("Type d’activité", "professionalType"), ("Catégories", "categories"), ("Visible publiquement", "isVisiblePublicly")]
+        case .courtier: [("Nom", "fullName"), ("Titre", "professionalTitle"), ("Ville", "city"), ("Téléphone", "phoneNumber"), ("Expérience (ans)", "yearsOfExperience")]
+        case .artisan, .diagnostiqueur, .prestataire: [("Entreprise", "businessName"), ("Activité", "category"), ("Spécialité", "subcategory"), ("Ville", "city"), ("Code postal", "postalCode"), ("Téléphone", "phone"), ("Vérifié", "verified"), ("Statut", "status")]
+        case .hebergeur: [("Nom", "fullName"), ("Téléphone", "phoneNumber"), ("Vérifié", "isVerified")]
+        }
+    }
+
+    private func display(_ value: Any?) -> String {
+        guard let value, !(value is NSNull) else { return "—" }
+        if let flag = value as? Bool { return flag ? "Oui" : "Non" }
+        if let values = value as? [String] { return values.joined(separator: ", ") }
+        if let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() { return number.boolValue ? "Oui" : "Non" }
+        return String(describing: value)
+    }
+}
+
+private struct DashboardConversationSelection: Identifiable {
+    let id: String
+    let preview: [String: Any]
+}
+
+private struct NativeProfessionalConversationView: View {
+    @StateObject private var auth = WixAuthStore.shared
+    @State private var messages: [[String: Any]] = []
+    @State private var error: String?
+    @State private var sendError: String?
+    @State private var composerText = ""
+    @State private var isLoading = false
+    @State private var isSending = false
+    let conversationID: String
+    let preview: [String: Any]
+    let professionalID: String
+
+    private var contactName: String {
+        [preview["senderName"] as? String, preview["senderEmail"] as? String]
+            .compactMap { $0 }.first(where: { !$0.isEmpty }) ?? "Votre contact"
+    }
+
+    var body: some View {
+        Group {
+            if isLoading && messages.isEmpty {
+                ProgressView("Chargement de la conversation…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let error, messages.isEmpty {
+                ContentUnavailableView {
+                    Label("Conversation indisponible", systemImage: "bubble.left.and.exclamationmark.bubble.right")
+                } description: {
+                    Text(error)
+                } actions: {
+                    Button("Réessayer") { Task { await reload() } }
+                        .buttonStyle(.borderedProminent)
+                }
+            } else if messages.isEmpty {
+                ContentUnavailableView("Aucun message", systemImage: "bubble.left.and.bubble.right")
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(spacing: 12) {
+                            ForEach(Array(messages.enumerated()), id: \.offset) { index, message in
+                                let outgoing = (message["senderId"] as? String) == professionalID
+                                HStack {
+                                    if outgoing { Spacer(minLength: 42) }
+                                    VStack(alignment: .leading, spacing: 5) {
+                                        Text((message["content"] as? String) ?? "")
+                                            .font(.body).textSelection(.enabled)
+                                        if let date = message["createdAt"] as? String, !date.isEmpty {
+                                            Text(date).font(.caption2).foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    .padding(12)
+                                    .background(outgoing ? Color.teal.opacity(0.14) : Color(uiColor: .secondarySystemGroupedBackground),
+                                                in: RoundedRectangle(cornerRadius: 16))
+                                    if !outgoing { Spacer(minLength: 42) }
+                                }
+                                .id(index)
+                            }
+                        }
+                        .padding(16)
+                    }
+                    .refreshable { await reload() }
+                    .onChange(of: messages.count) { _, count in
+                        if count > 0 { proxy.scrollTo(count - 1, anchor: .bottom) }
+                    }
+                }
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            VStack(spacing: 6) {
+                HStack(alignment: .bottom, spacing: 10) {
+                    TextField("Écrire un message…", text: $composerText, axis: .vertical)
+                        .lineLimit(1...4)
+                        .padding(.horizontal, 13).padding(.vertical, 10)
+                        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20))
+                        .accessibilityLabel("Votre message")
+                    Button {
+                        Task { await sendMessage() }
+                    } label: {
+                        if isSending { ProgressView() }
+                        else { Image(systemName: "arrow.up.circle.fill").font(.system(size: 34)) }
+                    }
+                    .disabled(isSending || composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityLabel("Envoyer le message")
+                }
+                .padding(.horizontal).padding(.top, 8)
+                if let email = preview["senderEmail"] as? String,
+                   let url = URL(string: "mailto:\(email)") {
+                    Link("Contacter aussi par e-mail", destination: url)
+                        .font(.caption).padding(.bottom, 5)
+                }
+            }
+            .background(.bar)
+        }
+        .navigationTitle(contactName)
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await reload() }
+        .alert("Envoi impossible", isPresented: Binding(
+            get: { sendError != nil },
+            set: { if !$0 { sendError = nil } }
+        )) {
+            Button("OK", role: .cancel) { sendError = nil }
+        } message: {
+            Text(sendError ?? "Réessayez dans un instant.")
+        }
+    }
+
+    @MainActor
+    private func reload() async {
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            let loaded = try await auth.loadProfessionalConversation(id: conversationID)
+            messages = loaded
+            error = nil
+            do {
+                try await auth.markProfessionalConversationRead(conversationID: conversationID)
+                messages = messages.map { message in
+                    var updated = message
+                    if (updated["receiverId"] as? String) == professionalID {
+                        updated["isRead"] = true
+                        updated["seen"] = true
+                    }
+                    return updated
+                }
+            } catch {
+                // Keep the thread readable even if Wix declines the optional read receipt.
+            }
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func sendMessage() async {
+        let content = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !content.isEmpty, !isSending else { return }
+        isSending = true
+        defer { isSending = false }
+        do {
+            let sent = try await auth.sendProfessionalMessage(conversationID: conversationID, content: content)
+            messages.append(sent)
+            composerText = ""
+        } catch {
+            sendError = error.localizedDescription
+        }
+    }
+}
+
 private struct DashboardOverview: View {
     let data: [String: Any]
     let role: AccountRole
@@ -862,7 +1967,7 @@ private struct DashboardOverview: View {
         case .prestataire:
             [("Contacts", "messages", "person.2.fill")]
         case .hebergeur:
-            [("Réservations", "reservations", "bed.double.fill")]
+            []
         }
     }
 
