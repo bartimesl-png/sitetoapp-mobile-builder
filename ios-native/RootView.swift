@@ -3351,6 +3351,144 @@ private struct NativeProfessionalPropertyForm: View {
     }
 }
 
+private struct NativeSeasonalRateForm: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var accommodationID: String
+    @State private var seasonName: String
+    @State private var startDate: Date
+    @State private var endDate: Date
+    @State private var pricePerNight: String
+    @State private var minimumStayNights: Int
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+
+    let accommodations: [[String: Any]]
+    let initialRate: [String: Any]?
+    let onSaved: () -> Void
+
+    init(accommodations: [[String: Any]], initialRate: [String: Any]?, onSaved: @escaping () -> Void) {
+        self.accommodations = accommodations
+        self.initialRate = initialRate
+        self.onSaved = onSaved
+        let firstID = (accommodations.first?["_id"] as? String) ?? (accommodations.first?["id"] as? String) ?? ""
+        _accommodationID = State(initialValue: (initialRate?["accommodationId"] as? String) ?? firstID)
+        _seasonName = State(initialValue: (initialRate?["seasonName"] as? String) ?? "")
+        _startDate = State(initialValue: Self.parseDate(initialRate?["startDate"] as? String) ?? Calendar.current.startOfDay(for: .now))
+        _endDate = State(initialValue: Self.parseDate(initialRate?["endDate"] as? String) ?? Calendar.current.date(byAdding: .month, value: 3, to: Calendar.current.startOfDay(for: .now)) ?? .now)
+        let existingPrice = initialRate?["pricePerNight"].map { String(describing: $0) } ?? ""
+        _pricePerNight = State(initialValue: existingPrice)
+        _minimumStayNights = State(initialValue: (initialRate?["minimumStayNights"] as? Int) ?? 1)
+    }
+
+    private var title: String { initialRate == nil ? "Nouveau tarif saisonnier" : "Modifier le tarif" }
+    private var parsedPrice: Double? {
+        Double(pricePerNight.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: ",", with: "."))
+    }
+    private var canSave: Bool {
+        !accommodationID.isEmpty && seasonName.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 &&
+        startDate <= endDate && (parsedPrice ?? 0) > 0 && (parsedPrice ?? .infinity) <= 100_000
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                Label(title, systemImage: "eurosign.circle")
+                    .font(.title3.bold())
+                Text("Définissez la période et les conditions de séjour pour un de vos hébergements.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            Section("Hébergement et saison") {
+                if accommodations.isEmpty {
+                    ContentUnavailableView("Aucun hébergement", systemImage: "house", description: Text("Créez d’abord un hébergement dans votre espace."))
+                } else {
+                    Picker("Hébergement", selection: $accommodationID) {
+                        ForEach(Array(accommodations.enumerated()), id: \.offset) { _, item in
+                            let id = (item["_id"] as? String) ?? (item["id"] as? String) ?? ""
+                            Text((item["itemName"] as? String) ?? "Hébergement").tag(id)
+                        }
+                    }
+                    .disabled(initialRate != nil)
+                    TextField("Nom de la saison", text: $seasonName)
+                        .textInputAutocapitalization(.words)
+                }
+            }
+            Section("Période") {
+                DatePicker("Du", selection: $startDate, displayedComponents: .date)
+                DatePicker("Au", selection: $endDate, in: startDate..., displayedComponents: .date)
+                    .onChange(of: startDate) { _, newStartDate in
+                        if endDate < newStartDate { endDate = newStartDate }
+                    }
+            }
+            Section("Conditions") {
+                TextField("Prix par nuit (€)", text: $pricePerNight).keyboardType(.decimalPad)
+                Stepper("Séjour minimum : \(minimumStayNights) nuit\(minimumStayNights > 1 ? "s" : "")", value: $minimumStayNights, in: 1...365)
+            }
+            if let errorMessage {
+                Section("Enregistrement impossible") {
+                    Text(errorMessage).font(.footnote).foregroundStyle(.red)
+                }
+            }
+            Section {
+                Button {
+                    Task { await save() }
+                } label: {
+                    HStack {
+                        Spacer()
+                        if isSaving { ProgressView("Enregistrement…") }
+                        else { Label("Enregistrer le tarif", systemImage: "checkmark.circle.fill") }
+                        Spacer()
+                    }
+                }
+                .disabled(!canSave || isSaving || accommodations.isEmpty)
+            }
+        }
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fermer") { dismiss() } } }
+    }
+
+    private static func parseDate(_ value: String?) -> Date? {
+        guard let value else { return nil }
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.date(from: String(value.prefix(10)))
+    }
+
+    private func formattedDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
+
+    @MainActor private func save() async {
+        guard canSave, let parsedPrice else { return }
+        isSaving = true
+        errorMessage = nil
+        defer { isSaving = false }
+        do {
+            try await WixAuthStore.shared.saveSeasonalRate(
+                rateID: (initialRate?["_id"] as? String) ?? (initialRate?["id"] as? String),
+                accommodationID: accommodationID,
+                seasonName: seasonName,
+                startDate: formattedDate(startDate),
+                endDate: formattedDate(endDate),
+                pricePerNight: parsedPrice,
+                minimumStayNights: minimumStayNights
+            )
+            onSaved()
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+
 private struct NativeSpacePickerView: View {
     @State private var selectedRole: AccountRole?
     @StateObject private var auth = WixAuthStore.shared
@@ -3990,6 +4128,8 @@ private struct NativeRoleDashboardView: View {
     @State private var showProfessionalPropertyForm = false
     @State private var showPrivatePropertyForm = false
     @State private var showClassifiedAdForm = false
+    @State private var showSeasonalRateForm = false
+    @State private var editingSeasonalRate: [String: Any]?
     @State private var showProfileEditor = false
     @State private var showMiniSitePreview = false
     @State private var editingBuyerSearch: [String: Any]?
@@ -4225,6 +4365,15 @@ private struct NativeRoleDashboardView: View {
                                     .font(.footnote).foregroundStyle(.orange)
                             }
                         }
+                        if role == .hebergeur, section.0 == "Tarifs saisonniers" {
+                            Button {
+                                editingSeasonalRate = nil
+                                showSeasonalRateForm = true
+                            } label: {
+                                Label("Ajouter un tarif saisonnier", systemImage: "plus.circle.fill")
+                                    .font(.headline)
+                            }
+                        }
                         if section.2.isEmpty {
                             Text("Aucun élément pour le moment.")
                                 .foregroundStyle(.secondary)
@@ -4242,6 +4391,9 @@ private struct NativeRoleDashboardView: View {
                                                   let conversationID = (item["_id"] as? String) ?? (item["id"] as? String),
                                                   !conversationID.isEmpty {
                                             selectedConversation = DashboardConversationSelection(id: conversationID, preview: item)
+                                        } else if role == .hebergeur, section.0 == "Tarifs saisonniers" {
+                                            editingSeasonalRate = item
+                                            showSeasonalRateForm = true
                                         } else {
                                             let list: String?
                                             if section.0 == "Mes biens" && [.particulier, .professionnel].contains(role) {
@@ -4338,6 +4490,13 @@ private struct NativeRoleDashboardView: View {
                                             pendingHostBookingRequest = requestID
                                             showHostBookingHideConfirmation = true
                                         }
+                                    }
+                                    if role == .hebergeur, section.0 == "Tarifs saisonniers" {
+                                        Button("Modifier", systemImage: "pencil") {
+                                            editingSeasonalRate = item
+                                            showSeasonalRateForm = true
+                                        }
+                                        .tint(.blue)
                                     }
                                     if [.courtier, .artisan, .diagnostiqueur, .prestataire].contains(role),
                                        section.0.contains("Messages") || section.0.contains("Demandes"),
@@ -4571,6 +4730,19 @@ private struct NativeRoleDashboardView: View {
             NavigationStack {
                 ProfessionalImportCenterView(service: professionalImportService)
             }
+        }
+        .sheet(isPresented: $showSeasonalRateForm) {
+            NavigationStack {
+                NativeSeasonalRateForm(
+                    accommodations: auth.dashboardData?["accommodations"] as? [[String: Any]] ?? [],
+                    initialRate: editingSeasonalRate
+                ) {
+                    showSeasonalRateForm = false
+                    editingSeasonalRate = nil
+                }
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
         }
         .refreshable { await auth.loadDashboard(role: role.dashboardQueryRole) }
         .task(id: role.rawValue) {

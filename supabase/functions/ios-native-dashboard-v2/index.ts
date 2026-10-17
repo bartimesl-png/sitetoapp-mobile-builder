@@ -697,6 +697,68 @@ Deno.serve(async (req: Request) => {
         return response({ success: true, requestId, hiddenByHost: true });
       }
 
+      if (body.action === "save_seasonal_rate") {
+        if (role !== "hebergeur") return response({ error: "Cette action est réservée à l’espace hébergeur." }, 403);
+        const accommodationId = String(body.accommodationId ?? "").trim();
+        const rateId = String(body.rateId ?? "").trim();
+        const seasonName = String(body.seasonName ?? "").trim();
+        const startDate = String(body.startDate ?? "").trim();
+        const endDate = String(body.endDate ?? "").trim();
+        const pricePerNight = Number(body.pricePerNight);
+        const minimumStayNights = Number(body.minimumStayNights);
+        const dateIsValid = (value: string) => {
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+          const date = new Date(`${value}T00:00:00.000Z`);
+          return !Number.isNaN(date.valueOf()) && date.toISOString().slice(0, 10) === value;
+        };
+        if (!/^[A-Za-z0-9_-]{1,160}$/.test(accommodationId) ||
+            (rateId && !/^[A-Za-z0-9_-]{1,160}$/.test(rateId)) ||
+            seasonName.length < 2 || seasonName.length > 80 ||
+            !dateIsValid(startDate) || !dateIsValid(endDate) || startDate > endDate ||
+            !Number.isFinite(pricePerNight) || pricePerNight <= 0 || pricePerNight > 100_000 ||
+            !Number.isInteger(minimumStayNights) || minimumStayNights < 1 || minimumStayNights > 365) {
+          return response({ error: "Vérifiez le nom, les dates et les critères du tarif." }, 400);
+        }
+
+        const dashboard = await loadDashboard(role, email, result.member.id, token);
+        const accommodations = (dashboard?.accommodations as Record<string, unknown>[] | undefined) ?? [];
+        if (!accommodations.some((item) => String(item._id ?? item.id ?? "") === accommodationId)) {
+          return response({ error: "Cet hébergement n’appartient pas à votre espace." }, 403);
+        }
+        const data = { accommodationId, seasonName, startDate, endDate, pricePerNight, minimumStayNights };
+        const rates = (dashboard?.seasonalRates as Record<string, unknown>[] | undefined) ?? [];
+        const overlappingRate = rates.find((item) => {
+          if (String(item.accommodationId ?? "") !== accommodationId || String(item._id ?? item.id ?? "") === rateId) return false;
+          const existingStart = String(item.startDate ?? "").slice(0, 10);
+          const existingEnd = String(item.endDate ?? "").slice(0, 10);
+          return existingStart && existingEnd && startDate <= existingEnd && endDate >= existingStart;
+        });
+        if (overlappingRate) return response({ error: "Cette période chevauche déjà un autre tarif de cet hébergement." }, 409);
+        if (rateId) {
+          const current = rates.find((item) => String(item._id ?? item.id ?? "") === rateId);
+          if (!current || String(current.accommodationId ?? "") !== accommodationId) {
+            return response({ error: "Ce tarif n’est pas associé à cet hébergement." }, 403);
+          }
+          await wixRequest(`/wix-data/v2/items/${encodeURIComponent(rateId)}`, token, {
+            method: "PATCH",
+            body: JSON.stringify({ dataCollectionId: "seasonalrates", patch: {
+              dataItemId: rateId,
+              fieldModifications: Object.entries(data).map(([fieldPath, value]) => ({
+                fieldPath, action: "SET_FIELD", setFieldOptions: { value },
+              })),
+            } }),
+          });
+          return response({ success: true, rateId, accommodationId });
+        }
+        const inserted = await wixRequest<{ dataItem?: WixItem }>("/wix-data/v2/items", token, {
+          method: "POST",
+          body: JSON.stringify({ dataCollectionId: "seasonalrates", dataItem: { data } }),
+        });
+        const createdId = String(inserted.dataItem?.id ?? inserted.dataItem?.data?._id ?? "");
+        if (!createdId) return response({ error: "Wix n’a pas confirmé la création du tarif." }, 502);
+        return response({ success: true, rateId: createdId, accommodationId });
+      }
+
       if (body.action === "mark_minisite_request_processed") {
         if (role !== "professionnel") return response({ error: "Cette action est réservée à l’espace professionnel." }, 403);
         const requestId = String(body.requestId ?? "").trim();

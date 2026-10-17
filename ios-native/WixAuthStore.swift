@@ -810,6 +810,31 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         }
     }
 
+    func saveSeasonalRate(rateID: String?, accommodationID: String, seasonName: String, startDate: String, endDate: String, pricePerNight: Double, minimumStayNights: Int) async throws {
+        let cleanAccommodationID = accommodationID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanRateID = rateID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanName = seasonName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanAccommodationID.isEmpty, cleanName.count >= 2,
+              startDate.range(of: "^\\d{4}-\\d{2}-\\d{2}$", options: .regularExpression) != nil,
+              endDate.range(of: "^\\d{4}-\\d{2}-\\d{2}$", options: .regularExpression) != nil,
+              startDate <= endDate, pricePerNight > 0, pricePerNight <= 100_000,
+              (1...365).contains(minimumStayNights) else {
+            throw AuthError.api("Vérifiez le nom, les dates et les critères du tarif.")
+        }
+        var payload: [String: Any] = [
+            "action": "save_seasonal_rate", "role": "hebergeur",
+            "accommodationId": cleanAccommodationID,
+            "seasonName": cleanName,
+            "startDate": startDate,
+            "endDate": endDate,
+            "pricePerNight": pricePerNight,
+            "minimumStayNights": minimumStayNights,
+        ]
+        if let cleanRateID, !cleanRateID.isEmpty { payload["rateId"] = cleanRateID }
+        try await sendDashboardAction(payload, fallback: "Impossible d’enregistrer ce tarif.")
+        await loadDashboard(role: "hebergeur")
+    }
+
     func markMinisiteRequestProcessed(requestID: String) async {
         errorMessage = nil
         let cleanID = requestID.trimmingCharacters(in: .whitespacesAndNewlines)
