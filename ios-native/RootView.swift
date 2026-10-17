@@ -449,9 +449,22 @@ private struct NativeFavoritesView: View {
             .navigationDestination(for: Listing.self) { ListingDetailView(listing: $0) }
             .navigationDestination(for: ClassifiedAd.self) { NativeClassifiedAdDetailView(ad: $0) }
             .navigationTitle("Favoris")
+            .safeAreaInset(edge: .bottom) {
+                if let message = favorites.syncMessage {
+                    Text(message)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 8)
+                        .background(.bar)
+                }
+            }
             .task {
                 await service.loadIfNeeded()
                 await classifiedAds.loadIfNeeded()
+                favorites.inferSources(listings: service.listings, ads: classifiedAds.ads)
+                await favorites.syncFromWix()
             }
         }
     }
@@ -1136,6 +1149,11 @@ private struct NativeSpacePickerView: View {
             }
             .navigationTitle("Mon espace")
             .navigationBarTitleDisplayMode(.inline)
+            .task(id: activeRoleRaw) {
+                guard activeRoleRaw == AccountRole.particulier.rawValue,
+                      auth.member != nil else { return }
+                await FavoritesStore.shared.syncFromWix()
+            }
             .sheet(item: $selectedRole) { role in
                 RoleEntryView(role: role) {
                     activeRoleRaw = role.rawValue
