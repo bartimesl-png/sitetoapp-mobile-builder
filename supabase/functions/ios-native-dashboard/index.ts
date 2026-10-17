@@ -52,7 +52,7 @@ async function query(
 const first = (items: Record<string, unknown>[]) => items[0] ?? null;
 const emailFilter = (email: string) => ({ email: { $eq: email } });
 
-async function loadDashboard(role: string, email: string, token: string) {
+async function loadDashboard(role: string, email: string, memberID: string, token: string) {
   if (role === "particulier") {
     const account = first(await query("privateaccounts", emailFilter(email), ["email", "accountType", "isActive"], token, 2));
     if (!account || account.isActive === false) return null;
@@ -79,7 +79,10 @@ async function loadDashboard(role: string, email: string, token: string) {
     if (!profile) return { role, account: accountSummary, profile: null, properties: [], matchings: [], messages: [] };
     const professionalId = String(profile._id ?? "");
     const [properties, matchings, demands, messages] = await Promise.all([
-      query("biensprofessionnels", { professionalId: { $eq: professionalId } }, ["professionalId", "title", "description", "propertyType", "transactionType", "price", "surface", "surfaceLand", "landSurface", "rooms", "bedrooms", "bathrooms", "city", "postalCode", "mainImageUrl", "galleryImages", "status", "commercialStatus", "updatedAt"], token),
+      // Public Wix listings are linked to the Wix member identity, not the
+      // separate prosprofiles item ID. Using professionalId here returned an
+      // empty property list for otherwise active professional accounts.
+      query("biensprofessionnels", { wixMemberId: { $eq: memberID } }, ["wixMemberId", "professionalId", "title", "description", "propertyType", "transactionType", "price", "surface", "surfaceLand", "landSurface", "rooms", "bedrooms", "bathrooms", "city", "postalCode", "mainImageUrl", "galleryImages", "status", "commercialStatus", "updatedAt"], token),
       query("matchings", { professionalId: { $eq: professionalId } }, ["professionalId", "propertyId", "acquereurId", "matchingScore", "matchingType", "status", "seen", "createdAt"], token),
       query("demandespromatchings", { proId: { $eq: professionalId } }, ["proId", "demandId", "demandType", "postalCode", "status", "seen", "isViewed", "createdAt"], token),
       query("messages", { receiverId: { $eq: professionalId } }, ["conversationId", "senderId", "receiverId", "content", "createdAt", "isRead", "readAt"], token),
@@ -138,7 +141,7 @@ Deno.serve(async (req: Request) => {
     if (!result.member?.id || !email || result.member.loginEmailVerified === false) {
       return response({ error: "Le compte Wix n’est pas vérifié." }, 403);
     }
-    const dashboard = await loadDashboard(role, email, token);
+    const dashboard = await loadDashboard(role, email, result.member.id, token);
     if (!dashboard) return response({ error: "Aucun compte actif de ce type n’est associé à cette adresse e-mail." }, 403);
     return response({ success: true, member: { id: result.member.id, email }, dashboard });
   } catch (error) {
