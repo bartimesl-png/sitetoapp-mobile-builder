@@ -293,6 +293,90 @@ private struct ProfessionalDetailView: View {
     }
 }
 
+private struct PrivatePropertyContactForm: View {
+    @Environment(\.dismiss) private var dismiss
+    @StateObject private var auth = WixAuthStore.shared
+    let listing: Listing
+    @State private var firstName = ""
+    @State private var lastName = ""
+    @State private var phone = ""
+    @State private var message = ""
+    @State private var isSending = false
+    @State private var didSend = false
+    @State private var errorMessage: String?
+
+    private var canSend: Bool {
+        auth.member?.loginEmailVerified != false && auth.member != nil &&
+        firstName.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 &&
+        lastName.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 &&
+        message.trimmingCharacters(in: .whitespacesAndNewlines).count >= 5
+    }
+
+    var body: some View {
+        Form {
+            Section("Annonce") {
+                Text(listing.title ?? "Annonce immobilière").font(.headline)
+                if !listing.locationLabel.isEmpty { Label(listing.locationLabel, systemImage: "mappin.and.ellipse") }
+                Text("Votre adresse e-mail vérifiée sera utilisée pour permettre au propriétaire de vous répondre. Elle ne sera pas affichée dans l’annonce.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            if let member = auth.member {
+                Section("Vos coordonnées") {
+                    TextField("Prénom", text: $firstName).textContentType(.givenName)
+                    TextField("Nom", text: $lastName).textContentType(.familyName)
+                    LabeledContent("E-mail", value: member.loginEmail)
+                    TextField("Téléphone (facultatif)", text: $phone)
+                        .textContentType(.telephoneNumber).keyboardType(.phonePad)
+                }
+            } else {
+                Section {
+                    Label("Connectez-vous depuis l’onglet Menu avec une adresse vérifiée pour envoyer un message.", systemImage: "person.crop.circle.badge.exclamationmark")
+                        .font(.footnote).foregroundStyle(.orange)
+                }
+            }
+            Section("Votre message") {
+                TextField("Écrivez au propriétaire…", text: $message, axis: .vertical).lineLimit(4...8)
+            }
+            if let errorMessage {
+                Section("Envoi impossible") { Text(errorMessage).foregroundStyle(.red).font(.footnote) }
+            }
+            if didSend {
+                Section { Label("Votre message a été envoyé au propriétaire.", systemImage: "checkmark.circle.fill").foregroundStyle(.green) }
+            }
+            Section {
+                Button { Task { await send() } } label: {
+                    HStack { Spacer(); if isSending { ProgressView("Envoi…") } else { Label("Envoyer au propriétaire", systemImage: "paperplane.fill") }; Spacer() }
+                }
+                .buttonStyle(.borderedProminent).tint(.teal)
+                .disabled(!canSend || isSending || didSend)
+            }
+        }
+        .navigationTitle("Contacter le propriétaire")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { ToolbarItem(placement: .topBarTrailing) { Button(didSend ? "Terminé" : "Fermer") { dismiss() } } }
+        .task {
+            if let member = auth.member {
+                if firstName.isEmpty { firstName = member.firstName ?? "" }
+                if lastName.isEmpty { lastName = member.lastName ?? "" }
+            }
+        }
+    }
+
+    @MainActor private func send() async {
+        guard canSend, !isSending, let id = listing.id.split(separator: "-", maxSplits: 2).last.map(String.init) else { return }
+        isSending = true
+        errorMessage = nil
+        defer { isSending = false }
+        do {
+            try await auth.submitPrivatePropertyContactRequest(
+                listingID: id, firstName: firstName, lastName: lastName,
+                phone: phone, message: message
+            )
+            didSend = true
+        } catch { errorMessage = error.localizedDescription }
+    }
+}
+
 private struct ProfessionalMinisiteRequestForm: View {
     @Environment(\.dismiss) private var dismiss
     let professional: WixPublicProfessional
@@ -1747,6 +1831,7 @@ private struct ListingDetailView: View {
     @ObservedObject private var favorites = FavoritesStore.shared
     @State private var showImportedContact = false
     @State private var showProfessionalContact = false
+    @State private var showPrivateOwnerContact = false
 
     private var linkedProfessional: WixPublicProfessional? {
         guard let profileID = listing.professionalID, !profileID.isEmpty else { return nil }
@@ -1885,6 +1970,16 @@ private struct ListingDetailView: View {
                         .presentationDragIndicator(.visible)
                     }
                 }
+                if listing.id.hasPrefix("wix-private-") {
+                    Button { showPrivateOwnerContact = true } label: {
+                        Label("Contacter le propriétaire", systemImage: "envelope.badge")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 15)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color(red: 0.02, green: 0.38, blue: 0.34))
+                }
             }
             .padding(18)
         }
@@ -1897,6 +1992,11 @@ private struct ListingDetailView: View {
             }
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showPrivateOwnerContact) {
+            NavigationStack { PrivatePropertyContactForm(listing: listing) }
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
         }
         .task { await professionalsService.loadIfNeeded() }
     }

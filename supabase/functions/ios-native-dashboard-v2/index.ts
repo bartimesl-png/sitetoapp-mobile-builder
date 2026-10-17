@@ -512,6 +512,52 @@ Deno.serve(async (req: Request) => {
       return response({ error: "Le compte Wix n’est pas vérifié." }, 403);
     }
     if (req.method === "POST") {
+      if (body.action === "contact_private_property_owner") {
+        const propertyId = String(body.propertyId ?? "").trim();
+        const firstName = String(body.firstName ?? "").trim().slice(0, 80);
+        const lastName = String(body.lastName ?? "").trim().slice(0, 80);
+        const phone = String(body.phone ?? "").trim().slice(0, 40);
+        const message = String(body.message ?? "").trim().slice(0, 4000);
+        if (!/^[A-Za-z0-9_-]{1,160}$/.test(propertyId) || firstName.length < 2 || lastName.length < 2 ||
+            message.length < 5 || phone.length > 40) {
+          return response({ error: "Vérifiez vos coordonnées et votre message." }, 400);
+        }
+        const property = first(await query("privateproperties", {
+          _id: { $eq: propertyId }, isPublic: { $eq: true }, status: { $eq: "active" },
+        }, ["ownerId", "title", "slug"], token, 2));
+        const ownerId = String(property?.ownerId ?? "");
+        if (!property || !ownerId) return response({ error: "Cette annonce n’est plus disponible." }, 404);
+        const [accounts, profiles] = await Promise.all([
+          query("privateaccounts", { _id: { $eq: ownerId } }, ["email", "isActive"], token, 2),
+          query("privateprofiles", { ownerId: { $eq: ownerId } }, ["email", "firstName", "lastName"], token, 2),
+        ]);
+        const account = first(accounts);
+        const profile = first(profiles);
+        const recipientEmail = String(profile?.email ?? account?.email ?? "").trim();
+        if (!account || account.isActive === false || !recipientEmail.includes("@")) {
+          return response({ error: "Le propriétaire ne peut pas être contacté pour le moment." }, 409);
+        }
+        if (recipientEmail.toLowerCase() === email.toLowerCase()) {
+          return response({ error: "Vous ne pouvez pas contacter votre propre annonce." }, 400);
+        }
+        const escapeHtml = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;").replace(/\"/g, "&quot;").replace(/'/g, "&#39;");
+        const safeName = `${escapeHtml(firstName)} ${escapeHtml(lastName)}`;
+        const safeTitle = escapeHtml(String(property.title ?? "Annonce immobilière"));
+        const safeMessage = escapeHtml(message).replace(/\n/g, "<br>");
+        const propertyURL = `https://www.partenairefoyer.com/annonce/${encodeURIComponent(propertyId)}`;
+        const emailResponse = await fetch("https://www.partenairefoyer.com/api/send-contact-email", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({
+            recipientEmail, recipientName: escapeHtml(String(profile?.firstName ?? "Propriétaire")),
+            propertyTitle: safeTitle, propertyUrl: propertyURL, senderName: safeName,
+            senderEmail: escapeHtml(email), senderPhone: escapeHtml(phone), message: safeMessage,
+          }),
+        });
+        if (!emailResponse.ok) return response({ error: "L’e-mail n’a pas pu être envoyé. Réessayez." }, 502);
+        return response({ success: true, sent: true });
+      }
       if (body.action === "update_profile") {
         const profileId = String(body.profileId ?? "").trim();
         const fields = body.fields;

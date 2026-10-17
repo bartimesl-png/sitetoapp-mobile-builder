@@ -1578,6 +1578,32 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         )
     }
 
+    func submitPrivatePropertyContactRequest(
+        listingID: String,
+        firstName: String,
+        lastName: String,
+        phone: String,
+        message: String
+    ) async throws {
+        let cleanID = listingID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard cleanID.range(of: "^[A-Za-z0-9_-]{1,160}$", options: .regularExpression) != nil,
+              firstName.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2,
+              lastName.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2,
+              cleanMessage.count >= 5,
+              member?.loginEmailVerified != false else {
+            throw AuthError.api("Connectez-vous avec une adresse vérifiée et vérifiez vos coordonnées.")
+        }
+        let result = try await sendDashboardAction([
+            "action": "contact_private_property_owner", "role": "particulier",
+            "propertyId": cleanID, "firstName": firstName, "lastName": lastName,
+            "phone": phone, "message": cleanMessage,
+        ], fallback: "Impossible d’envoyer votre message au propriétaire.")
+        guard result["sent"] as? Bool == true else {
+            throw AuthError.api("L’envoi du message n’a pas été confirmé.")
+        }
+    }
+
     func archiveProfessionalPropertyContactRequest(
         listingID: String,
         firstName: String,
