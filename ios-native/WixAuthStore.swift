@@ -404,6 +404,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         address: String,
         city: String,
         postalCode: String,
+        photos: [String],
         publishImmediately: Bool
     ) async throws {
         let token = try await validAccessToken()
@@ -427,6 +428,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
             "address": address,
             "city": city,
             "postalCode": postalCode,
+            "photos": photos,
             "publishImmediately": publishImmediately
         ])
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -434,6 +436,108 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         guard (200..<300).contains(http.statusCode) else {
             let payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
             throw AuthError.api(payload?["error"] as? String ?? "Impossible d’enregistrer le bien dans votre espace Wix.")
+        }
+    }
+
+    func createPrivateProperty(
+        title: String,
+        description: String,
+        propertyType: String,
+        transactionType: String,
+        price: Double,
+        surface: Double,
+        landSurface: Double?,
+        rooms: Int,
+        bedrooms: Int,
+        bathrooms: Int,
+        city: String,
+        postalCode: String,
+        photos: [String],
+        publishImmediately: Bool
+    ) async throws {
+        var payload: [String: Any] = [
+            "action": "create_private_property", "role": "particulier",
+            "title": title, "description": description, "propertyType": propertyType,
+            "transactionType": transactionType, "price": price, "surface": surface,
+            "rooms": rooms, "bedrooms": bedrooms, "bathrooms": bathrooms,
+            "city": city, "postalCode": postalCode, "publishImmediately": publishImmediately,
+            "photos": photos,
+        ]
+        if let landSurface { payload["landSurface"] = landSurface }
+        try await sendDashboardAction(payload, fallback: "Impossible d’enregistrer le bien dans votre espace Wix.")
+    }
+
+    func createClassifiedAd(
+        itemName: String,
+        itemDescription: String,
+        itemPrice: Double,
+        category: String,
+        subcategory: String,
+        itemCondition: String,
+        city: String,
+        postalCode: String,
+        photos: [String]
+    ) async throws {
+        var payload: [String: Any] = [
+            "action": "create_classified_ad", "role": "particulier",
+            "itemName": itemName, "itemDescription": itemDescription, "itemPrice": itemPrice,
+            "category": category, "subcategory": subcategory, "itemCondition": itemCondition,
+            "city": city, "postalCode": postalCode,
+            "photos": photos,
+        ]
+        try await sendDashboardAction(payload, fallback: "Impossible de publier la petite annonce dans Wix.")
+    }
+
+    func uploadListingPhotos(_ photos: [Data], role: String) async throws -> [String] {
+        guard ["particulier", "professionnel"].contains(role), photos.count <= 12 else {
+            throw AuthError.api("La sélection de photos pour l’annonce est invalide.")
+        }
+        let token = try await validAccessToken()
+        let endpoint = URL(string: "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/ios-native-dashboard-v2")!
+        var urls: [String] = []
+        for photo in photos {
+            guard !photo.isEmpty, photo.count <= 3 * 1024 * 1024 else {
+                throw AuthError.api("Chaque photo doit faire moins de 3 Mo.")
+            }
+            var request = URLRequest(url: endpoint, timeoutInterval: 50)
+            request.httpMethod = "POST"
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            request.httpBody = try JSONSerialization.data(withJSONObject: [
+                "action": "upload_listing_photo", "role": role,
+                "mimeType": "image/jpeg", "contentBase64": photo.base64EncodedString(),
+            ])
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else { throw AuthError.invalidResponse }
+            guard (200..<300).contains(http.statusCode) else {
+                let result = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+                throw AuthError.api(result?["error"] as? String ?? "Une photo n’a pas pu être envoyée.")
+            }
+            guard let result = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let url = result["url"] as? String,
+                  url.hasPrefix("https://krvwwavxmuwieemubhdj.supabase.co/storage/v1/object/public/pf-ios-listing-photos/") else {
+                throw AuthError.invalidResponse
+            }
+            urls.append(url)
+        }
+        return urls
+    }
+
+    private func sendDashboardAction(_ payload: [String: Any], fallback: String) async throws {
+        let token = try await validAccessToken()
+        let endpoint = URL(string: "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/ios-native-dashboard-v2")!
+        var request = URLRequest(url: endpoint, timeoutInterval: 40)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw AuthError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else {
+            let result = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            throw AuthError.api(result?["error"] as? String ?? fallback)
         }
     }
 

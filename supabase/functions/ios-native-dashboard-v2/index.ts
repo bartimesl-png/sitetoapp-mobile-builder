@@ -51,6 +51,23 @@ async function query(
 
 const first = (items: Record<string, unknown>[]) => items[0] ?? null;
 const emailFilter = (email: string) => ({ email: { $eq: email } });
+const listingPhotoBucket = "pf-ios-listing-photos";
+
+function getSupabaseSecretKey(): string {
+  try {
+    const secretKeys = JSON.parse(Deno.env.get("SUPABASE_SECRET_KEYS") ?? "{}") as Record<string, string>;
+    if (typeof secretKeys.default === "string" && secretKeys.default) return secretKeys.default;
+  } catch { /* Fall back to the legacy server-only key when the project has not migrated keys. */ }
+  return Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+}
+
+function ownedListingPhotos(value: unknown, role: string, memberID: string, projectURL: string): string[] | null {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.length > 20 || value.some((photo) => typeof photo !== "string")) return null;
+  const base = `${projectURL.replace(/\/$/, "")}/storage/v1/object/public/${listingPhotoBucket}/${role}/${memberID}/`;
+  const photos = value.map((photo) => String(photo));
+  return photos.every((photo) => photo.startsWith(base) && photo.length <= 2048) ? photos : null;
+}
 
 async function loadDashboard(role: string, email: string, memberID: string, token: string) {
   if (role === "particulier") {
@@ -59,7 +76,7 @@ async function loadDashboard(role: string, email: string, memberID: string, toke
     const accountId = String(account._id ?? "");
     const [profiles, properties, classifieds, favorites, savedSearches, buyerMatchings] = await Promise.all([
       query("privateprofiles", { ownerId: { $eq: accountId } }, ["ownerId", "firstName", "lastName", "email", "phone", "city", "postalCode", "isProfileComplete"], token, 2),
-      query("privateproperties", { ownerId: { $eq: accountId } }, ["ownerId", "title", "description", "propertyType", "transactionType", "price", "surface", "landSurface", "rooms", "bedrooms", "bathrooms", "city", "postalCode", "mainImage", "galleryImages", "isPublic", "status", "createdAt", "slug"], token),
+      query("privateproperties", { ownerId: { $eq: accountId } }, ["ownerId", "title", "description", "propertyType", "transactionType", "sellingPrice", "estimatedPrice", "surface", "landSurface", "rooms", "bedrooms", "bathrooms", "city", "postalCode", "mainImage", "photo1", "photo2", "photo3", "photo4", "photo5", "photo6", "photo7", "photo8", "galleryImages", "isPublic", "status", "createdAt", "slug"], token),
       query("classifiedads-1", { ownerId: { $eq: accountId } }, [
         "ownerId", "itemName", "itemPrice", "itemDescription", "itemImage",
         "photo2", "photo3", "photo4", "photo5", "photo6", "photo7", "photo8", "photo9", "photo10",
@@ -255,6 +272,147 @@ Deno.serve(async (req: Request) => {
       return response({ error: "Le compte Wix n’est pas vérifié." }, 403);
     }
     if (req.method === "POST") {
+      if (body.action === "upload_listing_photo") {
+        if (!["particulier", "professionnel"].includes(role)) {
+          return response({ error: "L’ajout de photos d’annonce est réservé aux espaces de vente immobilière." }, 403);
+        }
+        const accountCollection = role === "particulier" ? "privateaccounts" : "prosaccounts";
+        const profileCollection = role === "particulier" ? "privateprofiles" : "prosprofiles";
+        const account = first(await query(accountCollection, emailFilter(email), ["email", "isActive"], token, 2));
+        if (!account || account.isActive === false) return response({ error: "Aucun compte actif n’est associé à cette adresse." }, 403);
+        const accountID = String(account._id ?? "");
+        const profileFilter = role === "particulier" ? { ownerId: { $eq: accountID } } : { accountId: { $eq: accountID } };
+        const profile = first(await query(profileCollection, profileFilter, ["ownerId", "accountId", "isActive"], token, 2));
+        if (!profile || profile.isActive === false) return response({ error: "Aucun profil actif n’a été trouvé pour cet espace." }, 403);
+
+        const mimeType = String(body.mimeType ?? "");
+        const encoded = String(body.contentBase64 ?? "");
+        if (mimeType !== "image/jpeg" || !encoded || encoded.length > 4_300_000) {
+          return response({ error: "Choisissez une photo JPEG de moins de 3 Mo." }, 400);
+        }
+        let bytes: Uint8Array;
+        try {
+          const binary = atob(encoded);
+          bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+        } catch {
+          return response({ error: "Le fichier photo est illisible." }, 400);
+        }
+        if (bytes.length === 0 || bytes.length > 3 * 1024 * 1024) {
+          return response({ error: "La photo dépasse la taille maximale de 3 Mo." }, 400);
+        }
+        const supabaseURL = String(Deno.env.get("SUPABASE_URL") ?? "").replace(/\/$/, "");
+        const secretKey = getSupabaseSecretKey();
+        if (!supabaseURL || !secretKey) return response({ error: "Le stockage photo de l’application n’est pas configuré." }, 503);
+        const filePath = `${role}/${encodeURIComponent(result.member.id)}/${crypto.randomUUID()}.jpg`;
+        const upload = await fetch(`${supabaseURL}/storage/v1/object/${listingPhotoBucket}/${filePath}`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${secretKey}`,
+            apikey: secretKey,
+            "Content-Type": mimeType,
+            "Cache-Control": "public, max-age=31536000, immutable",
+            "x-upsert": "false",
+          },
+          body: bytes,
+        });
+        if (!upload.ok) {
+          console.error("[ios-native-dashboard] Listing photo upload failed", upload.status);
+          return response({ error: "La photo n’a pas pu être enregistrée. Réessayez." }, 502);
+        }
+        return response({
+          success: true,
+          url: `${supabaseURL}/storage/v1/object/public/${listingPhotoBucket}/${filePath}`,
+          sizeInBytes: bytes.length,
+        });
+      }
+
+      if (body.action === "create_private_property" || body.action === "create_classified_ad") {
+        if (role !== "particulier") return response({ error: "Cette action est réservée à l’espace particulier." }, 403);
+        const account = first(await query("privateaccounts", emailFilter(email), ["email", "isActive"], token, 2));
+        if (!account || account.isActive === false) return response({ error: "Aucun compte particulier actif n’est associé à cette adresse." }, 403);
+        const accountID = String(account._id ?? "");
+        const profile = first(await query("privateprofiles", { ownerId: { $eq: accountID } }, ["ownerId", "email"], token, 2));
+        if (!profile) return response({ error: "Votre profil particulier doit être complété avant de publier." }, 403);
+
+        const now = new Date().toISOString();
+        if (body.action === "create_private_property") {
+          const title = String(body.title ?? "").trim().slice(0, 140);
+          const description = String(body.description ?? "").trim().slice(0, 8000);
+          const propertyType = String(body.propertyType ?? "").trim().slice(0, 60);
+          const transactionType = String(body.transactionType ?? "");
+          const city = String(body.city ?? "").trim().slice(0, 100);
+          const postalCode = String(body.postalCode ?? "").trim().slice(0, 10);
+          const price = Number(body.price);
+          const surface = Number(body.surface);
+          const landSurface = body.landSurface === undefined || body.landSurface === null || body.landSurface === ""
+            ? undefined : Number(body.landSurface);
+          const rooms = Number(body.rooms);
+          const bedrooms = Number(body.bedrooms ?? 0);
+          const bathrooms = Number(body.bathrooms ?? 0);
+          const supabaseURL = String(Deno.env.get("SUPABASE_URL") ?? "");
+          const photos = ownedListingPhotos(body.photos, role, result.member.id, supabaseURL);
+          if (!photos) return response({ error: "Une photo ne provient pas de votre sélection d’images sécurisée." }, 400);
+          if (title.length < 5 || description.length < 20 || propertyType.length < 2 ||
+              !["vente", "location"].includes(transactionType) || city.length < 2 ||
+              !/^\d{4,10}$/.test(postalCode) || !Number.isFinite(price) || price < 0 ||
+              !Number.isFinite(surface) || surface <= 0 ||
+              (landSurface !== undefined && (!Number.isFinite(landSurface) || landSurface < 0)) ||
+              !Number.isInteger(rooms) || rooms < 1 || !Number.isInteger(bedrooms) || bedrooms < 0 ||
+              !Number.isInteger(bathrooms) || bathrooms < 0) {
+            return response({ error: "Vérifiez le titre, la description, la localisation et les caractéristiques du bien." }, 400);
+          }
+          const data: Record<string, unknown> = {
+            ownerId: accountID, title, description, propertyType, transactionType, sellingPrice: price, surface,
+            rooms, bedrooms, bathrooms, city, postalCode, isPublic: body.publishImmediately === true,
+            status: "active", createdAt: now, updatedAt: now,
+          };
+          if (landSurface !== undefined) data.landSurface = landSurface;
+          if (photos.length > 0) {
+            data.mainImage = photos[0];
+            data.photo1 = photos[0];
+            photos.slice(1, 8).forEach((photo, index) => { data[`photo${index + 2}`] = photo; });
+            data.galleryImages = JSON.stringify(photos);
+          }
+          const inserted = await wixRequest<{ dataItem?: { id?: string } }>("/wix-data/v2/items", token, {
+            method: "POST",
+            body: JSON.stringify({ dataCollectionId: "privateproperties", dataItem: { data } }),
+          });
+          if (!inserted.dataItem?.id) return response({ error: "Wix n’a pas confirmé l’enregistrement du bien." }, 502);
+          return response({ success: true, propertyId: inserted.dataItem.id, status: data.status, isPublic: data.isPublic });
+        }
+
+        const itemName = String(body.itemName ?? "").trim().slice(0, 140);
+        const itemDescription = String(body.itemDescription ?? "").trim().slice(0, 5000);
+        const category = String(body.category ?? "").trim().slice(0, 100);
+        const subcategory = String(body.subcategory ?? "").trim().slice(0, 100);
+        const itemCondition = String(body.itemCondition ?? "");
+        const city = String(body.city ?? "").trim().slice(0, 100);
+        const postalCode = String(body.postalCode ?? "").trim().slice(0, 10);
+        const itemPrice = Number(body.itemPrice);
+        const photos = ownedListingPhotos(body.photos, role, result.member.id, String(Deno.env.get("SUPABASE_URL") ?? ""));
+        if (!photos) return response({ error: "Une photo ne provient pas de votre sélection d’images sécurisée." }, 400);
+        const allowedConditions = new Set(["Neuf", "Comme neuf", "Très bon état", "Bon état", "État correct"]);
+        if (itemName.length < 3 || itemDescription.length < 10 || category.length < 2 ||
+            !allowedConditions.has(itemCondition) || city.length < 2 || !/^\d{4,10}$/.test(postalCode) ||
+            !Number.isFinite(itemPrice) || itemPrice < 0) {
+          return response({ error: "Vérifiez le titre, la description, la catégorie, l’état et la localisation de l’objet." }, 400);
+        }
+        const data: Record<string, unknown> = {
+          ownerId: accountID, itemName, itemPrice, itemDescription, category, subcategory,
+          itemCondition, city, postalCode, status: "published", createdAt: now,
+        };
+        if (photos.length > 0) {
+          data.itemImage = photos[0];
+          photos.slice(1).forEach((photo, index) => { data[`photo${index + 2}`] = photo; });
+        }
+        const inserted = await wixRequest<{ dataItem?: { id?: string } }>("/wix-data/v2/items", token, {
+          method: "POST",
+          body: JSON.stringify({ dataCollectionId: "classifiedads-1", dataItem: { data } }),
+        });
+        if (!inserted.dataItem?.id) return response({ error: "Wix n’a pas confirmé la publication de la petite annonce." }, 502);
+        return response({ success: true, classifiedAdID: inserted.dataItem.id, status: data.status });
+      }
+
       if (body.action === "create_professional_property") {
         if (role !== "professionnel") return response({ error: "Cette action est réservée à l’espace professionnel." }, 403);
         const title = String(body.title ?? "").trim().slice(0, 140);
@@ -268,6 +426,8 @@ Deno.serve(async (req: Request) => {
         const surface = Number(body.surface);
         const rooms = Number(body.rooms);
         const bedrooms = Number(body.bedrooms ?? 0);
+        const photos = ownedListingPhotos(body.photos, role, result.member.id, String(Deno.env.get("SUPABASE_URL") ?? ""));
+        if (!photos) return response({ error: "Une photo ne provient pas de votre sélection d’images sécurisée." }, 400);
         const allowedPropertyTypes = new Set([
           "house", "apartment", "maison", "appartement", "other", "commercial", "garage", "building", "land", "office",
         ]);
@@ -306,6 +466,11 @@ Deno.serve(async (req: Request) => {
           createdAt: now,
           updatedAt: now,
         };
+        if (photos.length > 0) {
+          data.mainImageUrl = photos[0];
+          data.galleryImages = JSON.stringify(photos);
+          photos.slice(0, 5).forEach((photo, index) => { data[`photo${index + 1}`] = photo; });
+        }
         const inserted = await wixRequest<{ dataItem?: { id?: string } }>("/wix-data/v2/items", token, {
           method: "POST",
           body: JSON.stringify({ dataCollectionId: "biensprofessionnels", dataItem: { data } }),

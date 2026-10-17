@@ -3,6 +3,7 @@ Total output lines: 2658
 
 import SwiftUI
 import CoreFoundation
+import PhotosUI
 import UIKit
 
 struct RootView: View {
@@ -1157,6 +1158,290 @@ private struct NativeBuyerSearchForm: View {
     }
 }
 
+private struct NativeListingPhotoPicker: View {
+    @Binding var photos: [Data]
+    @State private var selection: [PhotosPickerItem] = []
+    @State private var isLoading = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            PhotosPicker(selection: $selection, maxSelectionCount: 12, matching: .images) {
+                Label(photos.isEmpty ? "Choisir des photos" : "Modifier les photos", systemImage: "photo.badge.plus")
+            }
+            .disabled(isLoading)
+            if isLoading {
+                ProgressView("Préparation des photos…")
+                    .font(.footnote)
+            }
+            if !photos.isEmpty {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 10) {
+                        ForEach(Array(photos.enumerated()), id: \.offset) { index, data in
+                            if let image = UIImage(data: data) {
+                                ZStack(alignment: .topTrailing) {
+                                    Image(uiImage: image)
+                                        .resizable().scaledToFill()
+                                        .frame(width: 84, height: 72)
+                                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                                    Button {
+                                        photos.remove(at: index)
+                                        errorMessage = nil
+                                    } label: {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .font(.title3).symbolRenderingMode(.palette)
+                                            .foregroundStyle(.white, .black.opacity(0.6))
+                                    }
+                                    .buttonStyle(.plain)
+                                    .padding(4)
+                                    .accessibilityLabel("Supprimer la photo \(index + 1)")
+                                }
+                            }
+                        }
+                    }
+                }
+                .scrollIndicators(.hidden)
+            }
+            Text("Jusqu’à 12 photos. Elles sont redimensionnées avant l’envoi pour limiter les données utilisées.")
+                .font(.footnote).foregroundStyle(.secondary)
+            if let errorMessage {
+                Text(errorMessage).font(.footnote).foregroundStyle(.orange)
+            }
+        }
+        .onChange(of: selection) { _, items in
+            Task { await loadPhotos(items) }
+        }
+    }
+
+    @MainActor
+    private func loadPhotos(_ items: [PhotosPickerItem]) async {
+        guard !items.isEmpty else { photos = []; return }
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+        var prepared: [Data] = []
+        for item in items.prefix(12) {
+            guard let data = try? await item.loadTransferable(type: Data.self),
+                  let image = UIImage(data: data) else { continue }
+            let maxDimension = max(image.size.width, image.size.height)
+            let scale = min(1, 1600 / max(maxDimension, 1))
+            let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+            let renderer = UIGraphicsImageRenderer(size: size)
+            let resized = renderer.image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
+            if let jpeg = resized.jpegData(compressionQuality: 0.78), jpeg.count <= 3 * 1024 * 1024 {
+                prepared.append(jpeg)
+            }
+        }
+        photos = prepared
+        if prepared.isEmpty {
+            errorMessage = "Aucune photo compatible n’a pu être préparée. Choisissez des images JPEG, PNG ou HEIC."
+        } else if prepared.count < items.count {
+            errorMessage = "Certaines photos n’ont pas pu être préparées et n’ont pas été ajoutées."
+        }
+    }
+}
+
+private struct NativePrivatePropertyForm: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var auth = WixAuthStore.shared
+    let onCreated: () -> Void
+
+    @State private var title = ""
+    @State private var description = ""
+    @State private var propertyType = "maison"
+    @State private var transactionType = "vente"
+    @State private var price = ""
+    @State private var surface = ""
+    @State private var landSurface = ""
+    @State private var rooms = 3
+    @State private var bedrooms = 2
+    @State private var bathrooms = 1
+    @State private var city = ""
+    @State private var postalCode = ""
+    @State private var publishImmediately = false
+    @State private var photos: [Data] = []
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+
+    private var canSubmit: Bool {
+        title.trimmingCharacters(in: .whitespacesAndNewlines).count >= 5 &&
+        description.trimmingCharacters(in: .whitespacesAndNewlines).count >= 20 &&
+        propertyType.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 &&
+        city.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 &&
+        postalCode.count >= 4 && number(price) >= 0 && number(surface) > 0 && rooms > 0 &&
+        !photos.isEmpty && (landSurface.isEmpty || optionalNumber(landSurface) != nil)
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                Label("Nouveau bien immobilier", systemImage: "house.badge.plus").font(.title3.bold())
+                Text("Le bien est enregistré dans votre compte Wix. Vous pouvez le garder privé et ajouter une galerie depuis votre iPhone.")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            }
+            Section("Présentation") {
+                TextField("Titre de l’annonce", text: $title).textInputAutocapitalization(.sentences)
+                TextField("Type de bien (maison, appartement…)", text: $propertyType).textInputAutocapitalization(.never)
+                Picker("Transaction", selection: $transactionType) {
+                    Text("Vente").tag("vente")
+                    Text("Location").tag("location")
+                }
+                TextField("Description", text: $description, axis: .vertical).lineLimit(5...12)
+            }
+            Section("Caractéristiques") {
+                TextField("Prix (€)", text: $price).keyboardType(.decimalPad)
+                TextField("Surface habitable (m²)", text: $surface).keyboardType(.decimalPad)
+                TextField("Surface du terrain (facultatif)", text: $landSurface).keyboardType(.decimalPad)
+                Stepper("Pièces : \(rooms)", value: $rooms, in: 1...30)
+                Stepper("Chambres : \(bedrooms)", value: $bedrooms, in: 0...20)
+                Stepper("Salles de bain : \(bathrooms)", value: $bathrooms, in: 0...20)
+            }
+            Section("Localisation") {
+                TextField("Ville", text: $city).textContentType(.addressCity)
+                TextField("Code postal", text: $postalCode).keyboardType(.numberPad)
+                    .onChange(of: postalCode) { _, value in postalCode = String(value.filter(\.isNumber).prefix(10)) }
+            }
+            Section("Photos") { NativeListingPhotoPicker(photos: $photos) }
+            Section("Publication") {
+                Toggle("Publier dans les annonces publiques", isOn: $publishImmediately)
+                Text(publishImmediately ? "Le bien sera visible après synchronisation des annonces." : "Le bien restera dans votre espace, sans être affiché publiquement.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            if let errorMessage { Section("Enregistrement impossible") { Text(errorMessage).font(.footnote).foregroundStyle(.red) } }
+            Section {
+                Button { Task { await submit() } } label: {
+                    HStack {
+                        Spacer()
+                        if isSaving { ProgressView("Enregistrement…") }
+                        else { Label("Enregistrer le bien", systemImage: "checkmark.circle.fill").font(.headline) }
+                        Spacer()
+                    }
+                }
+                .disabled(!canSubmit || isSaving)
+            } footer: {
+                Text("Ajoutez au moins une photo. Le stockage dédié à l’application ne change pas la configuration Wix.")
+            }
+        }
+        .navigationTitle("Nouveau bien")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fermer") { dismiss() } } }
+    }
+
+    private func number(_ value: String) -> Double {
+        Double(value.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: " ", with: "").replacingOccurrences(of: ",", with: ".")) ?? -1
+    }
+    private func optionalNumber(_ value: String) -> Double? {
+        let result = number(value)
+        return result >= 0 ? result : nil
+    }
+
+    @MainActor
+    private func submit() async {
+        guard canSubmit else { return }
+        isSaving = true
+        errorMessage = nil
+        defer { isSaving = false }
+        do {
+            let imageURLs = try await auth.uploadListingPhotos(photos, role: "particulier")
+            try await auth.createPrivateProperty(
+                title: title, description: description, propertyType: propertyType,
+                transactionType: transactionType, price: number(price), surface: number(surface),
+                landSurface: optionalNumber(landSurface), rooms: rooms, bedrooms: bedrooms,
+                bathrooms: bathrooms, city: city, postalCode: postalCode, photos: imageURLs,
+                publishImmediately: publishImmediately
+            )
+            onCreated()
+            dismiss()
+        } catch { errorMessage = error.localizedDescription }
+    }
+}
+
+private struct NativeClassifiedAdForm: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var auth = WixAuthStore.shared
+    let onCreated: () -> Void
+
+    @State private var itemName = ""
+    @State private var itemDescription = ""
+    @State private var itemPrice = ""
+    @State private var category = ""
+    @State private var subcategory = ""
+    @State private var itemCondition = "Bon état"
+    @State private var city = ""
+    @State private var postalCode = ""
+    @State private var photos: [Data] = []
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+
+    private let conditions = ["Neuf", "Comme neuf", "Très bon état", "Bon état", "État correct"]
+    private var canSubmit: Bool {
+        itemName.trimmingCharacters(in: .whitespacesAndNewlines).count >= 3 &&
+        itemDescription.trimmingCharacters(in: .whitespacesAndNewlines).count >= 10 &&
+        category.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 &&
+        city.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 && postalCode.count >= 4 && number(itemPrice) >= 0 && !photos.isEmpty
+    }
+
+    var body: some View {
+        Form {
+            Section("Objet") {
+                TextField("Titre", text: $itemName).textInputAutocapitalization(.sentences)
+                TextField("Description", text: $itemDescription, axis: .vertical).lineLimit(4...10)
+                TextField("Catégorie", text: $category)
+                TextField("Sous-catégorie (facultatif)", text: $subcategory)
+                Picker("État", selection: $itemCondition) {
+                    ForEach(conditions, id: \.self) { Text($0).tag($0) }
+                }
+                TextField("Prix (€)", text: $itemPrice).keyboardType(.decimalPad)
+            }
+            Section("Localisation") {
+                TextField("Ville", text: $city).textContentType(.addressCity)
+                TextField("Code postal", text: $postalCode).keyboardType(.numberPad)
+                    .onChange(of: postalCode) { _, value in postalCode = String(value.filter(\.isNumber).prefix(10)) }
+            }
+            Section("Photos") { NativeListingPhotoPicker(photos: $photos) }
+            if let errorMessage { Section("Publication impossible") { Text(errorMessage).font(.footnote).foregroundStyle(.red) } }
+            Section {
+                Button { Task { await submit() } } label: {
+                    HStack {
+                        Spacer()
+                        if isSaving { ProgressView("Publication…") }
+                        else { Label("Publier la petite annonce", systemImage: "tag.fill").font(.headline) }
+                        Spacer()
+                    }
+                }
+                .disabled(!canSubmit || isSaving)
+            } footer: {
+                Text("Ajoutez au moins une photo. Votre annonce sera publiée dans la collection Wix des petites annonces.")
+            }
+        }
+        .navigationTitle("Petite annonce")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fermer") { dismiss() } } }
+    }
+
+    private func number(_ value: String) -> Double {
+        Double(value.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: " ", with: "").replacingOccurrences(of: ",", with: ".")) ?? -1
+    }
+
+    @MainActor
+    private func submit() async {
+        guard canSubmit else { return }
+        isSaving = true
+        errorMessage = nil
+        defer { isSaving = false }
+        do {
+            let imageURLs = try await auth.uploadListingPhotos(photos, role: "particulier")
+            try await auth.createClassifiedAd(
+                itemName: itemName, itemDescription: itemDescription, itemPrice: number(itemPrice),
+                category: category, subcategory: subcategory, itemCondition: itemCondition,
+                city: city, postalCode: postalCode, photos: imageURLs
+            )
+            onCreated()
+            dismiss()
+        } catch { errorMessage = error.localizedDescription }
+    }
+}
+
 private struct NativeProfessionalPropertyForm: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var auth = WixAuthStore.shared
@@ -1174,6 +1459,7 @@ private struct NativeProfessionalPropertyForm: View {
     @State private var city = ""
     @State private var postalCode = ""
     @State private var publishImmediately = false
+    @State private var photos: [Data] = []
     @State private var isSaving = false
     @State private var errorMessage: String?
 
@@ -1189,7 +1475,7 @@ private struct NativeProfessionalPropertyForm: View {
         description.trimmingCharacters(in: .whitespacesAndNewlines).count >= 20 &&
         address.trimmingCharacters(in: .whitespacesAndNewlines).count >= 5 &&
         city.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 &&
-        postalCode.count >= 4 && number(price) >= 0 && number(surface) > 0 && rooms > 0
+        postalCode.count >= 4 && number(price) >= 0 && number(surface) > 0 && rooms > 0 && !photos.isEmpty
     }
 
     var body: some View {
@@ -1197,7 +1483,7 @@ private struct NativeProfessionalPropertyForm: View {
             Section {
                 Label("Nouvelle annonce immobilière", systemImage: "house.badge.plus")
                     .font(.title3.bold())
-                Text("Le bien sera enregistré dans votre espace Wix. Par défaut, il reste masqué jusqu’à sa publication.")
+                Text("Le bien et sa galerie seront enregistrés pour votre espace Wix. Par défaut, l’annonce reste masquée.")
                     .font(.subheadline).foregroundStyle(.secondary)
             }
             Section("Présentation") {
@@ -1226,6 +1512,7 @@ private struct NativeProfessionalPropertyForm: View {
                     .keyboardType(.numberPad)
                     .onChange(of: postalCode) { _, value in postalCode = String(value.filter(\.isNumber).prefix(10)) }
             }
+            Section("Photos") { NativeListingPhotoPicker(photos: $photos) }
             Section("Publication") {
                 Toggle("Publier dès l’enregistrement", isOn: $publishImmediately)
                 Text(publishImmediately
@@ -1280,6 +1567,7 @@ private struct NativeProfessionalPropertyForm: View {
                 address: address,
                 city: city,
                 postalCode: postalCode,
+                photos: try await auth.uploadListingPhotos(photos, role: "professionnel"),
                 publishImmediately: publishImmediately
             )
             onCreated()
@@ -1700,6 +1988,8 @@ private struct NativeRoleDashboardView: View {
     @State private var showImportCenter = false
     @State private var showBuyerSearchForm = false
     @State private var showProfessionalPropertyForm = false
+    @State private var showPrivatePropertyForm = false
+    @State private var showClassifiedAdForm = false
     @State private var showProfileEditor = false
     let role: AccountRole
     let member: WixMember
@@ -1815,6 +2105,16 @@ private struct NativeRoleDashboardView: View {
                 }
                 ForEach(Array(sections.enumerated()), id: \.offset) { _, section in
                     Section {
+                        if role == .particulier, section.0 == "Mes biens" {
+                            Button { showPrivatePropertyForm = true } label: {
+                                Label("Déposer un bien immobilier", systemImage: "house.badge.plus").font(.headline)
+                            }
+                        }
+                        if role == .particulier, section.0 == "Mes petites annonces" {
+                            Button { showClassifiedAdForm = true } label: {
+                                Label("Déposer une petite annonce", systemImage: "tag.badge.plus").font(.headline)
+                            }
+                        }
                         if role == .particulier, section.0 == "Mes recherches" {
                             Button { showBuyerSearchForm = true } label: {
                                 Label("Créer une recherche", systemImage: "plus.circle.fill")
@@ -1984,6 +2284,24 @@ private struct NativeRoleDashboardView: View {
         .sheet(isPresented: $showProfessionalPropertyForm) {
             NavigationStack {
                 NativeProfessionalPropertyForm {
+                    Task { await auth.loadDashboard(role: role.dashboardQueryRole) }
+                }
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showPrivatePropertyForm) {
+            NavigationStack {
+                NativePrivatePropertyForm {
+                    Task { await auth.loadDashboard(role: role.dashboardQueryRole) }
+                }
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showClassifiedAdForm) {
+            NavigationStack {
+                NativeClassifiedAdForm {
                     Task { await auth.loadDashboard(role: role.dashboardQueryRole) }
                 }
             }
@@ -2665,7 +2983,7 @@ private struct WixDashboardItem: View {
                 Text(title).font(.subheadline.weight(.semibold)).lineLimit(2)
                 if !subtitle.isEmpty { Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
                 if let detail, !detail.isEmpty { Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(3) }
-                if let price = item["price"] ?? item["itemPrice"] {
+                if let price = item["price"] ?? item["sellingPrice"] ?? item["estimatedPrice"] ?? item["itemPrice"] {
                     Text("\(String(describing: price)) €").font(.caption.weight(.semibold)).foregroundStyle(.teal)
                 }
             }
@@ -2978,7 +3296,7 @@ private struct DashboardItemDetailView: View {
 
                 Text(title).font(.title2.bold())
 
-                if let price = item["price"] ?? item["itemPrice"] ?? item["totalPrice"] {
+                if let price = item["price"] ?? item["sellingPrice"] ?? item["estimatedPrice"] ?? item["itemPrice"] ?? item["totalPrice"] {
                     Text("\(String(describing: price)) €")
                         .font(.title3.weight(.semibold))
                         .foregroundStyle(.teal)
