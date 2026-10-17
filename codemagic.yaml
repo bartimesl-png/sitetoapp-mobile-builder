@@ -122,14 +122,7 @@ workflows:
 
     name: PartenaireFoyer iOS natif
 
-    # Validation de compilation uniquement. Aucune publication automatique.
-    triggering:
-      events:
-        - push
-      branch_patterns:
-        - pattern: "feature/ios-full-partenairefoyer-portal"
-          include: true
-          source: true
+    # Déclenchement manuel uniquement jusqu’à validation complète du parcours iOS natif.
 
     max_build_duration: 120
 
