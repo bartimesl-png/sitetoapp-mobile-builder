@@ -219,6 +219,33 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         }
     }
 
+    func loadProfessionalConversation(id: String) async throws -> [[String: Any]] {
+        let conversationID = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !conversationID.isEmpty, conversationID.count <= 160 else {
+            throw AuthError.api("Identifiant de conversation invalide.")
+        }
+        let token = try await validAccessToken()
+        var components = URLComponents(string: "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/ios-native-conversation")!
+        components.queryItems = [URLQueryItem(name: "conversationId", value: conversationID)]
+        var request = URLRequest(url: components.url!, timeoutInterval: 35)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw AuthError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else {
+            let payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            throw AuthError.api(payload?["error"] as? String ?? "Impossible de charger cette conversation.")
+        }
+        guard let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let messages = payload["messages"] as? [[String: Any]] else {
+            throw AuthError.invalidResponse
+        }
+        return messages.sorted {
+            String(describing: $0["createdAt"] ?? "") < String(describing: $1["createdAt"] ?? "")
+        }
+    }
+
     func fetchPublicPrivateListings() async throws -> [Listing] {
         let visitor = try await requestToken([
             "clientId": clientID,

@@ -832,6 +832,7 @@ private struct NativeRoleDashboardView: View {
     @StateObject private var referralService = ReferralService()
     @StateObject private var professionalImportService = ProfessionalImportService()
     @State private var selectedItem: DashboardItemSelection?
+    @State private var selectedConversation: DashboardConversationSelection?
     @State private var showReferralCenter = false
     @State private var showImportCenter = false
     let role: AccountRole
@@ -934,7 +935,13 @@ private struct NativeRoleDashboardView: View {
                         } else {
                             ForEach(Array(section.2.enumerated()), id: \.offset) { index, item in
                                 WixDashboardItem(item: item, fallbackTitle: "Élément \(index + 1)") {
-                                    selectedItem = DashboardItemSelection(item: item)
+                                        if role == .professionnel, section.0 == "Messages",
+                                           let conversationID = item["conversationId"] as? String,
+                                           !conversationID.isEmpty {
+                                            selectedConversation = DashboardConversationSelection(id: conversationID, preview: item)
+                                        } else {
+                                            selectedItem = DashboardItemSelection(item: item)
+                                        }
                                 }
                             }
                         }
@@ -1000,6 +1007,20 @@ private struct NativeRoleDashboardView: View {
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
         }
+        .sheet(item: $selectedConversation) { selection in
+            NavigationStack {
+                NativeProfessionalConversationView(
+                    conversationID: selection.id,
+                    preview: selection.preview,
+                    professionalID: (auth.dashboardData?["profile"] as? [String: Any])?["_id"] as? String ?? ""
+                )
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Fermer") { selectedConversation = nil }
+                    }
+                }
+            }
+        }
         .sheet(isPresented: $showReferralCenter) {
             NavigationStack {
                 ReferralCenterView(service: referralService)
@@ -1030,6 +1051,103 @@ private struct NativeRoleDashboardView: View {
         if let values = value as? [String] { return values.joined(separator: ", ") }
         if let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() { return number.boolValue ? "Oui" : "Non" }
         return String(describing: value)
+    }
+}
+
+private struct DashboardConversationSelection: Identifiable {
+    let id: String
+    let preview: [String: Any]
+}
+
+private struct NativeProfessionalConversationView: View {
+    @StateObject private var auth = WixAuthStore.shared
+    @State private var messages: [[String: Any]] = []
+    @State private var error: String?
+    @State private var isLoading = false
+    let conversationID: String
+    let preview: [String: Any]
+    let professionalID: String
+
+    private var contactName: String {
+        [preview["senderName"] as? String, preview["senderEmail"] as? String]
+            .compactMap { $0 }.first(where: { !$0.isEmpty }) ?? "Votre contact"
+    }
+
+    var body: some View {
+        Group {
+            if isLoading && messages.isEmpty {
+                ProgressView("Chargement de la conversation…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let error, messages.isEmpty {
+                ContentUnavailableView {
+                    Label("Conversation indisponible", systemImage: "bubble.left.and.exclamationmark.bubble.right")
+                } description: {
+                    Text(error)
+                } actions: {
+                    Button("Réessayer") { Task { await reload() } }
+                        .buttonStyle(.borderedProminent)
+                }
+            } else if messages.isEmpty {
+                ContentUnavailableView("Aucun message", systemImage: "bubble.left.and.bubble.right")
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(spacing: 12) {
+                            ForEach(Array(messages.enumerated()), id: \.offset) { index, message in
+                                let outgoing = (message["senderId"] as? String) == professionalID
+                                HStack {
+                                    if outgoing { Spacer(minLength: 42) }
+                                    VStack(alignment: .leading, spacing: 5) {
+                                        Text((message["content"] as? String) ?? "")
+                                            .font(.body).textSelection(.enabled)
+                                        if let date = message["createdAt"] as? String, !date.isEmpty {
+                                            Text(date).font(.caption2).foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    .padding(12)
+                                    .background(outgoing ? Color.teal.opacity(0.14) : Color(uiColor: .secondarySystemGroupedBackground),
+                                                in: RoundedRectangle(cornerRadius: 16))
+                                    if !outgoing { Spacer(minLength: 42) }
+                                }
+                                .id(index)
+                            }
+                        }
+                        .padding(16)
+                    }
+                    .refreshable { await reload() }
+                    .onChange(of: messages.count) { _, count in
+                        if count > 0 { proxy.scrollTo(count - 1, anchor: .bottom) }
+                    }
+                }
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            if let email = preview["senderEmail"] as? String,
+               let url = URL(string: "mailto:\(email)") {
+                Link(destination: url) {
+                    Label("Répondre au contact par e-mail", systemImage: "envelope")
+                        .font(.headline).frame(maxWidth: .infinity).padding(.vertical, 13)
+                }
+                .buttonStyle(.borderedProminent)
+                .padding(.horizontal).padding(.bottom, 8)
+                .background(.bar)
+            }
+        }
+        .navigationTitle(contactName)
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await reload() }
+    }
+
+    @MainActor
+    private func reload() async {
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            messages = try await auth.loadProfessionalConversation(id: conversationID)
+            error = nil
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
 }
 
