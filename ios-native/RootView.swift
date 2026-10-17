@@ -5270,6 +5270,9 @@ private struct NativeSeasonalAccommodationForm: View {
     @State private var accessMethod: String
     @State private var arrivalInstructions: String
     @State private var status: String
+    @State private var retainedPhotoURLs: [String]
+    @State private var newPhotos: [Data] = []
+    @State private var photosEdited = false
     @State private var isSaving = false
     @State private var errorMessage: String?
 
@@ -5279,6 +5282,11 @@ private struct NativeSeasonalAccommodationForm: View {
     init(initialAccommodation: [String: Any]?, onSaved: @escaping () -> Void) {
         self.initialAccommodation = initialAccommodation
         self.onSaved = onSaved
+        let photoKeys = ["itemImage"] + (1...30).map { "photo\($0)" } + ["galleryImage2", "galleryImage3", "galleryImage4", "galleryImage5"]
+        var seenPhotos = Set<String>()
+        let existingPhotos = photoKeys.compactMap { initialAccommodation?[$0] as? String }
+            .filter { !$0.isEmpty && seenPhotos.insert($0).inserted }
+        _retainedPhotoURLs = State(initialValue: existingPhotos)
         _itemName = State(initialValue: initialAccommodation?["itemName"] as? String ?? "")
         _itemDescription = State(initialValue: initialAccommodation?["itemDescription"] as? String ?? "")
         _accommodationType = State(initialValue: initialAccommodation?["accommodationType"] as? String ?? "apartment")
@@ -5342,6 +5350,42 @@ private struct NativeSeasonalAccommodationForm: View {
                 }
                 TextField("Consignes d’arrivée (sans code confidentiel)", text: $arrivalInstructions, axis: .vertical).lineLimit(3...6)
             }
+            Section("Photos de l’hébergement") {
+                if retainedPhotoURLs.isEmpty && newPhotos.isEmpty {
+                    Text("Aucune photo ajoutée.").foregroundStyle(.secondary)
+                }
+                if !retainedPhotoURLs.isEmpty {
+                    ScrollView(.horizontal) {
+                        HStack(spacing: 10) {
+                            ForEach(Array(retainedPhotoURLs.enumerated()), id: \.offset) { index, source in
+                                ZStack(alignment: .topTrailing) {
+                                    AsyncImage(url: WixImageSource.url(source)) { phase in
+                                        if let image = phase.image { image.resizable().scaledToFill() }
+                                        else { Image(systemName: "house.fill").foregroundStyle(.teal).frame(maxWidth: .infinity, maxHeight: .infinity).background(Color.teal.opacity(0.1)) }
+                                    }
+                                    .frame(width: 84, height: 72)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                                    Button(role: .destructive) {
+                                        retainedPhotoURLs.remove(at: index)
+                                        photosEdited = true
+                                    } label: {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .font(.title3).symbolRenderingMode(.palette)
+                                            .foregroundStyle(.white, .black.opacity(0.6))
+                                    }
+                                    .buttonStyle(.plain).padding(4)
+                                    .accessibilityLabel("Supprimer la photo existante \(index + 1)")
+                                }
+                            }
+                        }
+                    }
+                    .scrollIndicators(.hidden)
+                }
+                NativeListingPhotoPicker(photos: $newPhotos, maxPhotos: max(0, 35 - retainedPhotoURLs.count))
+                    .onChange(of: newPhotos) { _, _ in photosEdited = true }
+                Text("Vous pouvez ajouter ou retirer jusqu’à 35 photos. Les changements sont enregistrés dans l’hébergement Wix.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
             if initialAccommodation == nil {
                 Section("Statut") {
                     Picker("Publication", selection: $status) {
@@ -5351,10 +5395,7 @@ private struct NativeSeasonalAccommodationForm: View {
                     .pickerStyle(.segmented)
                 }
             } else {
-                Section {
-                    Text("Les photos existantes restent attachées à l’annonce. Leur ajout ou leur suppression doit encore être fait depuis la gestion complète du site.")
-                        .font(.footnote).foregroundStyle(.secondary)
-                }
+                EmptyView()
             }
             if let errorMessage {
                 Section { Label(errorMessage, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange) }
@@ -5398,6 +5439,10 @@ private struct NativeSeasonalAccommodationForm: View {
                 "checkInTime": checkInTime, "checkInUntil": checkInUntil,
                 "accessMethod": accessMethod, "arrivalInstructions": arrivalInstructions,
             ]
+            if photosEdited {
+                let uploadedPhotos = try await auth.uploadListingPhotos(newPhotos, role: "hebergeur")
+                fields["photos"] = retainedPhotoURLs + uploadedPhotos
+            }
             if let coordinates {
                 fields["latitude"] = coordinates.latitude
                 fields["longitude"] = coordinates.longitude

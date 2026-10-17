@@ -659,8 +659,8 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
     }
 
     func uploadListingPhotos(_ photos: [Data], role: String) async throws -> [String] {
-        guard ["particulier", "professionnel"].contains(role), photos.count <= 12 else {
-            throw AuthError.api("La sélection de photos pour l’annonce est invalide.")
+        guard ["particulier", "professionnel", "hebergeur"].contains(role), photos.count <= 35 else {
+            throw AuthError.api("La sélection de photos est invalide.")
         }
         let token = try await validAccessToken()
         let endpoint = URL(string: "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/ios-native-dashboard-v2")!

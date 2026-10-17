@@ -1017,6 +1017,15 @@ Deno.serve(async (req: Request) => {
         const checkInUntil = String(body.checkInUntil ?? "20:00").trim();
         const accessMethod = String(body.accessMethod ?? "HOST").trim().toUpperCase();
         const arrivalInstructions = String(body.arrivalInstructions ?? "").trim();
+        const accommodationPhotoKeys = ["itemImage", ...Array.from({ length: 30 }, (_, index) => `photo${index + 1}`),
+          "galleryImage2", "galleryImage3", "galleryImage4", "galleryImage5"];
+        const requestedPhotos = body.photos;
+        if (requestedPhotos !== undefined && (!Array.isArray(requestedPhotos) ||
+            requestedPhotos.length > accommodationPhotoKeys.length ||
+            requestedPhotos.some((photo) => typeof photo !== "string" || !photo.trim() || photo.length > 2048) ||
+            new Set(requestedPhotos).size !== requestedPhotos.length)) {
+          return response({ error: "La sélection de photos est invalide." }, 400);
+        }
         const typeOptions = new Set(["apartment", "house", "villa", "cottage", "studio", "room"]);
         const timeIsValid = (value: string) => /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
         if ((accommodationId && !/^[A-Za-z0-9_-]{1,160}$/.test(accommodationId)) ||
@@ -1048,11 +1057,25 @@ Deno.serve(async (req: Request) => {
           data.latitude = latitude;
           data.longitude = longitude;
         }
+        let ownedAccommodation: Record<string, unknown> | undefined;
         if (accommodationId) {
-          const accommodation = accommodations.find((item) => String(item._id ?? item.id ?? "") === accommodationId);
-          if (!accommodation || String(accommodation.hostId ?? "") !== hostId) {
+          ownedAccommodation = accommodations.find((item) => String(item._id ?? item.id ?? "") === accommodationId);
+          if (!ownedAccommodation || String(ownedAccommodation.hostId ?? "") !== hostId) {
             return response({ error: "Cet hébergement n’appartient pas à votre espace." }, 403);
           }
+        }
+        if (Array.isArray(requestedPhotos)) {
+          const existingPhotos = new Set(accommodationPhotoKeys
+            .map((key) => ownedAccommodation?.[key])
+            .filter((photo): photo is string => typeof photo === "string" && photo.length > 0));
+          const supabaseURL = String(Deno.env.get("SUPABASE_URL") ?? "");
+          if (requestedPhotos.some((photo) => !existingPhotos.has(photo as string) &&
+              !ownedListingPhotos([photo], role, result.member.id, supabaseURL))) {
+            return response({ error: "Une photo ne provient pas de cet hébergement ou de votre sélection sécurisée." }, 400);
+          }
+          accommodationPhotoKeys.forEach((key, index) => { data[key] = String(requestedPhotos[index] ?? ""); });
+        }
+        if (accommodationId) {
           await wixRequest(`/wix-data/v2/items/${encodeURIComponent(accommodationId)}`, token, {
             method: "PATCH", body: JSON.stringify({ dataCollectionId: "seasonalaccommodations", patch: {
               dataItemId: accommodationId,
@@ -1154,17 +1177,22 @@ Deno.serve(async (req: Request) => {
       }
 
       if (body.action === "upload_listing_photo") {
-        if (!["particulier", "professionnel"].includes(role)) {
-          return response({ error: "L’ajout de photos d’annonce est réservé aux espaces de vente immobilière." }, 403);
+        if (!["particulier", "professionnel", "hebergeur"].includes(role)) {
+          return response({ error: "L’ajout de photos est réservé aux espaces compatibles." }, 403);
         }
-        const accountCollection = role === "particulier" ? "privateaccounts" : "prosaccounts";
-        const profileCollection = role === "particulier" ? "privateprofiles" : "prosprofiles";
-        const account = first(await query(accountCollection, emailFilter(email), ["email", "isActive"], token, 2));
-        if (!account || account.isActive === false) return response({ error: "Aucun compte actif n’est associé à cette adresse." }, 403);
-        const accountID = String(account._id ?? "");
-        const profileFilter = role === "particulier" ? { ownerId: { $eq: accountID } } : { accountId: { $eq: accountID } };
-        const profile = first(await query(profileCollection, profileFilter, ["ownerId", "accountId", "isActive"], token, 2));
-        if (!profile || profile.isActive === false) return response({ error: "Aucun profil actif n’a été trouvé pour cet espace." }, 403);
+        if (role === "hebergeur") {
+          const profile = first(await query("seasonalhostprofiles", emailFilter(email), ["email", "isVerified"], token, 2));
+          if (!profile) return response({ error: "Aucun profil hébergeur n’est associé à cette adresse." }, 403);
+        } else {
+          const accountCollection = role === "particulier" ? "privateaccounts" : "prosaccounts";
+          const profileCollection = role === "particulier" ? "privateprofiles" : "prosprofiles";
+          const account = first(await query(accountCollection, emailFilter(email), ["email", "isActive"], token, 2));
+          if (!account || account.isActive === false) return response({ error: "Aucun compte actif n’est associé à cette adresse." }, 403);
+          const accountID = String(account._id ?? "");
+          const profileFilter = role === "particulier" ? { ownerId: { $eq: accountID } } : { accountId: { $eq: accountID } };
+          const profile = first(await query(profileCollection, profileFilter, ["ownerId", "accountId", "isActive"], token, 2));
+          if (!profile || profile.isActive === false) return response({ error: "Aucun profil actif n’a été trouvé pour cet espace." }, 403);
+        }
 
         const mimeType = String(body.mimeType ?? "");
         const encoded = String(body.contentBase64 ?? "");
