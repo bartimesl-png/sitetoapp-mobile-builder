@@ -290,3 +290,92 @@ struct WixPublicProfessionalProperty: Decodable {
         )
     }
 }
+/// Public classified-ad content loaded from the existing Wix CMS collection.
+struct ClassifiedAd: Identifiable, Hashable {
+    let id: String
+    let title: String
+    let description: String?
+    let price: Double?
+    let category: String?
+    let subcategory: String?
+    let condition: String?
+    let city: String?
+    let postalCode: String?
+    let images: [URL]
+
+    var locationLabel: String {
+        [postalCode, city].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
+    }
+
+    var formattedPrice: String {
+        guard let price else { return "Prix sur demande" }
+        return price.formatted(.currency(code: "EUR").locale(Locale(identifier: "fr_FR")))
+    }
+}
+
+struct WixPublicClassifiedAdsResponse: Decodable {
+    let dataItems: [WixPublicClassifiedAdItem]
+}
+
+struct WixPublicClassifiedAdItem: Decodable {
+    let id: String
+    let data: WixPublicClassifiedAdData
+}
+
+struct WixPublicClassifiedAdData: Decodable {
+    let itemName: String?
+    let itemDescription: String?
+    let itemPrice: Double?
+    let category: String?
+    let subcategory: String?
+    let itemCondition: String?
+    let city: String?
+    let postalCode: String?
+    let status: String?
+    let itemImage: String?
+    let photo2: String?
+    let photo3: String?
+    let photo4: String?
+    let photo5: String?
+    let photo6: String?
+    let photo7: String?
+    let photo8: String?
+    let photo9: String?
+    let photo10: String?
+    let photo11: String?
+    let photo12: String?
+    let photo13: String?
+    let photo14: String?
+    let photo15: String?
+    let photo16: String?
+    let photo17: String?
+    let photo18: String?
+    let photo19: String?
+    let photo20: String?
+
+    func classifiedAd(id: String) -> ClassifiedAd? {
+        guard status == "published",
+              let title = itemName?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !title.isEmpty else { return nil }
+        var seen = Set<String>()
+        let images = [itemImage, photo2, photo3, photo4, photo5, photo6, photo7, photo8,
+                      photo9, photo10, photo11, photo12, photo13, photo14, photo15, photo16,
+                      photo17, photo18, photo19, photo20]
+            .compactMap { $0 }
+            .compactMap(WixImageSource.url)
+            .filter { seen.insert($0.absoluteString).inserted }
+        return ClassifiedAd(
+            id: "wix-classified-\(id)",
+            title: title,
+            description: itemDescription,
+            price: itemPrice,
+            category: category,
+            subcategory: subcategory,
+            condition: itemCondition,
+            city: city,
+            postalCode: postalCode,
+            images: images
+        )
+    }
+}
+
