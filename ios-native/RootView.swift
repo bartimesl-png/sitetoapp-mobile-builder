@@ -1,5 +1,3 @@
-Warning: truncated output (original token count: 31959)
-Total output lines: 2658
 
 import SwiftUI
 import CoreFoundation
