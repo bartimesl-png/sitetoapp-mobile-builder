@@ -1063,7 +1063,10 @@ private struct NativeProfessionalConversationView: View {
     @StateObject private var auth = WixAuthStore.shared
     @State private var messages: [[String: Any]] = []
     @State private var error: String?
+    @State private var sendError: String?
+    @State private var composerText = ""
     @State private var isLoading = false
+    @State private var isSending = false
     let conversationID: String
     let preview: [String: Any]
     let professionalID: String
@@ -1122,20 +1125,42 @@ private struct NativeProfessionalConversationView: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            if let email = preview["senderEmail"] as? String,
-               let url = URL(string: "mailto:\(email)") {
-                Link(destination: url) {
-                    Label("Répondre au contact par e-mail", systemImage: "envelope")
-                        .font(.headline).frame(maxWidth: .infinity).padding(.vertical, 13)
+            VStack(spacing: 6) {
+                HStack(alignment: .bottom, spacing: 10) {
+                    TextField("Écrire un message…", text: $composerText, axis: .vertical)
+                        .lineLimit(1...4)
+                        .padding(.horizontal, 13).padding(.vertical, 10)
+                        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20))
+                        .accessibilityLabel("Votre message")
+                    Button {
+                        Task { await sendMessage() }
+                    } label: {
+                        if isSending { ProgressView() }
+                        else { Image(systemName: "arrow.up.circle.fill").font(.system(size: 34)) }
+                    }
+                    .disabled(isSending || composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityLabel("Envoyer le message")
                 }
-                .buttonStyle(.borderedProminent)
-                .padding(.horizontal).padding(.bottom, 8)
-                .background(.bar)
+                .padding(.horizontal).padding(.top, 8)
+                if let email = preview["senderEmail"] as? String,
+                   let url = URL(string: "mailto:\(email)") {
+                    Link("Contacter aussi par e-mail", destination: url)
+                        .font(.caption).padding(.bottom, 5)
+                }
             }
+            .background(.bar)
         }
         .navigationTitle(contactName)
         .navigationBarTitleDisplayMode(.inline)
         .task { await reload() }
+        .alert("Envoi impossible", isPresented: Binding(
+            get: { sendError != nil },
+            set: { if !$0 { sendError = nil } }
+        )) {
+            Button("OK", role: .cancel) { sendError = nil }
+        } message: {
+            Text(sendError ?? "Réessayez dans un instant.")
+        }
     }
 
     @MainActor
@@ -1143,10 +1168,39 @@ private struct NativeProfessionalConversationView: View {
         isLoading = true
         defer { isLoading = false }
         do {
-            messages = try await auth.loadProfessionalConversation(id: conversationID)
+            let loaded = try await auth.loadProfessionalConversation(id: conversationID)
+            messages = loaded
             error = nil
+            do {
+                try await auth.markProfessionalConversationRead(conversationID: conversationID)
+                messages = messages.map { message in
+                    var updated = message
+                    if (updated["receiverId"] as? String) == professionalID {
+                        updated["isRead"] = true
+                        updated["seen"] = true
+                    }
+                    return updated
+                }
+            } catch {
+                // Keep the thread readable even if Wix declines the optional read receipt.
+            }
         } catch {
             self.error = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func sendMessage() async {
+        let content = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !content.isEmpty, !isSending else { return }
+        isSending = true
+        defer { isSending = false }
+        do {
+            let sent = try await auth.sendProfessionalMessage(conversationID: conversationID, content: content)
+            messages.append(sent)
+            composerText = ""
+        } catch {
+            sendError = error.localizedDescription
         }
     }
 }

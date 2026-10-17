@@ -246,6 +246,49 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         }
     }
 
+    func sendProfessionalMessage(conversationID: String, content: String) async throws -> [String: Any] {
+        let text = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, text.count <= 4000 else {
+            throw AuthError.api("Le message doit contenir entre 1 et 4 000 caractères.")
+        }
+        let token = try await validAccessToken()
+        let endpoint = URL(string: "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/ios-native-conversation")!
+        var request = URLRequest(url: endpoint, timeoutInterval: 35)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["conversationId": conversationID, "content": text])
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw AuthError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else {
+            let payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            throw AuthError.api(payload?["error"] as? String ?? "Le message n’a pas pu être envoyé.")
+        }
+        guard let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let message = payload["message"] as? [String: Any] else {
+            throw AuthError.invalidResponse
+        }
+        return message
+    }
+
+    func markProfessionalConversationRead(conversationID: String) async throws {
+        let token = try await validAccessToken()
+        let endpoint = URL(string: "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/ios-native-conversation")!
+        var request = URLRequest(url: endpoint, timeoutInterval: 35)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["action": "mark_read", "conversationId": conversationID])
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw AuthError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else {
+            let payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            throw AuthError.api(payload?["error"] as? String ?? "Impossible de marquer la conversation comme lue.")
+        }
+    }
+
     func fetchPublicPrivateListings() async throws -> [Listing] {
         let visitor = try await requestToken([
             "clientId": clientID,
