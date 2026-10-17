@@ -95,12 +95,16 @@ Deno.serve(async (req: Request) => {
 
   try {
     const body = await req.json() as Record<string, unknown>;
+    const action = clean(body.action || "register");
+    if (!['register', 'disable'].includes(action)) return response({ error: "Action inconnue." }, 400);
     const role = clean(body.role);
     const deviceId = clean(body.deviceId);
     const fcmToken = clean(body.fcmToken);
-    if (!/^[a-z_]{3,32}$/.test(role)) return response({ error: "Espace invalide." }, 400);
-    if (deviceId.length < 5 || deviceId.length > 200) return response({ error: "Appareil invalide." }, 400);
-    if (fcmToken.length < 20 || fcmToken.length > 4096) return response({ error: "Jeton de notification invalide." }, 400);
+    const installationId = clean(body.installationId);
+    if (action === "register" && !/^[a-z_]{3,32}$/.test(role)) return response({ error: "Espace invalide." }, 400);
+    if (action === "register" && (deviceId.length < 5 || deviceId.length > 200)) return response({ error: "Appareil invalide." }, 400);
+    if (action === "register" && (fcmToken.length < 20 || fcmToken.length > 4096)) return response({ error: "Jeton de notification invalide." }, 400);
+    if (action === "disable" && !/^[0-9a-f-]{36}$/i.test(installationId)) return response({ error: "Appareil invalide." }, 400);
     if (!SUPABASE_URL || !SERVICE_ROLE) throw new Error("Configuration Supabase serveur manquante.");
 
     const memberResponse = await wixRequest<{ member?: { id?: string; loginEmail?: string; loginEmailVerified?: boolean } }>(
@@ -109,6 +113,35 @@ Deno.serve(async (req: Request) => {
     const member = memberResponse.member;
     const email = clean(member?.loginEmail).toLowerCase();
     if (!member?.id || !email || member.loginEmailVerified === false) return response({ error: "Compte Wix non vérifié." }, 403);
+
+    if (action === "disable") {
+      const ownerIDs = new Set<string>();
+      for (const supportedRole of ["particulier", "professionnel", "courtier", "artisan", "diagnostiqueur", "prestataire"]) {
+        const owner = await ownerForRole(supportedRole, email, token);
+        if (owner?.ownerId) ownerIDs.add(owner.ownerId);
+      }
+      let disabled = 0;
+      for (const ownerId of ownerIDs) {
+        const url = new URL("/rest/v1/push_devices", SUPABASE_URL);
+        url.searchParams.set("user_id", `eq.${ownerId}`);
+        url.searchParams.set("device_id", `like.${installationId}-%`);
+        const result = await fetch(url, {
+          method: "PATCH",
+          headers: {
+            apikey: SERVICE_ROLE,
+            Authorization: `Bearer ${SERVICE_ROLE}`,
+            "Content-Type": "application/json",
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({ enabled: false, registration_status: "disabled", updated_at: new Date().toISOString() }),
+        });
+        const raw = await result.text();
+        if (!result.ok) throw new Error(`Désactivation des notifications impossible (${result.status}).`);
+        const rows = raw ? JSON.parse(raw) as unknown : [];
+        if (Array.isArray(rows)) disabled += rows.length;
+      }
+      return response({ success: true, disabled });
+    }
 
     const owner = await ownerForRole(role, email, token);
     if (!owner?.ownerId) return response({ error: "Aucun espace actif associé à ce compte." }, 403);
