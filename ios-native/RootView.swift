@@ -1157,6 +1157,139 @@ private struct NativeBuyerSearchForm: View {
     }
 }
 
+private struct NativeProfessionalPropertyForm: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var auth = WixAuthStore.shared
+    let onCreated: () -> Void
+
+    @State private var title = ""
+    @State private var description = ""
+    @State private var propertyType = "house"
+    @State private var transactionType = "sale"
+    @State private var price = ""
+    @State private var surface = ""
+    @State private var rooms = 3
+    @State private var bedrooms = 2
+    @State private var address = ""
+    @State private var city = ""
+    @State private var postalCode = ""
+    @State private var publishImmediately = false
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+
+    private let propertyTypes = [
+        ("Maison", "house"), ("Appartement", "apartment"), ("Maison (autre)", "maison"),
+        ("Appartement (autre)", "appartement"), ("Commerce", "commercial"),
+        ("Terrain", "land"), ("Immeuble", "building"), ("Bureau", "office"),
+        ("Garage", "garage"), ("Autre", "other")
+    ]
+
+    private var canSubmit: Bool {
+        title.trimmingCharacters(in: .whitespacesAndNewlines).count >= 5 &&
+        description.trimmingCharacters(in: .whitespacesAndNewlines).count >= 20 &&
+        address.trimmingCharacters(in: .whitespacesAndNewlines).count >= 5 &&
+        city.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 &&
+        postalCode.count >= 4 && number(price) >= 0 && number(surface) > 0 && rooms > 0
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                Label("Nouvelle annonce immobilière", systemImage: "house.badge.plus")
+                    .font(.title3.bold())
+                Text("Le bien sera enregistré dans votre espace Wix. Par défaut, il reste masqué jusqu’à sa publication.")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            }
+            Section("Présentation") {
+                TextField("Titre de l’annonce", text: $title).textInputAutocapitalization(.sentences)
+                Picker("Type de bien", selection: $propertyType) {
+                    ForEach(Array(propertyTypes.enumerated()), id: \.offset) { _, option in
+                        Text(option.0).tag(option.1)
+                    }
+                }
+                Picker("Transaction", selection: $transactionType) {
+                    Text("Vente").tag("sale")
+                    Text("Location").tag("rent")
+                }
+                TextField("Description du bien", text: $description, axis: .vertical).lineLimit(5...12)
+            }
+            Section("Caractéristiques") {
+                TextField("Prix (€)", text: $price).keyboardType(.decimalPad)
+                TextField("Surface (m²)", text: $surface).keyboardType(.decimalPad)
+                Stepper("Pièces : \(rooms)", value: $rooms, in: 1...30)
+                Stepper("Chambres : \(bedrooms)", value: $bedrooms, in: 0...20)
+            }
+            Section("Adresse") {
+                TextField("Adresse", text: $address).textContentType(.streetAddressLine1)
+                TextField("Ville", text: $city).textContentType(.addressCity)
+                TextField("Code postal", text: $postalCode)
+                    .keyboardType(.numberPad)
+                    .onChange(of: postalCode) { _, value in postalCode = String(value.filter(\.isNumber).prefix(10)) }
+            }
+            Section("Publication") {
+                Toggle("Publier dès l’enregistrement", isOn: $publishImmediately)
+                Text(publishImmediately
+                     ? "L’annonce sera créée avec le statut actif dans Wix et pourra apparaître dans l’application."
+                     : "L’annonce sera créée comme inactive et ne sera pas affichée publiquement.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            if let errorMessage {
+                Section("Enregistrement impossible") { Text(errorMessage).font(.footnote).foregroundStyle(.red) }
+            }
+            Section {
+                Button {
+                    Task { await submit() }
+                } label: {
+                    HStack {
+                        Spacer()
+                        if isSaving { ProgressView("Enregistrement…") }
+                        else { Label(publishImmediately ? "Créer et publier" : "Enregistrer comme masquée", systemImage: "checkmark.circle.fill").font(.headline) }
+                        Spacer()
+                    }
+                }
+                .disabled(!canSubmit || isSaving)
+            }
+        }
+        .navigationTitle("Nouvelle annonce")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fermer") { dismiss() } } }
+    }
+
+    private func number(_ value: String) -> Double {
+        Double(value.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: ",", with: ".")) ?? -1
+    }
+
+    @MainActor
+    private func submit() async {
+        guard canSubmit else { return }
+        isSaving = true
+        errorMessage = nil
+        defer { isSaving = false }
+        do {
+            try await auth.createProfessionalProperty(
+                title: title,
+                description: description,
+                propertyType: propertyType,
+                transactionType: transactionType,
+                price: number(price),
+                surface: number(surface),
+                rooms: rooms,
+                bedrooms: bedrooms,
+                address: address,
+                city: city,
+                postalCode: postalCode,
+                publishImmediately: publishImmediately
+            )
+            onCreated()
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+
 private struct NativeSpacePickerView: View {
     @State private var selectedRole: AccountRole?
     @StateObject private var auth = WixAuthStore.shared
@@ -1566,6 +1699,7 @@ private struct NativeRoleDashboardView: View {
     @State private var showReferralCenter = false
     @State private var showImportCenter = false
     @State private var showBuyerSearchForm = false
+    @State private var showProfessionalPropertyForm = false
     @State private var showProfileEditor = false
     let role: AccountRole
     let member: WixMember
@@ -1749,6 +1883,13 @@ private struct NativeRoleDashboardView: View {
                     }
                 }
                 if role == .professionnel {
+                    Section("Mes biens") {
+                        Button { showProfessionalPropertyForm = true } label: {
+                            Label("Créer une annonce immobilière", systemImage: "house.badge.plus")
+                        }
+                        Text("Créez un bien dans la collection Wix de votre compte. Vous choisissez s’il reste masqué ou s’il est publié immédiatement.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
                     Section("Mes annonces importées") {
                         Button { showImportCenter = true } label: {
                             Label("Gérer les imports de mon réseau", systemImage: "arrow.down.doc")
@@ -1826,6 +1967,15 @@ private struct NativeRoleDashboardView: View {
         .sheet(isPresented: $showBuyerSearchForm) {
             NavigationStack {
                 NativeBuyerSearchForm(service: buyerSearchService)
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showProfessionalPropertyForm) {
+            NavigationStack {
+                NativeProfessionalPropertyForm {
+                    Task { await auth.loadDashboard(role: role.dashboardQueryRole) }
+                }
             }
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)

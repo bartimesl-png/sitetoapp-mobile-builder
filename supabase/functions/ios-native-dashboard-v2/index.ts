@@ -244,6 +244,64 @@ Deno.serve(async (req: Request) => {
       return response({ error: "Le compte Wix n’est pas vérifié." }, 403);
     }
     if (req.method === "POST") {
+      if (body.action === "create_professional_property") {
+        if (role !== "professionnel") return response({ error: "Cette action est réservée à l’espace professionnel." }, 403);
+        const title = String(body.title ?? "").trim().slice(0, 140);
+        const description = String(body.description ?? "").trim().slice(0, 8000);
+        const propertyType = String(body.propertyType ?? "");
+        const transactionType = String(body.transactionType ?? "");
+        const address = String(body.address ?? "").trim().slice(0, 240);
+        const city = String(body.city ?? "").trim().slice(0, 100);
+        const postalCode = String(body.postalCode ?? "").trim().slice(0, 10);
+        const price = Number(body.price);
+        const surface = Number(body.surface);
+        const rooms = Number(body.rooms);
+        const bedrooms = Number(body.bedrooms ?? 0);
+        const allowedPropertyTypes = new Set([
+          "house", "apartment", "maison", "appartement", "other", "commercial", "garage", "building", "land", "office",
+        ]);
+        if (title.length < 5 || description.length < 20 || !allowedPropertyTypes.has(propertyType) ||
+            !["sale", "rent"].includes(transactionType) || address.length < 5 || city.length < 2 ||
+            !/^\d{4,10}$/.test(postalCode) || !Number.isFinite(price) || price < 0 ||
+            !Number.isFinite(surface) || surface <= 0 || !Number.isInteger(rooms) || rooms < 1 ||
+            !Number.isInteger(bedrooms) || bedrooms < 0) {
+          return response({ error: "Vérifiez le titre, la description, la localisation et les caractéristiques du bien." }, 400);
+        }
+
+        const account = first(await query("prosaccounts", emailFilter(email), ["email", "isActive"], token, 2));
+        if (!account || account.isActive === false) return response({ error: "Aucun compte professionnel actif n’est associé à cette adresse." }, 403);
+        const accountId = String(account._id ?? "");
+        const profile = first(await query("prosprofiles", { accountId: { $eq: accountId } }, [
+          "accountId", "companyName", "contactName", "phoneNumber", "email", "isActive",
+        ], token, 2));
+        if (!profile || profile.isActive === false) return response({ error: "Aucune fiche professionnelle active n’a été trouvée." }, 403);
+
+        const now = new Date().toISOString();
+        const data: Record<string, unknown> = {
+          wixMemberId: result.member.id,
+          professionalId: String(profile._id ?? ""),
+          title,
+          description,
+          propertyType,
+          transactionType,
+          price,
+          surface,
+          rooms,
+          bedrooms,
+          address,
+          city,
+          postalCode,
+          status: body.publishImmediately === true ? "active" : "inactive",
+          createdAt: now,
+          updatedAt: now,
+        };
+        const inserted = await wixRequest<{ dataItem?: { id?: string } }>("/wix-data/v2/items", token, {
+          method: "POST",
+          body: JSON.stringify({ dataCollectionId: "biensprofessionnels", dataItem: { data } }),
+        });
+        if (!inserted.dataItem?.id) return response({ error: "Wix n’a pas confirmé l’enregistrement du bien." }, 502);
+        return response({ success: true, propertyId: inserted.dataItem.id, status: data.status });
+      }
       if (body.action === "mark_matching_seen") {
         if (role !== "professionnel") return response({ error: "Cette action est réservée à l’espace professionnel." }, 403);
         const itemId = String(body.itemId ?? "").trim();

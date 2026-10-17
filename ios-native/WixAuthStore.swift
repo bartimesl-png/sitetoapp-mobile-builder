@@ -392,6 +392,51 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         }
     }
 
+    func createProfessionalProperty(
+        title: String,
+        description: String,
+        propertyType: String,
+        transactionType: String,
+        price: Double,
+        surface: Double,
+        rooms: Int,
+        bedrooms: Int,
+        address: String,
+        city: String,
+        postalCode: String,
+        publishImmediately: Bool
+    ) async throws {
+        let token = try await validAccessToken()
+        let endpoint = URL(string: "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/ios-native-dashboard-v2")!
+        var request = URLRequest(url: endpoint, timeoutInterval: 40)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "action": "create_professional_property",
+            "role": "professionnel",
+            "title": title,
+            "description": description,
+            "propertyType": propertyType,
+            "transactionType": transactionType,
+            "price": price,
+            "surface": surface,
+            "rooms": rooms,
+            "bedrooms": bedrooms,
+            "address": address,
+            "city": city,
+            "postalCode": postalCode,
+            "publishImmediately": publishImmediately
+        ])
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw AuthError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else {
+            let payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            throw AuthError.api(payload?["error"] as? String ?? "Impossible d’enregistrer le bien dans votre espace Wix.")
+        }
+    }
+
     func markInquiryRead(role: String, messageID: String) async {
         errorMessage = nil
         do {
