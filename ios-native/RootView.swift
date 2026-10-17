@@ -560,18 +560,12 @@ private struct HomeDashboardView: View {
 
             VStack(alignment: .leading, spacing: 19) {
                 HStack(spacing: 11) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(.white)
-                        Image(systemName: "house.fill")
-                            .font(.system(size: 25, weight: .semibold))
-                            .foregroundStyle(Color(red: 0.035, green: 0.20, blue: 0.23))
-                        Image(systemName: "person.3.fill")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(Color(red: 0.12, green: 0.72, blue: 0.46))
-                            .offset(y: 7)
-                    }
-                    .frame(width: 46, height: 46)
+                    Image("BrandLogo")
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 58, height: 58)
+                        .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).stroke(.white.opacity(0.28), lineWidth: 1))
                     .accessibilityHidden(true)
 
                     VStack(alignment: .leading, spacing: 2) {
