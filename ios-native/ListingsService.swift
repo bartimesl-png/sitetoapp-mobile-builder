@@ -112,6 +112,94 @@ final class ClassifiedAdsService: ObservableObject {
 }
 
 @MainActor
+final class BuyerSearchService: ObservableObject {
+    @Published private(set) var isSubmitting = false
+    @Published private(set) var errorMessage: String?
+    @Published private(set) var statusMessage: String?
+
+    private let endpoint = URL(string: "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/ios-native-buyer-searches")!
+
+    func create(
+        searchName: String,
+        transactionType: String,
+        propertyTypes: [String],
+        city: String,
+        postalCode: String,
+        radius: Double,
+        minBudget: Double,
+        maxBudget: Double,
+        minSurface: Double,
+        maxSurface: Double?,
+        minRooms: Double,
+        minBedrooms: Double,
+        emailAlertsEnabled: Bool
+    ) async -> Bool {
+        var body: [String: Any] = [
+            "action": "create",
+            "searchName": searchName,
+            "transactionType": transactionType,
+            "propertyTypes": propertyTypes,
+            "city": city,
+            "postalCode": postalCode,
+            "radius": radius,
+            "minBudget": minBudget,
+            "maxBudget": maxBudget,
+            "minSurface": minSurface,
+            "minRooms": minRooms,
+            "minBedrooms": minBedrooms,
+            "emailAlertsEnabled": emailAlertsEnabled
+        ]
+        if let maxSurface { body["maxSurface"] = maxSurface }
+        return await perform(body, successMessage: "Votre recherche a été enregistrée dans votre espace Wix.")
+    }
+
+    func deactivate(searchID: String) async {
+        _ = await perform(["action": "deactivate", "searchId": searchID],
+                          successMessage: "La recherche a été désactivée.")
+    }
+
+    private func perform(_ body: [String: Any], successMessage: String) async -> Bool {
+        guard !isSubmitting else { return false }
+        isSubmitting = true
+        errorMessage = nil
+        statusMessage = nil
+        defer { isSubmitting = false }
+        do {
+            let token = try await WixAuthStore.shared.validAccessToken()
+            var request = URLRequest(url: endpoint, timeoutInterval: 35)
+            request.httpMethod = "POST"
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else { throw BuyerSearchError.invalidResponse }
+            let payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+            guard (200..<300).contains(http.statusCode) else {
+                throw BuyerSearchError.rejected(payload["error"] as? String ?? "Le service de recherche a refusé la demande (\(http.statusCode)).")
+            }
+            statusMessage = successMessage
+            await WixAuthStore.shared.loadDashboard(role: "particulier")
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    private enum BuyerSearchError: LocalizedError {
+        case invalidResponse
+        case rejected(String)
+        var errorDescription: String? {
+            switch self {
+            case .invalidResponse: "Réponse invalide du service de recherche."
+            case .rejected(let message): message
+            }
+        }
+    }
+}
+
+@MainActor
 final class ProfessionalsService: ObservableObject {
     @Published private(set) var professionals: [WixPublicProfessional] = []
     @Published private(set) var isLoading = false
