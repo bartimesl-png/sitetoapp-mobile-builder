@@ -163,10 +163,9 @@ workflows:
           chmod +x ./scripts/prepare-ios-firebase.sh
           ./scripts/prepare-ios-firebase.sh
 
-      - name: Préparer les assets iOS manquants
+      - name: Préparer le logo et l’icône iOS
         script: |
           chmod +x ./scripts/prepare-ios-assets.sh
-          export PARTENAIREFOYER_LOGO_URL="https://static.wixstatic.com/media/476a15_d601a17fe7c4406aac35fac85d309948~mv2.jpg"
           ./scripts/prepare-ios-assets.sh
 
       - name: Compiler l’IPA iOS
