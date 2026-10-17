@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 99591)
-Total output lines: 7565
-
 Warning: truncated output (original token count: 31959)
 Total output lines: 2658
 
@@ -789,6 +786,7 @@ private struct ProfessionalDetailView: View {
         components.path = trimmed
         return components.url
     }
+
 }
 
 private struct PrivatePropertyContactForm: View {
@@ -1499,7 +1497,4589 @@ private struct NativeListingsView: View {
                                         }
                                     }
                                     Section("Prix et surface") {
-                                        TextField("Pr…59591 tokens truncated…")
+                                        TextField("Prix minimum (€)", text: $propertyMinPrice).keyboardType(.decimalPad)
+                                        TextField("Prix maximum (€)", text: $propertyMaxPrice).keyboardType(.decimalPad)
+                                        TextField("Surface minimum (m²)", text: $propertyMinSurface).keyboardType(.decimalPad)
+                                        TextField("Surface maximum (m²)", text: $propertyMaxSurface).keyboardType(.decimalPad)
+                                        TextField("Terrain minimum (m²)", text: $propertyMinLandSurface).keyboardType(.decimalPad)
+                                    }
+                                    Section("Agencement minimum") {
+                                        TextField("Nombre de pièces", text: $propertyMinRooms).keyboardType(.numberPad)
+                                        TextField("Nombre de chambres", text: $propertyMinBedrooms).keyboardType(.numberPad)
+                                        TextField("Salles de bain", text: $propertyMinBathrooms).keyboardType(.numberPad)
+                                    }
+                                    Section("Localisation") {
+                                        TextField("Ville", text: $propertyCity).textContentType(.addressCity)
+                                        TextField("Code postal", text: $propertyPostalCode).keyboardType(.numberPad)
+                                    }
+                                    Section {
+                                        Button("Effacer les filtres immobiliers", role: .destructive) {
+                                            propertyTypeFilter = "Tous"
+                                            propertyTransactionFilter = "Tous"
+                                            propertyMinPrice = ""
+                                            propertyMaxPrice = ""
+                                            propertyMinSurface = ""
+                                            propertyMaxSurface = ""
+                                            propertyMinLandSurface = ""
+                                            propertyMinRooms = ""
+                                            propertyMinBedrooms = ""
+                                            propertyMinBathrooms = ""
+                                            propertyCity = ""
+                                            propertyPostalCode = ""
+                                            propertySort = "Ordre du catalogue"
+                                        }
+                                    }
+                                }
+                                .navigationTitle("Filtres immobiliers")
+                                .navigationBarTitleDisplayMode(.inline)
+                                .toolbar {
+                                    ToolbarItem(placement: .cancellationAction) { Button("Fermer") { showPropertyFilters = false } }
+                                    ToolbarItem(placement: .confirmationAction) { Button("Voir \(filteredListings.count)") { showPropertyFilters = false } }
+                                }
+                            }
+                            .presentationDetents([.large])
+                            .presentationDragIndicator(.visible)
+                        }
+                    }
+                    if let warning = service.warningMessage {
+                        Section {
+                            Label(warning, systemImage: "exclamationmark.triangle.fill")
+                                .font(.footnote).foregroundStyle(.orange)
+                            Button("Réessayer le chargement") { Task { await service.reload() } }
+                        }
+                    }
+                    if service.isLoading && service.listings.isEmpty {
+                        Section { HStack { Spacer(); ProgressView("Chargement des biens…"); Spacer() } }
+                    } else if let error = service.errorMessage, service.listings.isEmpty {
+                        Section("Annonces immobilières") {
+                            Label(error, systemImage: "wifi.exclamationmark").font(.footnote).foregroundStyle(.orange)
+                            Button("Réessayer") { Task { await service.reload() } }
+                        }
+                    } else if filteredListings.isEmpty {
+                        ContentUnavailableView.search(text: searchText)
+                    } else {
+                        ForEach(filteredListings) { listing in
+                            NavigationLink(value: listing) {
+                                ListingRow(listing: listing, isFavorite: favorites.contains(listing)) {
+                                    favorites.toggle(listing)
+                                }
+                            }
+                            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                        }
+                    }
+                } else {
+                    Section {
+                        HStack(spacing: 10) {
+                            Image(systemName: "tag.fill").foregroundStyle(.teal)
+                            Text("Petites annonces Wix et annonces de véhicules importées, avec leurs critères et le lien vers le vendeur d’origine.")
+                                .font(.footnote).foregroundStyle(.secondary)
+                        }
+                        .listRowBackground(Color.teal.opacity(0.07))
+                    }
+                    if let warning = classifiedAds.warningMessage {
+                        Section {
+                            Label(warning, systemImage: "exclamationmark.triangle.fill")
+                                .font(.footnote).foregroundStyle(.orange)
+                            Button("Réessayer le chargement") { Task { await classifiedAds.reload() } }
+                        }
+                    }
+                    Section {
+                        HStack {
+                            Text("\(filteredClassifiedAds.count) annonce\(filteredClassifiedAds.count > 1 ? "s" : "")")
+                                .font(.footnote).foregroundStyle(.secondary)
+                            Spacer()
+                            Menu {
+                                ForEach(["Ordre du catalogue", "Prix croissant", "Prix décroissant"], id: \.self) { option in
+                                    Button(option) { classifiedSort = option }
+                                }
+                            } label: {
+                                Label(classifiedSort, systemImage: "arrow.up.arrow.down").font(.footnote)
+                            }
+                        }
+                        Button { showClassifiedFilters = true } label: {
+                            Label(activeClassifiedFilterCount == 0 ? "Filtres" : "Filtres (\(activeClassifiedFilterCount))",
+                                  systemImage: "slider.horizontal.3")
+                        }
+                    }
+                    if classifiedAds.isLoading && classifiedAds.ads.isEmpty {
+                        Section { HStack { Spacer(); ProgressView("Chargement des petites annonces…"); Spacer() } }
+                    } else if let error = classifiedAds.errorMessage, classifiedAds.ads.isEmpty {
+                        Section("Petites annonces") {
+                            Label(error, systemImage: "wifi.exclamationmark").font(.footnote).foregroundStyle(.orange)
+                            Button("Réessayer") { Task { await classifiedAds.reload() } }
+                        }
+                    } else if filteredClassifiedAds.isEmpty {
+                        ContentUnavailableView {
+                            Label("Aucune petite annonce trouvée", systemImage: "tag")
+                        } description: {
+                            Text(searchText.isEmpty ? "Les nouvelles annonces publiées sur PartenaireFoyer apparaîtront ici." : "Essayez une autre recherche.")
+                        }
+                        if classifiedAds.warningMessage != nil {
+                            Section {
+                                Button("Réessayer le chargement") { Task { await classifiedAds.reload() } }
+                            }
+                        }
+                    } else {
+                        ForEach(filteredClassifiedAds) { ad in
+                            NavigationLink(value: ad) {
+                                ClassifiedAdRow(ad: ad, isFavorite: favorites.contains(ad)) {
+                                    favorites.toggle(ad)
+                                }
+                            }
+                            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                        }
+                    }
+                }
+            }
+            .listStyle(.plain)
+            .refreshable {
+                if catalogSection == .realEstate { await service.reload() }
+                else { await classifiedAds.reload() }
+            }
+            .navigationDestination(for: Listing.self) { listing in
+                ListingDetailView(listing: listing, professionalsService: professionalsService)
+            }
+            .navigationDestination(for: ClassifiedAd.self) { ad in
+                NativeClassifiedAdDetailView(ad: ad)
+            }
+            .navigationTitle("Annonces")
+            .navigationBarTitleDisplayMode(.large)
+            .searchable(text: $searchText, prompt: catalogSection == .realEstate ? "Ville, code postal, bien…" : "Article, catégorie, ville…")
+            .sheet(isPresented: $showClassifiedFilters) {
+                NavigationStack {
+                    Form {
+                        Section("Annonce") {
+                            Picker("Catégorie", selection: $classifiedCategory) {
+                                Text("Toutes").tag("Toutes")
+                                ForEach(Array(Set(classifiedAds.ads.compactMap(\.category))).sorted(), id: \.self) {
+                                    Text($0).tag($0)
+                                }
+                            }
+                            if classifiedCategory != "Toutes" {
+                                Picker("Sous-catégorie", selection: $classifiedSubcategory) {
+                                    Text("Toutes").tag("Toutes")
+                                    ForEach(Array(Set(classifiedAds.ads.filter { $0.category == classifiedCategory }.compactMap(\.subcategory))).sorted(), id: \.self) {
+                                        Text($0).tag($0)
+                                    }
+                                }
+                            }
+                            Picker("Type", selection: $classifiedListingType) {
+                                Text("Tous").tag("Tous")
+                                Text("Je vends").tag("sell")
+                                Text("Je donne").tag("give")
+                                Text("J’échange").tag("exchange")
+                                Text("Je loue").tag("rent")
+                            }
+                            Picker("État", selection: $classifiedCondition) {
+                                Text("Tous").tag("Tous")
+                                ForEach(Array(Set(classifiedAds.ads.compactMap(\.condition))).sorted(), id: \.self) {
+                                    Text($0).tag($0)
+                                }
+                            }
+                        }
+                        Section("Prix") {
+                            TextField("Prix minimum (€)", text: $classifiedMinPrice).keyboardType(.decimalPad)
+                            TextField("Prix maximum (€)", text: $classifiedMaxPrice).keyboardType(.decimalPad)
+                        }
+                        Section("Localisation") {
+                            TextField("Ville", text: $classifiedCity).textContentType(.addressCity)
+                            TextField("Code postal", text: $classifiedPostalCode).keyboardType(.numberPad)
+                        }
+                        if !classifiedAttributeKeys.isEmpty {
+                            Section("Caractéristiques de la catégorie") {
+                                Picker("Critère", selection: $classifiedAttributeKey) {
+                                    Text("Aucun").tag("Aucun")
+                                    ForEach(classifiedAttributeKeys, id: \.self) { key in
+                                        Text(attributeLabel(key)).tag(key)
+                                    }
+                                }
+                                if classifiedAttributeKey != "Aucun" {
+                                    TextField("Valeur à rechercher", text: $classifiedAttributeValue)
+                                        .textInputAutocapitalization(.never)
+                                }
+                            }
+                        }
+                        if classifiedCategory == "Auto / Moto — accessoires" {
+                            Section("Véhicules et pièces") {
+                                TextField("Marque", text: $classifiedBrand)
+                                TextField("Modèle", text: $classifiedModel)
+                                TextField("Énergie", text: $classifiedEnergy)
+                                TextField("Boîte de vitesses", text: $classifiedGearbox)
+                                TextField("Année minimum", text: $classifiedYearMin).keyboardType(.numberPad)
+                                TextField("Année maximum", text: $classifiedYearMax).keyboardType(.numberPad)
+                                TextField("Kilométrage maximum", text: $classifiedMileageMax).keyboardType(.decimalPad)
+                            }
+                        }
+                        Section {
+                            Button("Effacer les filtres", role: .destructive) {
+                                classifiedCategory = "Toutes"
+                                classifiedSubcategory = "Toutes"
+                                classifiedListingType = "Tous"
+                                classifiedCondition = "Tous"
+                                classifiedAttributeKey = "Aucun"
+                                classifiedAttributeValue = ""
+                                classifiedCity = ""
+                                classifiedPostalCode = ""
+                                classifiedMinPrice = ""
+                                classifiedMaxPrice = ""
+                                classifiedBrand = ""
+                                classifiedModel = ""
+                                classifiedYearMin = ""
+                                classifiedYearMax = ""
+                                classifiedMileageMax = ""
+                                classifiedEnergy = ""
+                                classifiedGearbox = ""
+                                classifiedSort = "Ordre du catalogue"
+                            }
+                        }
+                    }
+                    .navigationTitle("Filtres des petites annonces")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) { Button("Fermer") { showClassifiedFilters = false } }
+                        ToolbarItem(placement: .confirmationAction) { Button("Voir \(filteredClassifiedAds.count)") { showClassifiedFilters = false } }
+                    }
+                }
+            }
+            .onChange(of: classifiedCategory) { _, value in
+                classifiedSubcategory = "Toutes"
+                classifiedAttributeKey = "Aucun"
+                classifiedAttributeValue = ""
+                if value != "Auto / Moto — accessoires" {
+                    classifiedBrand = ""
+                    classifiedModel = ""
+                    classifiedYearMin = ""
+                    classifiedYearMax = ""
+                    classifiedMileageMax = ""
+                    classifiedEnergy = ""
+                    classifiedGearbox = ""
+                }
+            }
+            .onChange(of: classifiedSubcategory) { _, _ in
+                if classifiedAttributeKey != "Aucun" && !classifiedAttributeKeys.contains(classifiedAttributeKey) {
+                    classifiedAttributeKey = "Aucun"
+                    classifiedAttributeValue = ""
+                }
+            }
+            .onChange(of: classifiedAds.ads) { _, ads in
+                if classifiedSubcategory != "Toutes" && !ads.contains(where: { $0.category == classifiedCategory && $0.subcategory == classifiedSubcategory }) {
+                    classifiedSubcategory = "Toutes"
+                }
+            }
+            .task(id: catalogSection) {
+                if catalogSection == .realEstate { await service.loadIfNeeded() }
+                else { await classifiedAds.loadIfNeeded() }
+            }
+        }
+    }
+}
+
+private struct ClassifiedAdRow: View {
+    let ad: ClassifiedAd
+    var isFavorite = false
+    var onFavorite: () -> Void = {}
+
+    var body: some View {
+        HStack(spacing: 13) {
+            ListingImage(url: ad.images.first)
+                .frame(width: 112, height: 98)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            VStack(alignment: .leading, spacing: 6) {
+                Text(ad.formattedPrice).font(.headline.weight(.bold))
+                Text(ad.title).font(.subheadline.weight(.semibold)).lineLimit(2)
+                if let listingType = ad.listingTypeLabel {
+                    Text(listingType).font(.caption.weight(.semibold)).foregroundStyle(.teal)
+                }
+                if ad.isImported {
+                    Label("Annonce importée", systemImage: "arrow.down.doc")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                if let category = ad.category {
+                    Text([category, ad.subcategory].compactMap { $0 }.joined(separator: " · "))
+                        .font(.caption).foregroundStyle(.teal).lineLimit(1)
+                }
+                if !ad.locationLabel.isEmpty {
+                    Label(ad.locationLabel, systemImage: "mappin.and.ellipse")
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+            Spacer(minLength: 0)
+            Button(action: onFavorite) {
+                Image(systemName: isFavorite ? "heart.fill" : "heart")
+                    .font(.title3)
+                    .foregroundStyle(isFavorite ? .pink : .secondary)
+                    .frame(width: 40, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isFavorite ? "Retirer des favoris" : "Ajouter aux favoris")
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+    }
+}
+
+private struct NativeClassifiedAdDetailView: View {
+    let ad: ClassifiedAd
+    @ObservedObject private var auth = WixAuthStore.shared
+    @ObservedObject private var favorites = FavoritesStore.shared
+    @State private var activeSheet: ClassifiedDetailSheet?
+
+    private var checkoutURL: URL? {
+        guard !ad.isImported, ad.id.hasPrefix("wix-classified-") else { return nil }
+        let cmsID = String(ad.id.dropFirst("wix-classified-".count))
+        guard cmsID.range(of: "^[A-Za-z0-9_-]{1,200}$", options: .regularExpression) != nil else { return nil }
+        return URL(string: "https://www.partenairefoyer.com/petites-annonces/checkout/\(cmsID)")
+    }
+
+    private var handDeliveryCheckoutURL: URL? {
+        guard let checkoutURL,
+              var components = URLComponents(url: checkoutURL, resolvingAgainstBaseURL: false) else { return nil }
+        components.queryItems = [URLQueryItem(name: "delivery", value: "hand_delivery")]
+        return components.url
+    }
+
+    private var importedFacts: [(key: String, value: String)] {
+        guard let raw = ad.importedAttributesJSON?.data(using: .utf8),
+              let values = (try? JSONSerialization.jsonObject(with: raw)) as? [String: Any] else { return [] }
+        let labels: [(String, String)] = [
+            ("brand", "Marque"), ("model", "Modèle"), ("year", "Année"), ("mileage", "Kilométrage"),
+            ("energy", "Énergie"), ("gearbox", "Boîte"), ("bodyType", "Carrosserie"), ("engineCapacity", "Cylindrée"),
+            ("fiscalPower", "Puissance fiscale"), ("powerHp", "Puissance"), ("doors", "Portes"), ("seats", "Places"),
+            ("color", "Couleur"), ("partType", "Type de pièce"), ("partReference", "Référence"),
+            ("oemReference", "Référence constructeur"), ("compatibleMake", "Marque compatible"),
+            ("compatibleModel", "Modèle compatible"), ("compatibleYearFrom", "Année compatible dès"),
+            ("compatibleYearTo", "Année compatible jusqu’à"), ("engineCode", "Code moteur"), ("dimensions", "Dimensions")
+        ]
+        let knownLabels = Dictionary(uniqueKeysWithValues: labels)
+        let hiddenKeys: Set<String> = [
+            "catalogVersion", "classifiedOwnerType", "classifiedOwnerProfileId", "classifiedOwnerAccountId",
+            "classifiedOwnerDisplayName", "classifiedOwnerRoleLabel", "classifiedOwnerEmail", "classifiedOwnerPhone",
+            "classifiedOwnerImage", "classifiedOwnerDashboardPath", "pfImportedVehicleListing",
+            "importedProfessionalVehicle", "importedVehicleId", "sourceUrl", "providerProfileId", "providerSlug",
+            "externalReference", "originalListingRequired", "noRepublishingConsent"
+        ]
+        return values.keys.sorted().compactMap { key in
+            guard !hiddenKeys.contains(key), !key.hasPrefix("classifiedOwner"), !key.hasPrefix("pf"),
+                  let value = values[key], !(value is NSNull) else { return nil }
+            let text: String
+            if let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() {
+                text = number.boolValue ? "Oui" : "Non"
+            } else if let data = try? JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed, .sortedKeys]),
+                      let json = String(data: data, encoding: .utf8), value is [Any] || value is [String: Any] {
+                text = json
+            } else {
+                text = String(describing: value)
+            }
+            let cleanText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !cleanText.isEmpty else { return nil }
+            let readableKey = key.replacingOccurrences(of: "([a-z])([A-Z])", with: "$1 $2", options: .regularExpression)
+            let label = knownLabels[key] ?? (String(readableKey.prefix(1)).uppercased() + String(readableKey.dropFirst()))
+            return (label, cleanText)
+        }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                if ad.images.isEmpty {
+                    ListingImage(url: nil).frame(height: 290)
+                } else {
+                    TabView {
+                        ForEach(Array(ad.images.enumerated()), id: \.offset) { _, url in
+                            ListingImage(url: url)
+                        }
+                    }
+                    .tabViewStyle(.page)
+                    .frame(height: 290)
+                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .accessibilityLabel("Galerie de photos de la petite annonce")
+                }
+                HStack(alignment: .top) {
+                    Text(ad.formattedPrice).font(.title2.bold())
+                    Spacer()
+                    Button { favorites.toggle(ad) } label: {
+                        Image(systemName: favorites.contains(ad) ? "heart.fill" : "heart")
+                            .font(.title2)
+                            .foregroundStyle(favorites.contains(ad) ? .pink : .teal)
+                            .frame(width: 48, height: 48)
+                            .background(Color.teal.opacity(0.09), in: Circle())
+                    }
+                    .accessibilityLabel(favorites.contains(ad) ? "Retirer des favoris" : "Ajouter aux favoris")
+                }
+                Text(ad.title).font(.title3.weight(.semibold))
+                if let listingType = ad.listingTypeLabel {
+                    Label(listingType, systemImage: "tag")
+                        .font(.subheadline.weight(.semibold)).foregroundStyle(.teal)
+                }
+                if ad.isImported {
+                    Label("Annonce importée depuis un site partenaire", systemImage: "arrow.down.doc")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+                if let category = ad.category {
+                    Label([category, ad.subcategory].compactMap { $0 }.joined(separator: " · "), systemImage: "tag")
+                        .font(.subheadline).foregroundStyle(.teal)
+                }
+                if let condition = ad.condition, !condition.isEmpty {
+                    Label(condition, systemImage: "checkmark.seal")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+                if let provider = ad.importedProviderName, ad.isImported {
+                    Label(provider, systemImage: "building.2")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+                if !importedFacts.isEmpty {
+                    VStack(alignment: .leading, spacing: 9) {
+                        Text("Caractéristiques").font(.headline)
+                        ForEach(importedFacts, id: \.key) { fact in
+                            HStack(alignment: .firstTextBaseline) {
+                                Text(fact.key).foregroundStyle(.secondary)
+                                Spacer(minLength: 12)
+                                Text(fact.value).multilineTextAlignment(.trailing)
+                            }.font(.subheadline)
+                        }
+                    }
+                }
+                if !ad.locationLabel.isEmpty {
+                    Label(ad.locationLabel, systemImage: "mappin.and.ellipse")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+                if let description = ad.description, !description.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Description").font(.headline)
+                        Text(description).font(.body).foregroundStyle(.secondary).textSelection(.enabled)
+                    }
+                }
+                if let checkoutURL {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Button {
+                            activeSheet = .web(InAppSafariPage(url: checkoutURL))
+                        } label: {
+                            Label("Acheter avec livraison", systemImage: "shippingbox")
+                                .font(.headline)
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.teal)
+                        if let handDeliveryCheckoutURL {
+                            Button {
+                                activeSheet = .web(InAppSafariPage(url: handDeliveryCheckoutURL))
+                            } label: {
+                                Label("Acheter avec remise en main propre", systemImage: "person.crop.rectangle")
+                                    .font(.headline)
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(.teal)
+                        }
+                        Text("Le paiement sécurisé, les offres de prix et, pour la livraison, le choix d’un Point Relais Mondial Relay sont finalisés dans le checkout PartenaireFoyer.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if let wixDetailURL = ad.wixDetailURL {
+                    Button {
+                        activeSheet = .web(InAppSafariPage(url: wixDetailURL))
+                    } label: {
+                        Label("Contacter le vendeur sur PartenaireFoyer", systemImage: "message")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.teal)
+                    Text("La messagerie s’ouvre dans le parcours sécurisé PartenaireFoyer et reste liée à votre compte Wix.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                if !ad.isImported, ad.id.hasPrefix("wix-classified-") {
+                    Button {
+                        activeSheet = .report(ad)
+                    } label: {
+                        Label("Signaler cette annonce", systemImage: "flag")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                    }
+                    .buttonStyle(.plain)
+                    .tint(.red)
+                }
+                if let externalURL = ad.externalURL {
+                    Link(destination: externalURL) {
+                        Label("Voir l’annonce chez le vendeur", systemImage: "arrow.up.right.square")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.teal)
+                }
+            }
+            .padding(18)
+        }
+        .background(Color(uiColor: .systemGroupedBackground))
+        .navigationTitle("Petite annonce")
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $activeSheet) { sheet in
+            switch sheet {
+            case .report(let ad):
+                NativeClassifiedReportSheet(ad: ad)
+            case .web(let page):
+                InAppSafariView(url: page.url)
+                    .ignoresSafeArea()
+            }
+        }
+    }
+}
+
+private enum ClassifiedDetailSheet: Identifiable {
+    case report(ClassifiedAd)
+    case web(InAppSafariPage)
+
+    var id: String {
+        switch self {
+        case .report(let ad): return "report-\(ad.id)"
+        case .web(let page): return "web-\(page.id.uuidString)"
+        }
+    }
+}
+
+private struct InAppSafariPage: Identifiable {
+    let id = UUID()
+    let url: URL
+}
+
+private struct NativeClassifiedReportSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var auth = WixAuthStore.shared
+    @AppStorage("partenairefoyer.activeRole") private var activeRoleRaw = ""
+    let ad: ClassifiedAd
+    @State private var selectedReason = ""
+    @State private var details = ""
+    @State private var isSubmitting = false
+    @State private var errorMessage: String?
+    @State private var successMessage: String?
+
+    private let reasons: [(id: String, label: String, description: String)] = [
+        ("fraud_scam", "Arnaque ou fraude", "Paiement suspect, faux vendeur, tentative de fraude ou annonce trompeuse."),
+        ("prohibited_item", "Objet ou service interdit", "L’annonce semble proposer un produit ou un service interdit sur la plateforme."),
+        ("sexual_explicit", "Contenu sexuel explicite", "Pornographie, service sexuel ou contenu explicitement sexuel."),
+        ("drugs_restricted_medicine", "Drogues ou médicament réglementé", "Stupéfiants ou médicament soumis à prescription ou réglementation."),
+        ("weapon_dangerous", "Arme ou objet dangereux interdit", "Arme, munition, explosif ou autre objet dangereux dont la vente est interdite."),
+        ("counterfeit_stolen", "Contrefaçon ou objet volé", "Produit contrefait, provenance douteuse ou objet potentiellement volé."),
+        ("hate_violence_harassment", "Haine, violence ou harcèlement", "Contenu haineux, menaçant, violent ou ciblant une personne ou un groupe."),
+        ("personal_data", "Données personnelles sensibles", "Document d’identité, données bancaires ou informations personnelles exposées."),
+        ("misleading_category", "Mauvaise catégorie ou description", "L’annonce est volontairement mal classée ou ne correspond pas à sa description."),
+        ("other", "Autre problème", "Un autre motif nécessite une vérification par l’administration.")
+    ]
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Annonce signalée") {
+                    Text(ad.title).font(.headline)
+                    Text("Le signalement sera transmis à l’administration pour vérification.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+                Section("Motif") {
+                    ForEach(reasons, id: \.id) { reason in
+                        Button {
+                            selectedReason = reason.id
+                            errorMessage = nil
+                        } label: {
+                            HStack(alignment: .top, spacing: 10) {
+                                Image(systemName: selectedReason == reason.id ? "largecircle.fill.circle" : "circle")
+                                    .foregroundStyle(selectedReason == reason.id ? .red : .secondary)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(reason.label).font(.subheadline.weight(.semibold))
+                                    Text(reason.description).font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer(minLength: 0)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                Section("Précisions facultatives") {
+                    TextEditor(text: $details).frame(minHeight: 110)
+                    Text("\(details.count)/2000").font(.caption).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+                .onChange(of: details) { _, value in
+                    if value.count > 2000 { details = String(value.prefix(2000)) }
+                }
+                if auth.member == nil {
+                    Section {
+                        Label("Connectez-vous pour confirmer votre profil avant le signalement.", systemImage: "person.crop.circle.badge.exclamationmark")
+                            .font(.footnote).foregroundStyle(.orange)
+                    }
+                } else if !hasReportIdentity {
+                    Section {
+                        Label("Ouvrez votre espace particulier ou professionnel avant d’envoyer un signalement.", systemImage: "person.crop.circle.badge.exclamationmark")
+                            .font(.footnote).foregroundStyle(.orange)
+                    }
+                }
+                if let errorMessage {
+                    Section("Signalement impossible") {
+                        Text(errorMessage).font(.footnote).foregroundStyle(.red)
+                    }
+                }
+                if let successMessage {
+                    Section("Signalement envoyé") {
+                        Label(successMessage, systemImage: "checkmark.circle.fill")
+                            .font(.footnote).foregroundStyle(.green)
+                    }
+                }
+                Section {
+                    Button {
+                        Task { await submit() }
+                    } label: {
+                        HStack {
+                            Spacer()
+                            if isSubmitting { ProgressView("Envoi…") }
+                            else { Label("Envoyer le signalement", systemImage: "flag.fill") }
+                            Spacer()
+                        }
+                    }
+                    .disabled(isSubmitting || selectedReason.isEmpty || !hasReportIdentity || successMessage != nil)
+                }
+            }
+            .navigationTitle("Signaler l’annonce")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(successMessage == nil ? "Annuler" : "Fermer") { dismiss() }
+                        .disabled(isSubmitting)
+                }
+            }
+        }
+    }
+
+    private var hasReportIdentity: Bool {
+        auth.member != nil && ["particulier", "professionnel", "courtier", "artisan", "diagnostiqueur", "prestataire"].contains(activeRoleRaw)
+    }
+
+    @MainActor
+    private func submit() async {
+        guard !selectedReason.isEmpty, let adID = cmsID else { return }
+        isSubmitting = true
+        errorMessage = nil
+        defer { isSubmitting = false }
+        let key = "partenairefoyer.classifiedReportClientKey"
+        let clientKey = UserDefaults.standard.string(forKey: key) ?? UUID().uuidString
+        UserDefaults.standard.set(clientKey, forKey: key)
+        do {
+            successMessage = try await auth.reportClassifiedAd(
+                adID: adID,
+                reason: selectedReason,
+                details: details,
+                clientReportKey: clientKey
+            )
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private var cmsID: String? {
+        guard ad.id.hasPrefix("wix-classified-") else { return nil }
+        let value = String(ad.id.dropFirst("wix-classified-".count))
+        return value.range(of: "^[A-Za-z0-9_-]{1,200}$", options: .regularExpression) == nil ? nil : value
+    }
+}
+
+private struct NativeFavoritesView: View {
+    @ObservedObject var service: ListingsService
+    @ObservedObject var classifiedAds: ClassifiedAdsService
+    @ObservedObject var professionalsService: ProfessionalsService
+    @ObservedObject private var favorites = FavoritesStore.shared
+    @ObservedObject private var auth = WixAuthStore.shared
+    @State private var professionalFavorites: [WixProfessionalFavorite] = []
+    @State private var isLoadingProfessionalFavorites = false
+    @State private var professionalFavoritesError: String?
+    private var savedListings: [Listing] { service.listings.filter { favorites.contains($0) } }
+    private var savedClassifiedAds: [ClassifiedAd] { classifiedAds.ads.filter { favorites.contains($0) } }
+    private var savedProfessionals: [(WixProfessionalFavorite, WixPublicProfessional)] {
+        professionalFavorites.compactMap { favorite in
+            guard let professional = professionalsService.professionals.first(where: { $0.cmsProfileID == favorite.professionalID }) else { return nil }
+            return (favorite, professional)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Biens immobiliers") {
+                    if savedListings.isEmpty {
+                        Text("Aucun bien immobilier enregistré.").foregroundStyle(.secondary)
+                    } else {
+                        ForEach(savedListings) { listing in
+                            NavigationLink(value: listing) {
+                                ListingRow(listing: listing, isFavorite: true) { favorites.toggle(listing) }
+                            }
+                            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                        }
+                    }
+                }
+                Section("Petites annonces") {
+                    if savedClassifiedAds.isEmpty {
+                        Text("Aucune petite annonce enregistrée.").foregroundStyle(.secondary)
+                    } else {
+                        ForEach(savedClassifiedAds) { ad in
+                            NavigationLink(value: ad) {
+                                ClassifiedAdRow(ad: ad, isFavorite: true) { favorites.toggle(ad) }
+                            }
+                            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                        }
+                    }
+                }
+                Section("Professionnels") {
+                    if auth.member?.loginEmailVerified != true {
+                        Label("Connectez-vous depuis l’onglet Menu avec une adresse vérifiée pour voir vos professionnels favoris.", systemImage: "person.crop.circle.badge.exclamationmark")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    } else if isLoadingProfessionalFavorites {
+                        ProgressView("Chargement de vos professionnels favoris…")
+                    } else if let professionalFavoritesError {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(professionalFavoritesError).font(.footnote).foregroundStyle(.red)
+                            Button("Réessayer") { Task { await reloadProfessionalFavorites() } }
+                        }
+                    } else if savedProfessionals.isEmpty {
+                        Text("Aucun professionnel favori enregistré.").foregroundStyle(.secondary)
+                    } else {
+                        ForEach(professionalFavorites) { favorite in
+                            if let professional = professionalsService.professionals.first(where: { $0.cmsProfileID == favorite.professionalID }) {
+                                NavigationLink(value: professional.id) {
+                                    ProfessionalRow(professional: professional)
+                                }
+                                .listRowInsets(EdgeInsets(top: 7, leading: 16, bottom: 7, trailing: 16))
+                                .swipeActions {
+                                    Button("Retirer", systemImage: "heart.slash", role: .destructive) {
+                                        Task {
+                                            do {
+                                                _ = try await auth.toggleProfessionalFavorite(favorite.professionalID, professionalType: favorite.professionalType)
+                                                await reloadProfessionalFavorites()
+                                            } catch {
+                                                professionalFavoritesError = error.localizedDescription
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationDestination(for: Listing.self) { ListingDetailView(listing: $0, professionalsService: professionalsService) }
+            .navigationDestination(for: ClassifiedAd.self) { NativeClassifiedAdDetailView(ad: $0) }
+            .navigationDestination(for: String.self) { id in
+                if let professional = professionalsService.professionals.first(where: { $0.id == id }) {
+                    ProfessionalDetailView(professional: professional)
+                }
+            }
+            .navigationTitle("Favoris")
+            .safeAreaInset(edge: .bottom) {
+                if let message = favorites.syncMessage {
+                    Text(message)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 8)
+                        .background(.bar)
+                }
+            }
+            .task {
+                await service.loadIfNeeded()
+                await classifiedAds.loadIfNeeded()
+                favorites.inferSources(listings: service.listings, ads: classifiedAds.ads)
+                await favorites.syncFromWix()
+            }
+            .task(id: auth.member?.id) {
+                await professionalsService.loadIfNeeded()
+                await reloadProfessionalFavorites()
+            }
+        }
+    }
+
+    @MainActor
+    private func reloadProfessionalFavorites() async {
+        guard auth.member?.loginEmailVerified == true else {
+            professionalFavorites = []
+            professionalFavoritesError = nil
+            isLoadingProfessionalFavorites = false
+            return
+        }
+        isLoadingProfessionalFavorites = true
+        professionalFavoritesError = nil
+        defer { isLoadingProfessionalFavorites = false }
+        do {
+            professionalFavorites = try await auth.fetchProfessionalFavorites()
+        } catch {
+            professionalFavoritesError = error.localizedDescription
+        }
+    }
+}
+
+private struct ListingRow: View {
+    let listing: Listing
+    let isFavorite: Bool
+    let onFavorite: () -> Void
+
+    var body: some View {
+        HStack(spacing: 13) {
+            ListingImage(url: listing.gallery.first)
+                .frame(width: 112, height: 98)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(listing.formattedPrice)
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(.primary)
+                Text(listing.title ?? "Annonce immobilière")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                if !listing.locationLabel.isEmpty {
+                    Label(listing.locationLabel, systemImage: "mappin.and.ellipse")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                if let surface = listing.formattedSurface {
+                    Text(surface).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            Spacer(minLength: 0)
+            Button(action: onFavorite) {
+                Image(systemName: isFavorite ? "heart.fill" : "heart")
+                    .font(.title3)
+                    .foregroundStyle(isFavorite ? .pink : .secondary)
+                    .frame(width: 40, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isFavorite ? "Retirer des favoris" : "Ajouter aux favoris")
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+    }
+}
+
+private struct ListingImage: View {
+    let url: URL?
+
+    var body: some View {
+        Group {
+            if let url {
+                AsyncImage(url: url) { phase in
+                    if let image = phase.image {
+                        image.resizable().scaledToFill()
+                    } else if phase.error != nil {
+                        placeholder
+                    } else {
+                        ZStack { placeholder; ProgressView() }
+                    }
+                }
+            } else {
+                placeholder
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
+    }
+
+    private var placeholder: some View {
+        Rectangle()
+            .fill(Color.teal.opacity(0.09))
+            .overlay(Image(systemName: "house.fill").font(.title2).foregroundStyle(.teal.opacity(0.6)))
+    }
+}
+
+private struct ListingDetailView: View {
+    let listing: Listing
+    @ObservedObject var professionalsService: ProfessionalsService
+    @ObservedObject private var favorites = FavoritesStore.shared
+    @State private var showImportedContact = false
+    @State private var showProfessionalContact = false
+    @State private var showPrivateOwnerContact = false
+
+    private var linkedProfessional: WixPublicProfessional? {
+        guard let profileID = listing.professionalID, !profileID.isEmpty else { return nil }
+        return professionalsService.professionals.first {
+            $0.cmsProfileID == profileID || $0.id == profileID || $0.id == "prosprofile-\(profileID)"
+        }
+    }
+
+    private var propertyTypeLabel: String? {
+        guard let value = listing.propertyType?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return nil }
+        switch value.lowercased() {
+        case "house", "maison": return "Maison"
+        case "apartment", "appartement": return "Appartement"
+        case "land", "terrain": return "Terrain"
+        case "building", "immeuble": return "Immeuble"
+        case "commercial", "commerce": return "Commerce"
+        case "office", "bureau": return "Bureau"
+        case "garage": return "Garage"
+        default: return value.capitalized
+        }
+    }
+
+    private var transactionTypeLabel: String? {
+        guard let value = listing.transactionType?.lowercased() else { return nil }
+        if ["sale", "vente", "sell"].contains(value) { return "À vendre" }
+        if ["rent", "location", "rental"].contains(value) { return "À louer" }
+        return listing.transactionType
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                if listing.gallery.isEmpty {
+                    ListingImage(url: nil).frame(height: 290)
+                } else {
+                    TabView {
+                        ForEach(Array(listing.gallery.enumerated()), id: \.offset) { entry in
+                            ListingImage(url: entry.element)
+                        }
+                    }
+                    .tabViewStyle(.page)
+                    .frame(height: 290)
+                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                }
+
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text(listing.formattedPrice).font(.title2.bold())
+                        if !listing.locationLabel.isEmpty {
+                            Label(listing.locationLabel, systemImage: "mappin.and.ellipse")
+                                .font(.subheadline).foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer()
+                    Button { favorites.toggle(listing) } label: {
+                        Image(systemName: favorites.contains(listing) ? "heart.fill" : "heart")
+                            .font(.title2)
+                            .foregroundStyle(favorites.contains(listing) ? .pink : .teal)
+                            .frame(width: 48, height: 48)
+                            .background(Color.teal.opacity(0.09), in: Circle())
+                    }
+                    .accessibilityLabel(favorites.contains(listing) ? "Retirer des favoris" : "Ajouter aux favoris")
+                }
+
+                Text(listing.title ?? "Annonce immobilière")
+                    .font(.title3.weight(.semibold))
+
+                HStack(spacing: 12) {
+                    if let propertyTypeLabel {
+                        Label(propertyTypeLabel, systemImage: "house")
+                    }
+                    if let transactionTypeLabel {
+                        Label(transactionTypeLabel, systemImage: "tag")
+                    }
+                }
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.teal)
+
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), alignment: .leading)], alignment: .leading, spacing: 10) {
+                    if let surface = listing.formattedSurface { ListingFact(symbol: "square.dashed", text: surface) }
+                    if let landSurface = listing.landSurface, landSurface > 0 {
+                        ListingFact(symbol: "tree", text: "Terrain \(landSurface.formatted(.number.precision(.fractionLength(0...1)).locale(Locale(identifier: "fr_FR")))) m²")
+                    }
+                    if let rooms = listing.rooms { ListingFact(symbol: "door.left.hand.open", text: "\(rooms) pièces") }
+                    if let bedrooms = listing.bedrooms { ListingFact(symbol: "bed.double", text: "\(bedrooms) ch.") }
+                    if let bathrooms = listing.bathrooms { ListingFact(symbol: "shower", text: "\(bathrooms) SDB") }
+                }
+
+                if let description = listing.description, !description.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Description").font(.headline)
+                        Text(description).font(.body).foregroundStyle(.secondary)
+                    }
+                }
+
+                if let source = listing.sourceUrl, let sourceURL = URL(string: source) {
+                    Link(destination: sourceURL) {
+                        Label("Voir l’annonce d’origine", systemImage: "arrow.up.right.square")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 15)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(Color(red: 0.02, green: 0.38, blue: 0.34))
+                }
+
+                if listing.canContactImportedProfessional {
+                    Button { showImportedContact = true } label: {
+                        Label("Contacter via PartenaireFoyer", systemImage: "envelope.badge")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 15)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color(red: 0.02, green: 0.38, blue: 0.34))
+                }
+                if let linkedProfessional {
+                    Button { showProfessionalContact = true } label: {
+                        Label("Contacter le professionnel", systemImage: "envelope.badge")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 15)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color(red: 0.02, green: 0.38, blue: 0.34))
+                    .accessibilityHint("Envoie une demande native dans l’espace professionnel Wix.")
+                    .sheet(isPresented: $showProfessionalContact) {
+                        NavigationStack {
+                            ProfessionalMinisiteRequestForm(
+                                professional: linkedProfessional,
+                                requestType: "contact",
+                                listingContext: listing
+                            )
+                        }
+                        .presentationDetents([.large])
+                        .presentationDragIndicator(.visible)
+                    }
+                }
+                if listing.id.hasPrefix("wix-private-") {
+                    Button { showPrivateOwnerContact = true } label: {
+                        Label("Contacter le propriétaire", systemImage: "envelope.badge")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 15)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color(red: 0.02, green: 0.38, blue: 0.34))
+                }
+            }
+            .padding(18)
+        }
+        .background(Color(uiColor: .systemGroupedBackground))
+        .navigationTitle("Détail de l’annonce")
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showImportedContact) {
+            NavigationStack {
+                ImportedListingContactForm(listing: listing)
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showPrivateOwnerContact) {
+            NavigationStack { PrivatePropertyContactForm(listing: listing) }
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
+        .task { await professionalsService.loadIfNeeded() }
+    }
+}
+
+private struct ListingFact: View {
+    let symbol: String
+    let text: String
+    var body: some View {
+        Label(text, systemImage: symbol)
+            .font(.caption.weight(.medium))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(Color.teal.opacity(0.09), in: Capsule())
+    }
+}
+
+private struct HomeDashboardView: View {
+    @Binding var selectedTab: Int
+    @State private var showNativeEstimation = false
+    @State private var showPublicDemand = false
+    @State private var publicDemandType = "recherche_achat"
+
+    var body: some View {
+        NavigationStack {
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 20) {
+                    hero
+                    Button { selectedTab = 1 } label: {
+                        HStack(spacing: 14) {
+                            Image(systemName: "magnifyingglass")
+                                .font(.title3.weight(.semibold))
+                                .foregroundStyle(.teal)
+                                .frame(width: 46, height: 46)
+                                .background(Color.teal.opacity(0.11), in: RoundedRectangle(cornerRadius: 14))
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Voir les annonces").font(.headline).foregroundStyle(.primary)
+                                Text("Biens publiés par nos professionnels").font(.subheadline).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "arrow.right").foregroundStyle(.secondary)
+                        }
+                        .padding(16)
+                        .background(.background, in: RoundedRectangle(cornerRadius: 20))
+                        .overlay(RoundedRectangle(cornerRadius: 20).stroke(.quaternary, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+
+                    Button { selectedTab = 2 } label: {
+                        HStack(spacing: 14) {
+                            Image(systemName: "bed.double")
+                                .font(.title3.weight(.semibold))
+                                .foregroundStyle(.teal)
+                                .frame(width: 46, height: 46)
+                                .background(Color.teal.opacity(0.11), in: RoundedRectangle(cornerRadius: 14))
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Trouver un séjour saisonnier").font(.headline).foregroundStyle(.primary)
+                                Text("Parcourez les hébergements et leurs équipements").font(.subheadline).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "arrow.right").foregroundStyle(.secondary)
+                        }
+                        .padding(16)
+                        .background(.background, in: RoundedRectangle(cornerRadius: 20))
+                        .overlay(RoundedRectangle(cornerRadius: 20).stroke(.quaternary, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+
+                    Button { selectedTab = 3 } label: {
+                        HStack(spacing: 14) {
+                            Image(systemName: "person.2")
+                                .font(.title3.weight(.semibold))
+                                .foregroundStyle(.teal)
+                                .frame(width: 46, height: 46)
+                                .background(Color.teal.opacity(0.11), in: RoundedRectangle(cornerRadius: 14))
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Trouver un professionnel").font(.headline).foregroundStyle(.primary)
+                                Text("Profils inscrits et professionnels importés").font(.subheadline).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "arrow.right").foregroundStyle(.secondary)
+                        }
+                        .padding(16)
+                        .background(.background, in: RoundedRectangle(cornerRadius: 20))
+                        .overlay(RoundedRectangle(cornerRadius: 20).stroke(.quaternary, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+
+                    Button { showNativeEstimation = true } label: {
+                        HStack(spacing: 14) {
+                            Image(systemName: "chart.line.uptrend.xyaxis")
+                                .font(.title3.weight(.semibold))
+                                .foregroundStyle(.teal)
+                                .frame(width: 46, height: 46)
+                                .background(Color.teal.opacity(0.11), in: RoundedRectangle(cornerRadius: 14))
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Faire estimer mon bien").font(.headline).foregroundStyle(.primary)
+                                Text("Envoyez votre demande depuis l’app").font(.subheadline).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "arrow.right").foregroundStyle(.secondary)
+                        }
+                        .padding(16)
+                        .background(.background, in: RoundedRectangle(cornerRadius: 20))
+                        .overlay(RoundedRectangle(cornerRadius: 20).stroke(.quaternary, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Déposer une demande particulière")
+                            .font(.headline)
+                        projectCard(
+                            title: "Je recherche un bien à acheter",
+                            subtitle: "Envoyez une demande aux professionnels de votre secteur",
+                            symbol: "house.and.flag",
+                            type: "recherche_achat"
+                        )
+                        projectCard(
+                            title: "Je recherche une location",
+                            subtitle: "Transmettez vos critères de recherche locative",
+                            symbol: "key.horizontal",
+                            type: "recherche_location"
+                        )
+                        projectCard(
+                            title: "Je mets un bien en location",
+                            subtitle: "Proposez votre logement aux professionnels concernés",
+                            symbol: "house.badge.plus",
+                            type: "mise_en_location"
+                        )
+                        Text("Ces demandes publiques sont enregistrées dans le parcours Wix des particuliers et transmises aux professionnels selon le matching du site.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(16)
+                    .background(.background, in: RoundedRectangle(cornerRadius: 20))
+                    .overlay(RoundedRectangle(cornerRadius: 20).stroke(.quaternary, lineWidth: 1))
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Votre projet immobilier, au même endroit")
+                            .font(.title3.bold())
+                        Text("Consultez les biens, enregistrez vos favoris et choisissez votre espace depuis le menu.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(18)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.background, in: RoundedRectangle(cornerRadius: 20))
+                    .overlay(RoundedRectangle(cornerRadius: 20).stroke(.quaternary, lineWidth: 1))
+
+                    Button { selectedTab = 5 } label: {
+                        Label("Vous êtes… ? Choisir mon espace", systemImage: "person.crop.circle.badge.questionmark")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 15)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color(red: 0.02, green: 0.38, blue: 0.34))
+                }
+                .padding(.horizontal, 17)
+                .padding(.top, 14)
+                .padding(.bottom, 28)
+            }
+            .background(Color(uiColor: .systemGroupedBackground))
+            .toolbar(.hidden, for: .navigationBar)
+        }
+        .sheet(isPresented: $showNativeEstimation) {
+            NavigationStack { NativeEstimationRequestView() }
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showPublicDemand) {
+            NavigationStack { NativePublicDemandForm(demandType: publicDemandType) }
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
+    }
+
+    private func projectCard(title: String, subtitle: String, symbol: String, type: String) -> some View {
+        Button {
+            publicDemandType = type
+            showPublicDemand = true
+        } label: {
+            HStack(spacing: 14) {
+                Image(systemName: symbol)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.teal)
+                    .frame(width: 46, height: 46)
+                    .background(Color.teal.opacity(0.11), in: RoundedRectangle(cornerRadius: 14))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title).font(.headline).foregroundStyle(.primary)
+                    Text(subtitle).font(.subheadline).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 4)
+                Image(systemName: "arrow.right").foregroundStyle(.secondary)
+            }
+            .padding(12)
+            .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var hero: some View {
+        ZStack(alignment: .bottomLeading) {
+            LinearGradient(
+                colors: [Color(red: 0.035, green: 0.12, blue: 0.19), Color(red: 0.02, green: 0.39, blue: 0.32)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            Circle()
+                .fill(.white.opacity(0.07))
+                .frame(width: 230, height: 230)
+                .offset(x: 245, y: -85)
+            Circle()
+                .stroke(.white.opacity(0.10), lineWidth: 1)
+                .frame(width: 180, height: 180)
+                .offset(x: 260, y: -72)
+
+            VStack(alignment: .leading, spacing: 19) {
+                HStack(spacing: 11) {
+                    Image("BrandLogo")
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 58, height: 58)
+                        .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).stroke(.white.opacity(0.28), lineWidth: 1))
+                    .accessibilityHidden(true)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 0) {
+                            Text("Partenaire")
+                                .foregroundStyle(.white)
+                            Text("Foyer")
+                                .foregroundStyle(Color(red: 0.35, green: 0.91, blue: 0.62))
+                        }
+                        .font(.system(size: 17, weight: .bold, desi…13959 tokens truncated…                      Task { await sendMessage() }
+                    } label: {
+                        if isSending { ProgressView() }
+                        else { Image(systemName: "arrow.up.circle.fill").font(.system(size: 34)) }
+                    }
+                    .disabled(isSending || composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityLabel("Envoyer le message")
+                }
+                .padding(.horizontal).padding(.top, 8)
+                if let email = preview["senderEmail"] as? String,
+                   let url = URL(string: "mailto:\(email)") {
+                    Link("Contacter aussi par e-mail", destination: url)
+                        .font(.caption).padding(.bottom, 5)
+                }
+            }
+            .background(.bar)
+        }
+        .navigationTitle(contactName)
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await reload() }
+        .alert("Envoi impossible", isPresented: Binding(
+            get: { sendError != nil },
+            set: { if !$0 { sendError = nil } }
+        )) {
+            Button("OK", role: .cancel) { sendError = nil }
+        } message: {
+            Text(sendError ?? "Réessayez dans un instant.")
+        }
+    }
+
+    @MainActor
+    private func reload() async {
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            let loaded = try await auth.loadProfessionalConversation(id: conversationID)
+            messages = loaded
+            error = nil
+            do {
+                try await auth.markProfessionalConversationRead(conversationID: conversationID)
+                messages = messages.map { message in
+                    var updated = message
+                    if (updated["receiverId"] as? String) == professionalID {
+                        updated["isRead"] = true
+                        updated["seen"] = true
+                    }
+                    return updated
+                }
+            } catch {
+                // Keep the thread readable even if Wix declines the optional read receipt.
+            }
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func sendMessage() async {
+        let content = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !content.isEmpty, !isSending else { return }
+        isSending = true
+        defer { isSending = false }
+        do {
+            let sent = try await auth.sendProfessionalMessage(conversationID: conversationID, content: content)
+            messages.append(sent)
+            composerText = ""
+        } catch {
+            sendError = error.localizedDescription
+        }
+    }
+}
+
+private struct NativePostalLocationFields: View {
+    @Binding var city: String
+    @Binding var postalCode: String
+    @State private var communes: [String] = []
+    @State private var isLoading = false
+
+    var body: some View {
+        TextField("Code postal", text: $postalCode)
+            .keyboardType(.numberPad)
+            .onChange(of: postalCode) { _, value in
+                let cleaned = String(value.filter(\.isNumber).prefix(5))
+                if cleaned != value {
+                    postalCode = cleaned
+                    return
+                }
+                Task { await loadCommunes(for: cleaned) }
+            }
+        if isLoading {
+            ProgressView("Recherche de la commune…")
+        } else if communes.count > 1 {
+            Picker("Choisissez la commune", selection: $city) {
+                Text("Sélectionner une commune").tag("")
+                ForEach(communes, id: \.self) { commune in
+                    Text(commune).tag(commune)
+                }
+            }
+        } else if let commune = communes.first {
+            LabeledContent("Ville", value: commune)
+        } else {
+            TextField("Ville", text: $city)
+                .textContentType(.addressCity)
+        }
+    }
+
+    private func loadCommunes(for code: String) async {
+        guard code.count == 5 else {
+            communes = []
+            return
+        }
+        isLoading = true
+        defer { isLoading = false }
+        let results = await WixAuthStore.shared.postalCommunes(postalCode: code)
+        guard postalCode == code else { return }
+        communes = results
+        if results.contains(where: { $0.compare(city, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame }) {
+            return
+        }
+        city = results.count == 1 ? results[0] : ""
+    }
+}
+
+private struct NativePublicDemandForm: View {
+    @Environment(\.dismiss) private var dismiss
+    let demandType: String
+    @State private var firstName = ""
+    @State private var lastName = ""
+    @State private var email = ""
+    @State private var phone = ""
+    @State private var city = ""
+    @State private var postalCode = ""
+    @State private var propertyType = "Maison"
+    @State private var minRent = ""
+    @State private var minBudget = ""
+    @State private var maxBudget = ""
+    @State private var livingArea = ""
+    @State private var maxLivingArea = ""
+    @State private var landArea = ""
+    @State private var maxLandArea = ""
+    @State private var rooms = ""
+    @State private var bedrooms = ""
+    @State private var bathrooms = ""
+    @State private var garage = false
+    @State private var annex = false
+    @State private var swimmingPool = false
+    @State private var description = ""
+    @State private var consent = false
+    @State private var isSubmitting = false
+    @State private var didSubmit = false
+    @State private var errorMessage: String?
+
+    private var isLandlord: Bool { demandType == "mise_en_location" }
+    private var isRentSearch: Bool { demandType == "recherche_location" }
+    private var title: String {
+        switch demandType {
+        case "recherche_location": "Recherche de location"
+        case "mise_en_location": "Mise en location"
+        default: "Recherche d’achat"
+        }
+    }
+    private var canSubmit: Bool {
+        firstName.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 &&
+        lastName.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 &&
+        email.contains("@") && phone.filter(\.isNumber).count >= 8 &&
+        !city.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        postalCode.count == 5 && postalCode.allSatisfy(\.isNumber) && consent &&
+        (!isLandlord || (
+            (number(minRent) ?? 0) > 0 &&
+            (number(livingArea) ?? 0) > 0 &&
+            wholeNumber(rooms) != nil &&
+            wholeNumber(bedrooms) != nil &&
+            wholeNumber(bathrooms) != nil
+        ))
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                Label(title, systemImage: isLandlord ? "house.badge.plus" : "house.and.flag")
+                    .font(.title3.bold())
+                Text("Votre demande sera enregistrée dans le parcours PartenaireFoyer et orientée selon les critères de secteur du site.")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            }
+            Section("Vos coordonnées") {
+                TextField("Prénom", text: $firstName).textContentType(.givenName)
+                TextField("Nom", text: $lastName).textContentType(.familyName)
+                TextField("E-mail", text: $email).textContentType(.emailAddress)
+                    .keyboardType(.emailAddress).textInputAutocapitalization(.never).autocorrectionDisabled()
+                TextField("Téléphone", text: $phone).textContentType(.telephoneNumber).keyboardType(.phonePad)
+            }
+            Section(isLandlord ? "Le bien à louer" : "Votre recherche") {
+                Picker("Type de bien", selection: $propertyType) {
+                    ForEach(["Maison", "Appartement", "Terrain", "Immeuble", "Commerce", "Autre"], id: \.self) { Text($0) }
+                }
+                NativePostalLocationFields(city: $city, postalCode: $postalCode)
+                if isLandlord {
+                    TextField("Loyer mensuel souhaité (€)", text: $minRent).keyboardType(.decimalPad)
+                    TextField("Surface habitable (m²)", text: $livingArea).keyboardType(.decimalPad)
+                    TextField("Surface du terrain (m²), facultatif", text: $landArea).keyboardType(.decimalPad)
+                    TextField("Nombre de pièces", text: $rooms).keyboardType(.numberPad)
+                    TextField("Nombre de chambres", text: $bedrooms).keyboardType(.numberPad)
+                    TextField("Nombre de salles de bain", text: $bathrooms).keyboardType(.numberPad)
+                    Toggle("Garage", isOn: $garage)
+                    Toggle("Annexe", isOn: $annex)
+                    Toggle("Piscine", isOn: $swimmingPool)
+                } else {
+                    TextField(isRentSearch ? "Loyer minimum (€)" : "Budget minimum (€)", text: $minBudget).keyboardType(.decimalPad)
+                    TextField(isRentSearch ? "Loyer maximum (€)" : "Budget maximum (€)", text: $maxBudget).keyboardType(.decimalPad)
+                    TextField("Surface minimale (m²)", text: $livingArea).keyboardType(.decimalPad)
+                    TextField("Surface maximale (m²)", text: $maxLivingArea).keyboardType(.decimalPad)
+                    TextField("Terrain minimum (m²)", text: $landArea).keyboardType(.decimalPad)
+                    TextField("Terrain maximum (m²)", text: $maxLandArea).keyboardType(.decimalPad)
+                    TextField("Pièces minimum", text: $rooms).keyboardType(.numberPad)
+                    TextField("Chambres minimum", text: $bedrooms).keyboardType(.numberPad)
+                    TextField("Salles de bain minimum", text: $bathrooms).keyboardType(.numberPad)
+                    Toggle("Garage", isOn: $garage)
+                }
+                TextField(isLandlord ? "Description du bien ou du projet" : "Précisions sur le projet", text: $description, axis: .vertical)
+                    .lineLimit(3...6)
+            }
+            Section {
+                Toggle("J’accepte la transmission de mes coordonnées et des critères de ma demande.", isOn: $consent)
+                Text("La demande sera traitée selon les règles de matching PartenaireFoyer. Les coordonnées des particuliers ne sont pas affichées aux professionnels avant attribution.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            if let errorMessage { Section("Envoi impossible") { Text(errorMessage).font(.footnote).foregroundStyle(.red) } }
+            if didSubmit { Section { Label("Votre demande a été transmise.", systemImage: "checkmark.circle.fill").foregroundStyle(.green) } }
+            Section {
+                Button { Task { await submit() } } label: {
+                    HStack { Spacer(); if isSubmitting { ProgressView("Envoi…") } else { Label("Envoyer ma demande", systemImage: "paperplane.fill") }; Spacer() }
+                }
+                .disabled(!canSubmit || isSubmitting || didSubmit)
+            }
+        }
+        .navigationTitle(title).navigationBarTitleDisplayMode(.inline)
+        .toolbar { ToolbarItem(placement: .topBarTrailing) { Button(didSubmit ? "Terminé" : "Fermer") { dismiss() } } }
+    }
+
+    private func number(_ value: String) -> Double? {
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: ",", with: ".")
+        return normalized.isEmpty ? nil : Double(normalized)
+    }
+
+    private func wholeNumber(_ value: String) -> Int? {
+        guard let value = number(value), value > 0, value.rounded(.towardZero) == value else { return nil }
+        return Int(value)
+    }
+
+    @MainActor private func submit() async {
+        guard canSubmit else { return }
+        isSubmitting = true; errorMessage = nil
+        defer { isSubmitting = false }
+        var fields: [String: Any] = [
+            "firstName": firstName.trimmingCharacters(in: .whitespacesAndNewlines),
+            "lastName": lastName.trimmingCharacters(in: .whitespacesAndNewlines),
+            "email": email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+            "phone": phone.trimmingCharacters(in: .whitespacesAndNewlines),
+            "city": city.trimmingCharacters(in: .whitespacesAndNewlines),
+            "propertyType": propertyType,
+            "projectDescription": description
+        ]
+        if isLandlord {
+            fields["senderName"] = "\(firstName) \(lastName)"
+            fields["senderEmail"] = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            fields["senderPhone"] = phone.trimmingCharacters(in: .whitespacesAndNewlines)
+            fields["description"] = description
+            if let value = number(minRent) { fields["rent"] = value }
+            if let value = number(livingArea) { fields["livingArea"] = value }
+            if let value = number(landArea) { fields["landArea"] = value }
+            if let value = number(bathrooms) { fields["bathrooms"] = value }
+            fields["garage"] = garage
+            fields["annex"] = annex
+            fields["swimmingPool"] = swimmingPool
+        } else {
+            fields["description"] = description
+            if isRentSearch {
+                if let value = number(minBudget) { fields["minRent"] = value }
+                if let value = number(maxBudget) { fields["maxRent"] = value }
+            } else {
+                if let value = number(minBudget) { fields["minPrice"] = value }
+                if let value = number(maxBudget) { fields["maxPrice"] = value }
+            }
+            if let value = number(livingArea) { fields["minLivingArea"] = value }
+            if let value = number(maxLivingArea) { fields["maxLivingArea"] = value }
+            if let value = number(landArea) { fields["minLandArea"] = value }
+            if let value = number(maxLandArea) { fields["maxLandArea"] = value }
+            if let value = number(bathrooms) { fields["bathrooms"] = value }
+            fields["garage"] = garage
+        }
+        if let value = number(rooms) { fields["rooms"] = value }
+        if let value = number(bedrooms) { fields["bedrooms"] = value }
+        do {
+            try await WixAuthStore.shared.submitPublicDemand(fields, demandType: demandType, postalCode: postalCode)
+            didSubmit = true
+        } catch { errorMessage = error.localizedDescription }
+    }
+}
+
+private struct NativeEstimationRequestView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var firstName = ""
+    @State private var lastName = ""
+    @State private var email = ""
+    @State private var phone = ""
+    @State private var address = ""
+    @State private var city = ""
+    @State private var postalCode = ""
+    @State private var propertyType = "Maison"
+    @State private var propertyCondition = "Bon état"
+    @State private var occupancyStatus = "Occupé par le propriétaire"
+    @State private var projectTimeline = "Dans les 3 mois"
+    @State private var livingArea = ""
+    @State private var landArea = ""
+    @State private var rooms = ""
+    @State private var bedrooms = ""
+    @State private var budget = ""
+    @State private var consent = false
+    @State private var isSubmitting = false
+    @State private var didSubmit = false
+    @State private var errorMessage: String?
+
+    private var canSubmit: Bool {
+        firstName.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 &&
+        lastName.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 &&
+        email.contains("@") && email.contains(".") &&
+        phone.filter(\.isNumber).count >= 8 &&
+        !address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        !city.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        postalCode.count == 5 && postalCode.allSatisfy(\.isNumber) &&
+        (number(livingArea) ?? 0) > 0 && consent
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                Label("Demande d’estimation", systemImage: "chart.line.uptrend.xyaxis")
+                    .font(.title3.bold())
+                Text("Décrivez votre bien. Votre demande sera transmise à PartenaireFoyer pour être traitée selon le parcours d’estimation existant.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Vos coordonnées") {
+                TextField("Prénom", text: $firstName).textContentType(.givenName)
+                TextField("Nom", text: $lastName).textContentType(.familyName)
+                TextField("Adresse e-mail", text: $email)
+                    .textContentType(.emailAddress)
+                    .keyboardType(.emailAddress)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                TextField("Téléphone", text: $phone)
+                    .textContentType(.telephoneNumber)
+                    .keyboardType(.phonePad)
+            }
+
+            Section("Le bien à estimer") {
+                Picker("Type de bien", selection: $propertyType) {
+                    ForEach(["Maison", "Appartement", "Terrain", "Immeuble", "Autre"], id: \.self) { Text($0) }
+                }
+                TextField("Adresse", text: $address)
+                    .textContentType(.fullStreetAddress)
+                NativePostalLocationFields(city: $city, postalCode: $postalCode)
+                TextField("Surface habitable (m²)", text: $livingArea)
+                    .keyboardType(.decimalPad)
+                TextField("Surface du terrain (m²), facultatif", text: $landArea)
+                    .keyboardType(.decimalPad)
+                TextField("Nombre de pièces, facultatif", text: $rooms)
+                    .keyboardType(.numberPad)
+                TextField("Nombre de chambres, facultatif", text: $bedrooms)
+                    .keyboardType(.numberPad)
+                Picker("État général", selection: $propertyCondition) {
+                    ForEach(["Neuf", "Très bon état", "Bon état", "À rafraîchir", "À rénover"], id: \.self) { Text($0) }
+                }
+                Picker("Occupation", selection: $occupancyStatus) {
+                    ForEach(["Occupé par le propriétaire", "Loué", "Vacant"], id: \.self) { Text($0) }
+                }
+                Picker("Délai du projet", selection: $projectTimeline) {
+                    ForEach(["Au plus vite", "Dans les 3 mois", "Dans les 6 mois", "Plus tard / information"], id: \.self) { Text($0) }
+                }
+                TextField("Budget souhaité, facultatif (€)", text: $budget)
+                    .keyboardType(.decimalPad)
+            }
+
+            Section {
+                Toggle("J’accepte que mes coordonnées et les informations du bien soient transmises pour traiter cette demande.", isOn: $consent)
+                Text("Les informations sont envoyées à la collection Wix existante des demandes d’estimation. L’application n’affiche pas de valeur automatique et ne remplace pas l’avis d’un professionnel.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let errorMessage {
+                Section("Envoi impossible") {
+                    Text(errorMessage).foregroundStyle(.red).font(.footnote)
+                }
+            }
+            if didSubmit {
+                Section {
+                    Label("Votre demande a été transmise.", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                    Text("Vous pouvez fermer cet écran. L’équipe PartenaireFoyer pourra vous recontacter avec les coordonnées fournies.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+
+            Section {
+                Button {
+                    Task { await submit() }
+                } label: {
+                    HStack {
+                        Spacer()
+                        if isSubmitting { ProgressView("Envoi…") }
+                        else { Label("Envoyer ma demande", systemImage: "paperplane.fill").font(.headline) }
+                        Spacer()
+                    }
+                }
+                .disabled(!canSubmit || isSubmitting || didSubmit)
+            } footer: {
+                Text("Les champs marqués facultatifs peuvent rester vides. Le code postal doit comporter 5 chiffres.")
+            }
+        }
+        .navigationTitle("Estimation")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(didSubmit ? "Terminé" : "Fermer") { dismiss() }
+            }
+        }
+    }
+
+    private func number(_ value: String) -> Double? {
+        let normalized = value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: ",", with: ".")
+        guard !normalized.isEmpty else { return nil }
+        return Double(normalized)
+    }
+
+    @MainActor
+    private func submit() async {
+        guard canSubmit else { return }
+        isSubmitting = true
+        errorMessage = nil
+        defer { isSubmitting = false }
+        do {
+            try await WixAuthStore.shared.submitEstimationRequest(
+                firstName: firstName,
+                lastName: lastName,
+                email: email,
+                phone: phone,
+                address: address,
+                city: city,
+                postalCode: postalCode,
+                propertyType: propertyType,
+                propertyCondition: propertyCondition,
+                occupancyStatus: occupancyStatus,
+                projectTimeline: projectTimeline,
+                livingArea: number(livingArea),
+                landArea: number(landArea),
+                rooms: number(rooms),
+                bedrooms: number(bedrooms),
+                budget: number(budget)
+            )
+            didSubmit = true
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+
+private struct NativeBuyerSearchForm: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var service: BuyerSearchService
+    private let searchID: String?
+    @State private var searchName = ""
+    @State private var transactionType: String
+    @State private var selectedTypes: Set<String> = []
+    @State private var city = ""
+    @State private var postalCode = ""
+    @State private var radius = 50.0
+    @State private var minBudget = "0"
+    @State private var maxBudget = "1000000"
+    @State private var minSurface = "0"
+    @State private var maxSurface = ""
+    @State private var minLandSurface = "0"
+    @State private var maxLandSurface = ""
+    @State private var minRooms = "0"
+    @State private var minBedrooms = "0"
+    @State private var minBathrooms = "0"
+    @State private var singleStory = false
+    @State private var garage = false
+    @State private var garden = false
+    @State private var terrace = false
+    @State private var pool = false
+    @State private var parking = false
+    @State private var emailAlertsEnabled = true
+    private let propertyTypes = [
+        "Maison", "Appartement", "Terrain", "Immeuble", "Commerce", "Bureau", "Garage / Parking", "Autre",
+        "Mobile-home", "Bien saisonnier", "Gîte", "Château", "Camping", "Mas", "Place de parking", "Pêcherie",
+        "Maison de vacances", "Résidence secondaire", "Terrain de loisirs", "Terrain agricole", "Étang", "Grange",
+        "Dépendance", "Corps de ferme", "Longère", "Loft", "Atelier", "Hangar", "Local professionnel",
+        "Fonds de commerce", "Viager", "Colocation", "Chambre", "Studio"
+    ]
+
+    init(service: BuyerSearchService, initialTransactionType: String = "buy", initialData: [String: Any]? = nil) {
+        self.service = service
+        searchID = (initialData?["_id"] as? String) ?? (initialData?["id"] as? String)
+        func text(_ key: String, _ fallback: String) -> String {
+            guard let value = initialData?[key] else { return fallback }
+            return String(describing: value)
+        }
+        func flag(_ key: String, _ fallback: Bool = false) -> Bool {
+            (initialData?[key] as? Bool) ?? fallback
+        }
+        _searchName = State(initialValue: text("searchName", ""))
+        _transactionType = State(initialValue: (initialData?["transactionType"] as? String) ?? initialTransactionType)
+        let rawTypes = (initialData?["propertyTypes"] as? String ?? "")
+            .split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        _selectedTypes = State(initialValue: Set(rawTypes))
+        _city = State(initialValue: text("city", ""))
+        _postalCode = State(initialValue: text("postalCode", ""))
+        _radius = State(initialValue: (initialData?["radius"] as? Double) ?? 50)
+        _minBudget = State(initialValue: text("minBudget", "0"))
+        _maxBudget = State(initialValue: text("maxBudget", "1000000"))
+        _minSurface = State(initialValue: text("minSurface", "0"))
+        _maxSurface = State(initialValue: text("maxSurface", ""))
+        _minLandSurface = State(initialValue: text("minLandSurface", "0"))
+        _maxLandSurface = State(initialValue: text("maxLandSurface", ""))
+        _minRooms = State(initialValue: text("minRooms", "0"))
+        _minBedrooms = State(initialValue: text("minBedrooms", "0"))
+        _minBathrooms = State(initialValue: text("minBathrooms", "0"))
+        _singleStory = State(initialValue: flag("singleStory"))
+        _garage = State(initialValue: flag("garage"))
+        _garden = State(initialValue: flag("garden"))
+        _terrace = State(initialValue: flag("terrace"))
+        _pool = State(initialValue: flag("pool"))
+        _parking = State(initialValue: flag("parking"))
+        _emailAlertsEnabled = State(initialValue: flag("emailAlertsEnabled", true))
+    }
+
+    private var canSubmit: Bool {
+        searchName.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 &&
+        !city.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && postalCode.count == 5 &&
+        !selectedTypes.isEmpty && radius >= 1 && radius <= 500 &&
+        validRange(minBudget, maxBudget) && validRange(minSurface, maxSurface) &&
+        validRange(minLandSurface, maxLandSurface)
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                Label(searchID == nil ? "Nouvelle recherche immobilière" : "Modifier ma recherche", systemImage: "sparkles")
+                    .font(.title3.bold())
+                Text("Cette recherche sera enregistrée dans votre compte Wix et alimentera les matchings liés aux biens correspondants.")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            }
+            Section("Recherche") {
+                TextField("Nom de la recherche", text: $searchName)
+                    .textInputAutocapitalization(.sentences)
+                Picker("Projet", selection: $transactionType) {
+                    Text("Acheter").tag("buy")
+                    Text("Louer").tag("rent")
+                }
+                NativePostalLocationFields(city: $city, postalCode: $postalCode)
+                Stepper("Rayon : \(Int(radius)) km", value: $radius, in: 1...500, step: 1)
+            }
+            Section("Types de biens") {
+                ForEach(propertyTypes, id: \.self) { type in
+                    Toggle(type, isOn: Binding(
+                        get: { selectedTypes.contains(type) },
+                        set: { enabled in
+                            if enabled { selectedTypes.insert(type) }
+                            else { selectedTypes.remove(type) }
+                        }
+                    ))
+                }
+            }
+            Section("Critères (facultatifs)") {
+                TextField("Budget minimum (€)", text: $minBudget).keyboardType(.decimalPad)
+                TextField("Budget maximum (€)", text: $maxBudget).keyboardType(.decimalPad)
+                TextField("Surface minimale (m²)", text: $minSurface).keyboardType(.decimalPad)
+                TextField("Surface maximale (m²)", text: $maxSurface).keyboardType(.decimalPad)
+                TextField("Terrain minimum (m²)", text: $minLandSurface).keyboardType(.decimalPad)
+                TextField("Terrain maximum (m²)", text: $maxLandSurface).keyboardType(.decimalPad)
+                TextField("Pièces minimum", text: $minRooms).keyboardType(.numberPad)
+                TextField("Chambres minimum", text: $minBedrooms).keyboardType(.numberPad)
+                TextField("Salles de bain minimum", text: $minBathrooms).keyboardType(.numberPad)
+            }
+            Section("Caractéristiques") {
+                Toggle("Plain-pied", isOn: $singleStory)
+                Toggle("Garage", isOn: $garage)
+                Toggle("Jardin", isOn: $garden)
+                Toggle("Terrasse", isOn: $terrace)
+                Toggle("Piscine", isOn: $pool)
+                Toggle("Parking", isOn: $parking)
+            }
+            Section {
+                Toggle("Recevoir les alertes par e-mail", isOn: $emailAlertsEnabled)
+                Text("Vous pourrez désactiver cette recherche depuis le tableau de bord.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            if let error = service.errorMessage {
+                Section("Enregistrement impossible") {
+                    Text(error).font(.footnote).foregroundStyle(.red)
+                }
+            }
+            Section {
+                Button {
+                    Task { await submit() }
+                } label: {
+                    HStack {
+                        Spacer()
+                        if service.isSubmitting { ProgressView("Enregistrement…") }
+                        else { Label(searchID == nil ? "Créer ma recherche" : "Enregistrer les modifications", systemImage: "checkmark.circle.fill").font(.headline) }
+                        Spacer()
+                    }
+                }
+                .disabled(!canSubmit || service.isSubmitting)
+            }
+        }
+        .navigationTitle("Nouvelle recherche")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fermer") { dismiss() } } }
+    }
+
+    private func number(_ value: String, defaultValue: Double = 0) -> Double {
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: ",", with: ".")
+        return normalized.isEmpty ? defaultValue : (Double(normalized) ?? -1)
+    }
+
+    private func optionalNumber(_ value: String) -> Double? {
+        let parsed = number(value, defaultValue: -1)
+        return parsed < 0 ? nil : parsed
+    }
+
+    private func validRange(_ low: String, _ high: String) -> Bool {
+        let lower = number(low)
+        let upper = optionalNumber(high)
+        return lower >= 0 && (upper == nil || upper! == 0 || lower <= upper!)
+    }
+
+    @MainActor
+    private func submit() async {
+        guard canSubmit else { return }
+        let coordinate = await WixAuthStore.shared.coordinates(city: city, postalCode: postalCode)
+        let success = await service.create(
+            searchName: searchName,
+            transactionType: transactionType,
+            propertyTypes: propertyTypes.filter { selectedTypes.contains($0) },
+            city: city,
+            postalCode: postalCode,
+            radius: radius,
+            minBudget: number(minBudget),
+            maxBudget: number(maxBudget),
+            minSurface: number(minSurface),
+            maxSurface: optionalNumber(maxSurface),
+            minLandSurface: number(minLandSurface),
+            maxLandSurface: optionalNumber(maxLandSurface),
+            minRooms: number(minRooms),
+            minBedrooms: number(minBedrooms),
+            minBathrooms: number(minBathrooms),
+            singleStory: singleStory,
+            garage: garage,
+            garden: garden,
+            terrace: terrace,
+            pool: pool,
+            parking: parking,
+            latitude: coordinate?.latitude,
+            longitude: coordinate?.longitude,
+            emailAlertsEnabled: emailAlertsEnabled,
+            searchID: searchID
+        )
+        if success { dismiss() }
+    }
+}
+
+private struct NativeListingPhotoPicker: View {
+    @Binding var photos: [Data]
+    let maxPhotos: Int
+    @State private var selection: [PhotosPickerItem] = []
+    @State private var isLoading = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            PhotosPicker(selection: $selection, maxSelectionCount: max(1, maxPhotos), matching: .images) {
+                Label(photos.isEmpty ? "Choisir des photos" : "Modifier les photos", systemImage: "photo.badge.plus")
+            }
+            .disabled(isLoading || maxPhotos == 0)
+            if isLoading {
+                ProgressView("Préparation des photos…")
+                    .font(.footnote)
+            }
+            if !photos.isEmpty {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 10) {
+                        ForEach(Array(photos.enumerated()), id: \.offset) { index, data in
+                            if let image = UIImage(data: data) {
+                                ZStack(alignment: .topTrailing) {
+                                    Image(uiImage: image)
+                                        .resizable().scaledToFill()
+                                        .frame(width: 84, height: 72)
+                                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                                    Button {
+                                        photos.remove(at: index)
+                                        errorMessage = nil
+                                    } label: {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .font(.title3).symbolRenderingMode(.palette)
+                                            .foregroundStyle(.white, .black.opacity(0.6))
+                                    }
+                                    .buttonStyle(.plain)
+                                    .padding(4)
+                                    .accessibilityLabel("Supprimer la photo \(index + 1)")
+                                }
+                            }
+                        }
+                    }
+                }
+                .scrollIndicators(.hidden)
+            }
+            Text("Jusqu’à \(maxPhotos) photos. Elles sont redimensionnées avant l’envoi pour limiter les données utilisées.")
+                .font(.footnote).foregroundStyle(.secondary)
+            if let errorMessage {
+                Text(errorMessage).font(.footnote).foregroundStyle(.orange)
+            }
+        }
+        .onChange(of: selection) { _, items in
+            Task { await loadPhotos(items) }
+        }
+    }
+
+    @MainActor
+    private func loadPhotos(_ items: [PhotosPickerItem]) async {
+        guard !items.isEmpty else { photos = []; return }
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+        var prepared: [Data] = []
+        for item in items.prefix(maxPhotos) {
+            guard let data = try? await item.loadTransferable(type: Data.self),
+                  let image = UIImage(data: data) else { continue }
+            let maxDimension = max(image.size.width, image.size.height)
+            let scale = min(1, 1600 / max(maxDimension, 1))
+            let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+            let renderer = UIGraphicsImageRenderer(size: size)
+            let resized = renderer.image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
+            if let jpeg = resized.jpegData(compressionQuality: 0.78), jpeg.count <= 3 * 1024 * 1024 {
+                prepared.append(jpeg)
+            }
+        }
+        photos = prepared
+        if prepared.isEmpty {
+            errorMessage = "Aucune photo compatible n’a pu être préparée. Choisissez des images JPEG, PNG ou HEIC."
+        } else if prepared.count < items.count {
+            errorMessage = "Certaines photos n’ont pas pu être préparées et n’ont pas été ajoutées."
+        }
+    }
+
+    init(photos: Binding<[Data]>, maxPhotos: Int = 12) {
+        _photos = photos
+        self.maxPhotos = max(0, maxPhotos)
+    }
+}
+
+private struct NativePrivatePropertyForm: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var auth = WixAuthStore.shared
+    let onCreated: () -> Void
+
+    @State private var title = ""
+    @State private var description = ""
+    @State private var propertyType = "maison"
+    @State private var transactionType = "vente"
+    @State private var price = ""
+    @State private var surface = ""
+    @State private var landSurface = ""
+    @State private var rooms = 3
+    @State private var bedrooms = 2
+    @State private var bathrooms = 1
+    @State private var city = ""
+    @State private var postalCode = ""
+    @State private var publishImmediately = false
+    @State private var photos: [Data] = []
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+
+    private var canSubmit: Bool {
+        title.trimmingCharacters(in: .whitespacesAndNewlines).count >= 5 &&
+        description.trimmingCharacters(in: .whitespacesAndNewlines).count >= 20 &&
+        propertyType.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 &&
+        city.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 &&
+        postalCode.count >= 4 && number(price) >= 0 && number(surface) > 0 && rooms > 0 &&
+        !photos.isEmpty && (landSurface.isEmpty || optionalNumber(landSurface) != nil)
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                Label("Nouveau bien immobilier", systemImage: "house.badge.plus").font(.title3.bold())
+                Text("Le bien est enregistré dans votre compte Wix. Vous pouvez le garder privé et ajouter une galerie depuis votre iPhone.")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            }
+            Section("Présentation") {
+                TextField("Titre de l’annonce", text: $title).textInputAutocapitalization(.sentences)
+                TextField("Type de bien (maison, appartement…)", text: $propertyType).textInputAutocapitalization(.never)
+                Picker("Transaction", selection: $transactionType) {
+                    Text("Vente").tag("vente")
+                    Text("Location").tag("location")
+                }
+                TextField("Description", text: $description, axis: .vertical).lineLimit(5...12)
+            }
+            Section("Caractéristiques") {
+                TextField("Prix (€)", text: $price).keyboardType(.decimalPad)
+                TextField("Surface habitable (m²)", text: $surface).keyboardType(.decimalPad)
+                TextField("Surface du terrain (facultatif)", text: $landSurface).keyboardType(.decimalPad)
+                Stepper("Pièces : \(rooms)", value: $rooms, in: 1...30)
+                Stepper("Chambres : \(bedrooms)", value: $bedrooms, in: 0...20)
+                Stepper("Salles de bain : \(bathrooms)", value: $bathrooms, in: 0...20)
+            }
+            Section("Localisation") {
+                TextField("Ville", text: $city).textContentType(.addressCity)
+                TextField("Code postal", text: $postalCode).keyboardType(.numberPad)
+                    .onChange(of: postalCode) { _, value in
+                        postalCode = String(value.filter(\.isNumber).prefix(10))
+                    }
+                    .onChange(of: postalCode) { _, value in postalCode = String(value.filter(\.isNumber).prefix(10)) }
+            }
+            Section("Photos") { NativeListingPhotoPicker(photos: $photos) }
+            Section("Publication") {
+                Toggle("Publier dans les annonces publiques", isOn: $publishImmediately)
+                Text(publishImmediately ? "Le bien sera visible après synchronisation des annonces." : "Le bien restera dans votre espace, sans être affiché publiquement.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            if let errorMessage { Section("Enregistrement impossible") { Text(errorMessage).font(.footnote).foregroundStyle(.red) } }
+            Section {
+                Button { Task { await submit() } } label: {
+                    HStack {
+                        Spacer()
+                        if isSaving { ProgressView("Enregistrement…") }
+                        else { Label("Enregistrer le bien", systemImage: "checkmark.circle.fill").font(.headline) }
+                        Spacer()
+                    }
+                }
+                .disabled(!canSubmit || isSaving)
+            } footer: {
+                Text("Ajoutez au moins une photo. Le stockage dédié à l’application ne change pas la configuration Wix.")
+            }
+        }
+        .navigationTitle("Nouveau bien")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fermer") { dismiss() } } }
+    }
+
+    private func number(_ value: String) -> Double {
+        Double(value.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: " ", with: "").replacingOccurrences(of: ",", with: ".")) ?? -1
+    }
+    private func optionalNumber(_ value: String) -> Double? {
+        let result = number(value)
+        return result >= 0 ? result : nil
+    }
+
+    @MainActor
+    private func submit() async {
+        guard canSubmit else { return }
+        isSaving = true
+        errorMessage = nil
+        defer { isSaving = false }
+        do {
+            let imageURLs = try await auth.uploadListingPhotos(photos, role: "particulier")
+            try await auth.createPrivateProperty(
+                title: title, description: description, propertyType: propertyType,
+                transactionType: transactionType, price: number(price), surface: number(surface),
+                landSurface: optionalNumber(landSurface), rooms: rooms, bedrooms: bedrooms,
+                bathrooms: bathrooms, city: city, postalCode: postalCode, photos: imageURLs,
+                publishImmediately: publishImmediately
+            )
+            onCreated()
+            dismiss()
+        } catch { errorMessage = error.localizedDescription }
+    }
+}
+
+private enum ClassifiedCategoryOptions {
+    static let rentalUnits = [("À l’heure", "hour"), ("À la journée", "day"), ("Au week-end", "weekend"), ("À la semaine", "week"), ("Au mois", "month")]
+    static let commonAttributes: [(String, String)] = [
+        ("brand", "Marque"), ("model", "Modèle"), ("color", "Couleur"), ("size", "Taille / dimensions"),
+        ("material", "Matière"), ("dimensions", "Dimensions"), ("capacity", "Capacité"),
+    ]
+    static let vehicleAttributes: [(String, String)] = [
+        ("year", "Année"), ("mileage", "Kilométrage"), ("energy", "Énergie"), ("gearbox", "Boîte de vitesses"),
+        ("bodyType", "Carrosserie"), ("engineCapacity", "Cylindrée"), ("fiscalPower", "Puissance fiscale"),
+        ("powerHp", "Puissance (ch)"), ("doors", "Nombre de portes"), ("seats", "Nombre de places"),
+        ("engineCode", "Code moteur"), ("partType", "Type de pièce"), ("partReference", "Référence de pièce"),
+        ("oemReference", "Référence constructeur"), ("compatibleMake", "Marque compatible"),
+        ("compatibleModel", "Modèle compatible"), ("compatibleYearFrom", "Année compatible dès"),
+        ("compatibleYearTo", "Année compatible jusqu’à"),
+    ]
+    static let allAttributes = commonAttributes + vehicleAttributes
+    static func isUserAttributeKey(_ key: String) -> Bool {
+        key.range(of: "^[A-Za-z][A-Za-z0-9_]{0,63}$", options: .regularExpression) != nil &&
+            key.range(of: "^(?:_?id|ownerId|accountId|memberId|professionalId|hostId|rentalUnit|createdAt|updatedAt|status|isPublic|isActive|slug|attributesJSON|catalogVersion|classifiedOwner.*|pf.*|imported.*|source.*|stripe.*|payment.*|order.*|purchase.*)$", options: [.regularExpression, .caseInsensitive]) == nil
+    }
+
+    static func label(for key: String) -> String {
+        key.replacingOccurrences(of: "([a-z0-9])([A-Z])", with: "$1 $2", options: .regularExpression)
+            .replacingOccurrences(of: "_", with: " ")
+            .capitalized
+    }
+
+    static func observedKeys(category: String, subcategory: String, ads: [ClassifiedAd]) -> [String] {
+        func normalize(_ value: String?) -> String {
+            (value ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+        }
+        let wantedCategory = normalize(category)
+        let wantedSubcategory = normalize(subcategory)
+        var keys = Set<String>()
+        for ad in ads {
+            guard !ad.isImported,
+                  normalize(ad.category) == wantedCategory,
+                  wantedSubcategory.isEmpty || normalize(ad.subcategory) == wantedSubcategory,
+                  let raw = ad.importedAttributesJSON,
+                  let data = raw.data(using: .utf8),
+                  let values = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
+            keys.formUnion(values.keys.filter(isUserAttributeKey))
+        }
+        return keys.sorted()
+    }
+
+    static func attributes(for category: String, observedKeys: [String] = []) -> [(String, String)] {
+        var fields = category == "Auto / Moto — accessoires" ? allAttributes : commonAttributes
+        var seen = Set(fields.map(\.0))
+        for key in observedKeys where isUserAttributeKey(key) && seen.insert(key).inserted {
+            fields.append((key, label(for: key)))
+        }
+        return Array(fields.prefix(80))
+    }
+    static let all = [
+        "Maison & décoration", "Meubles", "Brocante, vintage & antiquités", "Jardin", "Bricolage",
+        "Bois, chauffage & combustibles", "Électroménager", "Informatique", "Téléphonie", "TV / Son / Photo",
+        "Jeux vidéo", "Jeux de société & loisirs", "Fête, événementiel & réception", "Ésotérisme & spiritualité",
+        "Art & loisirs créatifs", "Mode & accessoires", "Beauté & bien-être", "Bébé & enfant", "Sports & loisirs",
+        "Camping, caravaning & plein air", "Vélo & mobilité", "Culture", "Collections", "Instruments de musique",
+        "Auto / Moto — accessoires", "Nautisme", "Matériel professionnel", "BTP, chantier & industrie",
+        "Agriculture & élevage", "Restauration & métiers de bouche", "Bureau & entreprise",
+        "Sécurité, domotique & énergie", "Santé, mobilité & autonomie", "Animaux & accessoires", "Divers"
+    ]
+}
+
+private struct NativeClassifiedAdForm: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var auth = WixAuthStore.shared
+    @ObservedObject var classifiedAds: ClassifiedAdsService
+    let onCreated: () -> Void
+
+    @State private var itemName = ""
+    @State private var itemDescription = ""
+    @State private var itemPrice = ""
+    @State private var listingType = "sell"
+    @State private var rentalUnit = "day"
+    @State private var category = "Maison & décoration"
+    @State private var subcategory = ""
+    @State private var attributes: [String: String] = [:]
+    @State private var itemCondition = "Bon état"
+    @State private var city = ""
+    @State private var postalCode = ""
+    @State private var photos: [Data] = []
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+
+    private let conditions = ["Neuf", "Comme neuf", "Très bon état", "Bon état", "État correct"]
+    private var attributeFields: [(String, String)] {
+        ClassifiedCategoryOptions.attributes(
+            for: category,
+            observedKeys: ClassifiedCategoryOptions.observedKeys(category: category, subcategory: subcategory, ads: classifiedAds.ads)
+        )
+    }
+    private var canSubmit: Bool {
+        itemName.trimmingCharacters(in: .whitespacesAndNewlines).count >= 3 &&
+        itemDescription.trimmingCharacters(in: .whitespacesAndNewlines).count >= 10 &&
+        category.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 &&
+        city.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 && postalCode.count >= 4 && number(itemPrice) >= 0 && !photos.isEmpty
+    }
+
+    var body: some View {
+        Form {
+            Section("Objet") {
+                Picker("Vous souhaitez", selection: $listingType) {
+                    Text("Je vends").tag("sell")
+                    Text("Je donne").tag("give")
+                    Text("J’échange").tag("exchange")
+                    Text("Je loue").tag("rent")
+                }
+                TextField("Titre", text: $itemName).textInputAutocapitalization(.sentences)
+                TextField("Description", text: $itemDescription, axis: .vertical).lineLimit(4...10)
+                Picker("Catégorie", selection: $category) {
+                    ForEach(ClassifiedCategoryOptions.all, id: \.self) { Text($0).tag($0) }
+                }
+                TextField("Sous-catégorie (facultatif)", text: $subcategory)
+                Picker("État", selection: $itemCondition) {
+                    ForEach(conditions, id: \.self) { Text($0).tag($0) }
+                }
+                TextField("Prix (€)", text: $itemPrice).keyboardType(.decimalPad)
+                if listingType == "rent" {
+                    Picker("Périodicité du prix", selection: $rentalUnit) {
+                        ForEach(Array(ClassifiedCategoryOptions.rentalUnits.enumerated()), id: \.offset) { _, option in Text(option.0).tag(option.1) }
+                    }
+                }
+            }
+            if !attributeFields.isEmpty {
+                Section("Caractéristiques complémentaires") {
+                    ForEach(attributeFields, id: \.0) { key, label in
+                        TextField(label, text: Binding(
+                            get: { attributes[key, default: ""] },
+                            set: { attributes[key] = $0 }
+                        ))
+                        .keyboardType(["year", "mileage", "engineCapacity", "fiscalPower", "powerHp", "doors", "seats", "capacity"].contains(key) ? .numbersAndPunctuation : .default)
+                    }
+                }
+            }
+            if let loadIssue = classifiedAds.errorMessage ?? classifiedAds.warningMessage {
+                Section("Champs complémentaires") {
+                    Label(loadIssue, systemImage: "exclamationmark.triangle.fill")
+                        .font(.footnote).foregroundStyle(.orange)
+                    Text("Les champs déjà disponibles restent modifiables.").font(.footnote).foregroundStyle(.secondary)
+                    Button("Réessayer") { Task { await classifiedAds.reload() } }
+                        .disabled(classifiedAds.isLoading)
+                }
+            }
+            Section("Localisation") {
+                TextField("Ville", text: $city).textContentType(.addressCity)
+                TextField("Code postal", text: $postalCode).keyboardType(.numberPad)
+                    .onChange(of: postalCode) { _, value in postalCode = String(value.filter(\.isNumber).prefix(10)) }
+            }
+            Section("Photos") { NativeListingPhotoPicker(photos: $photos) }
+            if let errorMessage { Section("Publication impossible") { Text(errorMessage).font(.footnote).foregroundStyle(.red) } }
+            Section {
+                Button { Task { await submit() } } label: {
+                    HStack {
+                        Spacer()
+                        if isSaving { ProgressView("Publication…") }
+                        else { Label("Publier la petite annonce", systemImage: "tag.fill").font(.headline) }
+                        Spacer()
+                    }
+                }
+                .disabled(!canSubmit || isSaving)
+            } footer: {
+                Text("Ajoutez au moins une photo. Votre annonce sera publiée dans la collection Wix des petites annonces.")
+            }
+        }
+        .navigationTitle("Petite annonce")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fermer") { dismiss() } } }
+        .task { await classifiedAds.loadIfNeeded() }
+        .onChange(of: category) { _, value in
+            clearUnsupportedAttributes(category: value, subcategory: subcategory)
+        }
+        .onChange(of: subcategory) { _, value in
+            clearUnsupportedAttributes(category: category, subcategory: value)
+        }
+    }
+
+    private func clearUnsupportedAttributes(category: String, subcategory: String) {
+        let current = Set(ClassifiedCategoryOptions.attributes(
+            for: category,
+            observedKeys: ClassifiedCategoryOptions.observedKeys(category: category, subcategory: subcategory, ads: classifiedAds.ads)
+        ).map(\.0))
+        for key in Array(attributes.keys) where !current.contains(key) { attributes[key] = "" }
+    }
+
+    private func number(_ value: String) -> Double {
+        Double(value.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: " ", with: "").replacingOccurrences(of: ",", with: ".")) ?? -1
+    }
+
+    @MainActor
+    private func submit() async {
+        guard canSubmit else { return }
+        isSaving = true
+        errorMessage = nil
+        defer { isSaving = false }
+        do {
+            let imageURLs = try await auth.uploadListingPhotos(photos, role: "particulier")
+            try await auth.createClassifiedAd(
+                itemName: itemName, itemDescription: itemDescription, itemPrice: number(itemPrice),
+                category: category, subcategory: subcategory, listingType: listingType, rentalUnit: rentalUnit, itemCondition: itemCondition,
+                city: city, postalCode: postalCode, photos: imageURLs, attributes: attributes
+            )
+            onCreated()
+            dismiss()
+        } catch { errorMessage = error.localizedDescription }
+    }
+}
+
+private struct NativeProfessionalPropertyForm: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var auth = WixAuthStore.shared
+    let onCreated: () -> Void
+
+    @State private var title = ""
+    @State private var description = ""
+    @State private var propertyType = "house"
+    @State private var transactionType = "sale"
+    @State private var price = ""
+    @State private var surface = ""
+    @State private var landSurface = ""
+    @State private var rooms = 3
+    @State private var bedrooms = 2
+    @State private var bathrooms = 1
+    @State private var address = ""
+    @State private var city = ""
+    @State private var postalCode = ""
+    @State private var publishImmediately = false
+    @State private var photos: [Data] = []
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+
+    private let propertyTypes = [
+        ("Maison", "house"), ("Appartement", "apartment"), ("Maison (autre)", "maison"),
+        ("Appartement (autre)", "appartement"), ("Commerce", "commercial"),
+        ("Terrain", "land"), ("Immeuble", "building"), ("Bureau", "office"),
+        ("Garage", "garage"), ("Autre", "other")
+    ]
+
+    private var canSubmit: Bool {
+        title.trimmingCharacters(in: .whitespacesAndNewlines).count >= 5 &&
+        description.trimmingCharacters(in: .whitespacesAndNewlines).count >= 20 &&
+        address.trimmingCharacters(in: .whitespacesAndNewlines).count >= 5 &&
+        city.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 &&
+        postalCode.count >= 4 && number(price) >= 0 && number(surface) > 0 && rooms > 0 &&
+        bathrooms >= 0 && (landSurface.isEmpty || number(landSurface) >= 0) && !photos.isEmpty
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                Label("Nouvelle annonce immobilière", systemImage: "house.badge.plus")
+                    .font(.title3.bold())
+                Text("Le bien et sa galerie seront enregistrés pour votre espace Wix. Par défaut, l’annonce reste masquée.")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            }
+            Section("Présentation") {
+                TextField("Titre de l’annonce", text: $title).textInputAutocapitalization(.sentences)
+                Picker("Type de bien", selection: $propertyType) {
+                    ForEach(Array(propertyTypes.enumerated()), id: \.offset) { _, option in
+                        Text(option.0).tag(option.1)
+                    }
+                }
+                Picker("Transaction", selection: $transactionType) {
+                    Text("Vente").tag("sale")
+                    Text("Location").tag("rent")
+                }
+                TextField("Description du bien", text: $description, axis: .vertical).lineLimit(5...12)
+            }
+            Section("Caractéristiques") {
+                TextField("Prix (€)", text: $price).keyboardType(.decimalPad)
+                TextField("Surface (m²)", text: $surface).keyboardType(.decimalPad)
+                TextField("Surface du terrain (m²), facultative", text: $landSurface).keyboardType(.decimalPad)
+                Stepper("Pièces : \(rooms)", value: $rooms, in: 1...30)
+                Stepper("Chambres : \(bedrooms)", value: $bedrooms, in: 0...20)
+                Stepper("Salles de bain : \(bathrooms)", value: $bathrooms, in: 0...20)
+            }
+            Section("Adresse") {
+                TextField("Adresse", text: $address).textContentType(.streetAddressLine1)
+                TextField("Ville", text: $city).textContentType(.addressCity)
+                TextField("Code postal", text: $postalCode)
+                    .keyboardType(.numberPad)
+                    .onChange(of: postalCode) { _, value in postalCode = String(value.filter(\.isNumber).prefix(10)) }
+            }
+            Section("Photos") { NativeListingPhotoPicker(photos: $photos) }
+            Section("Publication") {
+                Toggle("Publier dès l’enregistrement", isOn: $publishImmediately)
+                Text(publishImmediately
+                     ? "L’annonce sera créée avec le statut actif dans Wix et pourra apparaître dans l’application."
+                     : "L’annonce sera créée comme inactive et ne sera pas affichée publiquement.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            if let errorMessage {
+                Section("Enregistrement impossible") { Text(errorMessage).font(.footnote).foregroundStyle(.red) }
+            }
+            Section {
+                Button {
+                    Task { await submit() }
+                } label: {
+                    HStack {
+                        Spacer()
+                        if isSaving { ProgressView("Enregistrement…") }
+                        else { Label(publishImmediately ? "Créer et publier" : "Enregistrer comme masquée", systemImage: "checkmark.circle.fill").font(.headline) }
+                        Spacer()
+                    }
+                }
+                .disabled(!canSubmit || isSaving)
+            }
+        }
+        .navigationTitle("Nouvelle annonce")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fermer") { dismiss() } } }
+    }
+
+    private func number(_ value: String) -> Double {
+        Double(value.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: ",", with: ".")) ?? -1
+    }
+
+    @MainActor
+    private func submit() async {
+        guard canSubmit else { return }
+        isSaving = true
+        errorMessage = nil
+        defer { isSaving = false }
+        do {
+            try await auth.createProfessionalProperty(
+                title: title,
+                description: description,
+                propertyType: propertyType,
+                transactionType: transactionType,
+                price: number(price),
+                surface: number(surface),
+                landSurface: landSurface.isEmpty ? nil : number(landSurface),
+                rooms: rooms,
+                bedrooms: bedrooms,
+                bathrooms: bathrooms,
+                address: address,
+                city: city,
+                postalCode: postalCode,
+                photos: try await auth.uploadListingPhotos(photos, role: "professionnel"),
+                publishImmediately: publishImmediately
+            )
+            onCreated()
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+
+private struct NativeSeasonalRateForm: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var accommodationID: String
+    @State private var seasonName: String
+    @State private var startDate: Date
+    @State private var endDate: Date
+    @State private var pricePerNight: String
+    @State private var minimumStayNights: Int
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+
+    let accommodations: [[String: Any]]
+    let initialRate: [String: Any]?
+    let onSaved: () -> Void
+
+    init(accommodations: [[String: Any]], initialRate: [String: Any]?, onSaved: @escaping () -> Void) {
+        self.accommodations = accommodations
+        self.initialRate = initialRate
+        self.onSaved = onSaved
+        let firstID = (accommodations.first?["_id"] as? String) ?? (accommodations.first?["id"] as? String) ?? ""
+        _accommodationID = State(initialValue: (initialRate?["accommodationId"] as? String) ?? firstID)
+        _seasonName = State(initialValue: (initialRate?["seasonName"] as? String) ?? "")
+        _startDate = State(initialValue: Self.parseDate(initialRate?["startDate"] as? String) ?? Calendar.current.startOfDay(for: .now))
+        _endDate = State(initialValue: Self.parseDate(initialRate?["endDate"] as? String) ?? Calendar.current.date(byAdding: .month, value: 3, to: Calendar.current.startOfDay(for: .now)) ?? .now)
+        let existingPrice = initialRate?["pricePerNight"].map { String(describing: $0) } ?? ""
+        _pricePerNight = State(initialValue: existingPrice)
+        _minimumStayNights = State(initialValue: (initialRate?["minimumStayNights"] as? Int) ?? 1)
+    }
+
+    private var title: String { initialRate == nil ? "Nouveau tarif saisonnier" : "Modifier le tarif" }
+    private var parsedPrice: Double? {
+        Double(pricePerNight.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: ",", with: "."))
+    }
+    private var canSave: Bool {
+        !accommodationID.isEmpty && seasonName.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 &&
+        startDate <= endDate && (parsedPrice ?? 0) > 0 && (parsedPrice ?? .infinity) <= 100_000
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                Label(title, systemImage: "eurosign.circle")
+                    .font(.title3.bold())
+                Text("Définissez la période et les conditions de séjour pour un de vos hébergements.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            Section("Hébergement et saison") {
+                if accommodations.isEmpty {
+                    ContentUnavailableView("Aucun hébergement", systemImage: "house", description: Text("Créez d’abord un hébergement dans votre espace."))
+                } else {
+                    Picker("Hébergement", selection: $accommodationID) {
+                        ForEach(Array(accommodations.enumerated()), id: \.offset) { _, item in
+                            let id = (item["_id"] as? String) ?? (item["id"] as? String) ?? ""
+                            Text((item["itemName"] as? String) ?? "Hébergement").tag(id)
+                        }
+                    }
+                    .disabled(initialRate != nil)
+                    TextField("Nom de la saison", text: $seasonName)
+                        .textInputAutocapitalization(.words)
+                }
+            }
+            Section("Période") {
+                DatePicker("Du", selection: $startDate, displayedComponents: .date)
+                DatePicker("Au", selection: $endDate, in: startDate..., displayedComponents: .date)
+                    .onChange(of: startDate) { _, newStartDate in
+                        if endDate < newStartDate { endDate = newStartDate }
+                    }
+            }
+            Section("Conditions") {
+                TextField("Prix par nuit (€)", text: $pricePerNight).keyboardType(.decimalPad)
+                Stepper("Séjour minimum : \(minimumStayNights) nuit\(minimumStayNights > 1 ? "s" : "")", value: $minimumStayNights, in: 1...365)
+            }
+            if let errorMessage {
+                Section("Enregistrement impossible") {
+                    Text(errorMessage).font(.footnote).foregroundStyle(.red)
+                }
+            }
+            Section {
+                Button {
+                    Task { await save() }
+                } label: {
+                    HStack {
+                        Spacer()
+                        if isSaving { ProgressView("Enregistrement…") }
+                        else { Label("Enregistrer le tarif", systemImage: "checkmark.circle.fill") }
+                        Spacer()
+                    }
+                }
+                .disabled(!canSave || isSaving || accommodations.isEmpty)
+            }
+        }
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fermer") { dismiss() } } }
+    }
+
+    private static func parseDate(_ value: String?) -> Date? {
+        guard let value else { return nil }
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.date(from: String(value.prefix(10)))
+    }
+
+    private func formattedDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
+
+    @MainActor private func save() async {
+        guard canSave, let parsedPrice else { return }
+        isSaving = true
+        errorMessage = nil
+        defer { isSaving = false }
+        do {
+            try await WixAuthStore.shared.saveSeasonalRate(
+                rateID: (initialRate?["_id"] as? String) ?? (initialRate?["id"] as? String),
+                accommodationID: accommodationID,
+                seasonName: seasonName,
+                startDate: formattedDate(startDate),
+                endDate: formattedDate(endDate),
+                pricePerNight: parsedPrice,
+                minimumStayNights: minimumStayNights
+            )
+            onSaved()
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+
+private struct NativeSpacePickerView: View {
+    @State private var selectedRole: AccountRole?
+    @StateObject private var auth = WixAuthStore.shared
+    @AppStorage("partenairefoyer.activeRole") private var activeRoleRaw = ""
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let member = auth.member, let role = AccountRole(rawValue: activeRoleRaw) {
+                    NativeRoleDashboardView(role: role, member: member) {
+                        auth.signOut()
+                        activeRoleRaw = ""
+                    } onSwitchSpace: {
+                        auth.resetDashboard()
+                        activeRoleRaw = ""
+                    }
+                } else {
+                    rolePicker
+                }
+            }
+            .navigationTitle("Mon espace")
+            .navigationBarTitleDisplayMode(.inline)
+            .task(id: activeRoleRaw) {
+                guard activeRoleRaw == AccountRole.particulier.rawValue,
+                      auth.member != nil else { return }
+                await FavoritesStore.shared.syncFromWix()
+            }
+            .sheet(item: $selectedRole) { role in
+                RoleEntryView(role: role) {
+                    activeRoleRaw = role.rawValue
+                    selectedRole = nil
+                }
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+            }
+        }
+    }
+
+    private var rolePicker: some View {
+        List {
+                Section {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text("Vous êtes… ?")
+                            .font(.largeTitle.bold())
+                        Text("Choisissez votre profil. Chaque espace reste séparé ; les fonctions d’un compte ne s’affichent qu’après connexion à cet espace.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 8)
+                    .listRowBackground(Color.clear)
+                }
+
+                Section("Choisir un espace") {
+                    ForEach(AccountRole.allCases) { role in
+                        Button { select(role) } label: {
+                            HStack(spacing: 13) {
+                                Image(systemName: role.symbol)
+                                    .font(.title3)
+                                    .foregroundStyle(.teal)
+                                    .frame(width: 42, height: 42)
+                                    .background(Color.teal.opacity(0.1), in: RoundedRectangle(cornerRadius: 13))
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(role.title).font(.headline).foregroundStyle(.primary)
+                                    Text(role.subtitle).font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption.weight(.bold)).foregroundStyle(.tertiary)
+                            }
+                            .padding(.vertical, 5)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+        }
+        .listStyle(.insetGrouped)
+        .overlay {
+            if auth.isSigningIn {
+                ProgressView("Connexion sécurisée Wix…")
+                    .padding(22)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
+            }
+        }
+    }
+
+    private func select(_ role: AccountRole) {
+        // Keep the role spaces distinct while allowing a signed-in Wix member to
+        // move between their own linked spaces without entering their password again.
+        if auth.member != nil {
+            auth.resetDashboard()
+            activeRoleRaw = role.rawValue
+            selectedRole = nil
+        } else {
+            selectedRole = role
+        }
+    }
+}
+
+private enum AccountRole: String, CaseIterable, Identifiable {
+    case particulier, professionnel, courtier, artisan, diagnostiqueur, prestataire, hebergeur
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .particulier: "Particulier"
+        case .professionnel: "Professionnel de l’immobilier"
+        case .courtier: "Courtier"
+        case .artisan: "Artisan / diagnostiqueur"
+        case .diagnostiqueur: "Diagnostiqueur"
+        case .prestataire: "Prestataire"
+        case .hebergeur: "Hébergeur"
+        }
+    }
+    var subtitle: String {
+        switch self {
+        case .particulier: "Mes annonces, recherches et favoris"
+        case .professionnel: "Mes biens, acquéreurs et matchings"
+        case .courtier: "Mon espace et mes demandes"
+        case .artisan: "Mes services et demandes de diagnostic"
+        case .diagnostiqueur: "Mes diagnostics et demandes reçues"
+        case .prestataire: "Ma fiche, mes photos et mes contacts"
+        case .hebergeur: "Mes hébergements et réservations"
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .particulier: "person.crop.circle"
+        case .professionnel: "building.2"
+        case .courtier: "briefcase"
+        case .artisan: "wrench.and.screwdriver"
+        case .diagnostiqueur: "doc.text.magnifyingglass"
+        case .prestataire: "person.2"
+        case .hebergeur: "bed.double"
+        }
+    }
+    var loginURL: URL {
+        URL(string: "https://www.partenairefoyer.com\(loginPath)")!
+    }
+    var signupURL: URL {
+        URL(string: "https://www.partenairefoyer.com\(signupPath)")!
+    }
+    var dashboardQueryRole: String {
+        rawValue
+    }
+    private var loginPath: String {
+        switch self {
+        case .particulier: "/vendeur-login"
+        case .professionnel: "/pro-app-login"
+        case .courtier: "/broker-login"
+        case .artisan: "/artisan-login"
+        case .diagnostiqueur: "/artisan-login"
+        case .prestataire: "/connexion-prestataire"
+        case .hebergeur: "/hebergeur-connexion"
+        }
+    }
+    private var signupPath: String {
+        switch self {
+        case .particulier: "/vendeur-signup"
+        case .professionnel: "/inscription-pro"
+        case .courtier: "/broker-signup"
+        case .artisan: "/artisan-signup"
+        case .diagnostiqueur: "/artisan-signup"
+        case .prestataire: "/inscription-prestataire"
+        case .hebergeur: "/hebergeur-inscription"
+        }
+    }
+}
+
+private struct RoleEntryView: View {
+    @Environment(\.dismiss) private var dismiss
+    @StateObject private var auth = WixAuthStore.shared
+    @State private var email = ""
+    @State private var password = ""
+    @State private var firstName = ""
+    @State private var lastName = ""
+    @State private var phone = ""
+    @State private var city = ""
+    @State private var postalCode = ""
+    @State private var companyName = ""
+    @State private var category = ""
+    @State private var subcategory = ""
+    @State private var description = ""
+    @State private var website = ""
+    @State private var isVisiblePublicly = false
+    @State private var professionalTitle = ""
+    @State private var yearsOfExperience = ""
+    @State private var professionalType = "mandataire"
+    @State private var showLegalAcceptance = false
+    @State private var showAccountRecovery = false
+    @State private var isCreatingAccount = false
+    let role: AccountRole
+    let onSignedIn: () -> Void
+    var initialProfile: [String: Any]? = nil
+    var isEditing: Bool = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Label(role.title, systemImage: role.symbol)
+                        .font(.title3.bold())
+                    Text(role.subtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+
+                if isCreatingAccount {
+                    Section(isEditing ? "Modifier mon profil Wix" : "Créer votre compte Wix") {
+                        if !isEditing {
+                            TextField("Prénom", text: $firstName)
+                                .textContentType(.givenName)
+                                .textInputAutocapitalization(.words)
+                            TextField("Nom", text: $lastName)
+                                .textContentType(.familyName)
+                                .textInputAutocapitalization(.words)
+                            TextField("Adresse e-mail", text: $email)
+                                .textContentType(.emailAddress)
+                                .keyboardType(.emailAddress)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                            SecureField("Mot de passe (8 caractères minimum)", text: $password)
+                                .textContentType(.newPassword)
+                        }
+                        TextField("Téléphone", text: $phone)
+                            .textContentType(.telephoneNumber)
+                            .keyboardType(.phonePad)
+                        roleRegistrationFields
+                    }
+                } else {
+                    Section("Connexion à votre compte") {
+                    TextField("Adresse e-mail", text: $email)
+                        .textContentType(.username)
+                        .keyboardType(.emailAddress)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    SecureField("Mot de passe", text: $password)
+                        .textContentType(.password)
+                    Button("Mot de passe oublié ?") {
+                        auth.errorMessage = nil
+                        showAccountRecovery = true
+                    }
+                    .font(.subheadline)
+                    }
+                }
+
+                if let error = auth.errorMessage {
+                    Section {
+                        Text(error).font(.footnote).foregroundStyle(.red)
+                    }
+                }
+
+                if let message = auth.infoMessage {
+                    Section {
+                        Label(message, systemImage: "envelope.badge")
+                            .font(.footnote).foregroundStyle(.teal)
+                    }
+                }
+
+                Section {
+                    Button {
+                        if isEditing {
+                            Task { await updateExistingProfile() }
+                        } else if isCreatingAccount {
+                            showLegalAcceptance = true
+                        } else {
+                            Task {
+                                await auth.signIn(email: email, password: password)
+                                if auth.member != nil { onSignedIn() }
+                            }
+                        }
+                    } label: {
+                        HStack {
+                            Spacer()
+                                    Label(isEditing ? "Enregistrer les modifications" : (isCreatingAccount ? "Créer mon compte" : "Se connecter"),
+                                  systemImage: isEditing ? "checkmark.circle" : (isCreatingAccount ? "person.badge.plus" : "lock.shield"))
+                                .font(.headline)
+                            Spacer()
+                        }
+                    }
+                    .disabled(email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (!isEditing && password.isEmpty) || auth.isSigningIn)
+
+                    if !isEditing {
+                        Button {
+                            isCreatingAccount.toggle()
+                            auth.errorMessage = nil
+                        } label: {
+                            Label(isCreatingAccount ? "J’ai déjà un compte : me connecter" : "Créer un compte", systemImage: "person.crop.circle.badge.plus")
+                        }
+                        .disabled(auth.isSigningIn)
+                    }
+                } footer: {
+                    Text(isEditing
+                         ? "Les informations sont mises à jour dans la fiche Wix associée à votre espace."
+                         : (isCreatingAccount
+                         ? "Votre compte est créé par l’authentification Wix sécurisée. Le mot de passe n’est pas conservé par l’application."
+                         : "La connexion passe par l’authentification Wix sécurisée. Le mot de passe n’est pas conservé par l’application."))
+                }
+            }
+            .navigationTitle("Accès à l’espace")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { Button("Fermer") { dismiss() } }
+            }
+            .sheet(isPresented: $showLegalAcceptance) {
+                LegalAcceptanceSheet(role: role) {
+                    showLegalAcceptance = false
+                    Task { await createAccountAfterLegalAcceptance() }
+                }
+            }
+            .sheet(isPresented: $showAccountRecovery) {
+                NavigationStack {
+                    InAppSafariView(url: role.loginURL)
+                        .ignoresSafeArea()
+                        .toolbar {
+                            ToolbarItem(placement: .topBarTrailing) {
+                                Button("Fermer") { showAccountRecovery = false }
+                            }
+                        }
+                }
+            }
+            .onAppear {
+                guard let initialProfile else { return }
+                isCreatingAccount = isEditing
+                email = auth.member?.loginEmail ?? (initialProfile["email"] as? String ?? "")
+                let profileName = (initialProfile["contactName"] as? String)
+                    ?? (initialProfile["fullName"] as? String)
+                    ?? (initialProfile["companyName"] as? String)
+                    ?? (initialProfile["businessName"] as? String)
+                    ?? ""
+                let nameParts = profileName.split(separator: " ", maxSplits: 1).map(String.init)
+                firstName = (initialProfile["firstName"] as? String) ?? auth.member?.firstName ?? nameParts.first ?? ""
+                lastName = (initialProfile["lastName"] as? String) ?? auth.member?.lastName ?? nameParts.dropFirst().first ?? ""
+                phone = (initialProfile["phone"] as? String) ?? (initialProfile["phoneNumber"] as? String ?? "")
+                city = initialProfile["city"] as? String ?? ""
+                postalCode = initialProfile["postalCode"] as? String ?? ""
+                companyName = (initialProfile["companyName"] as? String)
+                    ?? (initialProfile["businessName"] as? String)
+                    ?? (role == .hebergeur ? (initialProfile["fullName"] as? String) : nil)
+                    ?? ""
+                category = initialProfile["category"] as? String ?? ""
+                subcategory = (initialProfile["subcategory"] as? String) ?? Self.primarySubcategory(from: initialProfile["categories"])
+                description = (initialProfile["description"] as? String) ?? (initialProfile["biography"] as? String ?? "")
+                website = (initialProfile["website"] as? String) ?? (initialProfile["websiteUrl"] as? String ?? "")
+                professionalTitle = initialProfile["professionalTitle"] as? String ?? ""
+                if let years = initialProfile["yearsOfExperience"] { yearsOfExperience = String(describing: years) }
+                professionalType = initialProfile["professionalType"] as? String ?? "mandataire"
+                isVisiblePublicly = initialProfile["isVisiblePublicly"] as? Bool ?? false
+            }
+        }
+    }
+
+    private static func primarySubcategory(from value: Any?) -> String {
+        var decoded = value
+        if let raw = decoded as? String, let data = raw.data(using: .utf8) {
+            decoded = try? JSONSerialization.jsonObject(with: data)
+        }
+        if let entries = decoded as? [[String: Any]],
+           let subcategories = entries.first?["subCategories"] as? [String] {
+            return subcategories.first ?? ""
+        }
+        if let entries = decoded as? [[String: Any]],
+           let subcategories = entries.first?["subcategories"] as? [String] {
+            return subcategories.first ?? ""
+        }
+        return ""
+    }
+
+    @MainActor
+    private func createAccountAfterLegalAcceptance() async {
+        let profile: [String: String] = [
+            "firstName": firstName,
+            "lastName": lastName,
+            "phone": phone,
+            "city": city,
+            "postalCode": postalCode,
+            "companyName": companyName,
+            "contactName": "\(firstName) \(lastName)",
+            "category": category,
+            "subcategory": subcategory,
+            "description": description,
+            "website": website,
+            "isVisiblePublicly": isVisiblePublicly ? "true" : "false",
+            "professionalTitle": professionalTitle,
+            "yearsOfExperience": yearsOfExperience,
+            "professionalType": professionalType
+        ]
+        let didComplete = await auth.signUp(
+            email: email,
+            password: password,
+            firstName: firstName,
+            lastName: lastName,
+            role: role.rawValue,
+            profile: profile,
+            acceptedCGU: true,
+            acceptedCGV: true
+        )
+        if didComplete { onSignedIn() }
+    }
+
+    @MainActor
+    private func updateExistingProfile() async {
+        guard let profileID = initialProfile?["_id"] as? String, !profileID.isEmpty else {
+            auth.errorMessage = "Identifiant de profil manquant. Rechargez votre espace puis réessayez."
+            return
+        }
+        auth.errorMessage = nil
+        var fields: [String: Any] = [
+            "firstName": firstName.trimmingCharacters(in: .whitespacesAndNewlines),
+            "lastName": lastName.trimmingCharacters(in: .whitespacesAndNewlines),
+            "phone": phone.trimmingCharacters(in: .whitespacesAndNewlines),
+            "city": city.trimmingCharacters(in: .whitespacesAndNewlines),
+            "postalCode": postalCode.trimmingCharacters(in: .whitespacesAndNewlines),
+            "companyName": companyName.trimmingCharacters(in: .whitespacesAndNewlines),
+            "contactName": "\(firstName.trimmingCharacters(in: .whitespacesAndNewlines)) \(lastName.trimmingCharacters(in: .whitespacesAndNewlines))".trimmingCharacters(in: .whitespaces),
+            "category": category.trimmingCharacters(in: .whitespacesAndNewlines),
+            "subcategory": subcategory.trimmingCharacters(in: .whitespacesAndNewlines),
+            "description": description.trimmingCharacters(in: .whitespacesAndNewlines),
+            "website": website.trimmingCharacters(in: .whitespacesAndNewlines),
+            "isVisiblePublicly": isVisiblePublicly,
+            "professionalTitle": professionalTitle.trimmingCharacters(in: .whitespacesAndNewlines),
+            "yearsOfExperience": yearsOfExperience.trimmingCharacters(in: .whitespacesAndNewlines),
+            "professionalType": professionalType,
+        ]
+        if role == .particulier { fields["phoneNumber"] = fields["phone"] }
+        if role == .courtier {
+            fields["bio"] = fields["description"]
+            fields["websiteUrl"] = fields["website"]
+        }
+        if role == .hebergeur {
+            fields["fullName"] = fields["companyName"]
+            fields["biography"] = fields["description"]
+            fields["phoneNumber"] = fields["phone"]
+        }
+        do {
+            try await auth.updateRoleProfile(role: role.rawValue, profileID: profileID, fields: fields)
+            onSignedIn()
+        } catch {
+            auth.errorMessage = error.localizedDescription
+        }
+    }
+
+    @ViewBuilder
+    private var roleRegistrationFields: some View {
+        switch role {
+        case .particulier:
+            TextField("Ville (facultatif)", text: $city).textContentType(.addressCity)
+            TextField("Code postal (facultatif)", text: $postalCode).keyboardType(.numberPad)
+        case .professionnel:
+            TextField("Société / réseau", text: $companyName)
+            Picker("Profil professionnel", selection: $professionalType) {
+                Text("Mandataire immobilier").tag("mandataire")
+                Text("Agence immobilière").tag("agency")
+            }
+            TextField("Activité", text: $category)
+            TextField("Présentation de votre activité", text: $description, axis: .vertical).lineLimit(3...8)
+            TextField("Ville", text: $city).textContentType(.addressCity)
+            TextField("Code postal", text: $postalCode).keyboardType(.numberPad)
+            TextField("Site internet (facultatif)", text: $website).keyboardType(.URL).textInputAutocapitalization(.never)
+            Toggle("Afficher mon mini-site professionnel", isOn: $isVisiblePublicly)
+        case .courtier:
+            TextField("Spécialité / titre professionnel", text: $professionalTitle)
+            TextField("Présentation professionnelle", text: $description, axis: .vertical).lineLimit(3...8)
+            TextField("Ville", text: $city).textContentType(.addressCity)
+            TextField("Années d’expérience (facultatif)", text: $yearsOfExperience).keyboardType(.numberPad)
+            TextField("Site internet (facultatif)", text: $website).keyboardType(.URL).textInputAutocapitalization(.never)
+        case .artisan, .diagnostiqueur, .prestataire:
+            TextField("Entreprise", text: $companyName)
+            if role == .artisan {
+                TextField("Activité artisanale", text: $subcategory)
+                TextField("Activité", text: $category).disabled(true).onAppear { category = "Artisan" }
+            } else if role == .diagnostiqueur {
+                TextField("Spécialité (DPE, amiante…)", text: $subcategory)
+                TextField("Activité", text: $category).disabled(true).onAppear { category = "Diagnostiqueur" }
+            } else {
+                TextField("Activité", text: $category)
+                TextField("Spécialité (facultatif)", text: $subcategory)
+            }
+            TextField("Ville", text: $city).textContentType(.addressCity)
+            TextField("Code postal", text: $postalCode).keyboardType(.numberPad)
+            TextField("Présentation (facultatif)", text: $description, axis: .vertical).lineLimit(3...6)
+            TextField("Site internet (facultatif)", text: $website).keyboardType(.URL).textInputAutocapitalization(.never)
+        case .hebergeur:
+            TextField("Nom de l’hébergement / activité", text: $companyName)
+            TextField("Présentation (facultatif)", text: $description, axis: .vertical).lineLimit(3...6)
+        }
+    }
+}
+
+private enum LegalDocument: String, Identifiable, Equatable {
+    case cgu
+    case cgv
+    var id: String { rawValue }
+}
+
+private struct LegalAcceptanceSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let role: AccountRole
+    let onAccept: () -> Void
+    @State private var cguOpened = false
+    @State private var cgvOpened = false
+    @State private var cguAccepted = false
+    @State private var cgvAccepted = false
+    @State private var selectedDocument: LegalDocument?
+    @State private var lastOpenedDocument: LegalDocument?
+
+    private var documentPaths: (cgu: String, cgv: String) {
+        switch role {
+        case .particulier: ("/cgu-particuliers", "/cgv-particuliers")
+        case .hebergeur: ("/cgu", "/cgv")
+        case .professionnel: ("/pro-cgu", "/pro-cgv")
+        case .courtier: ("/broker-cgu", "/broker-cgv")
+        case .artisan, .diagnostiqueur: ("/artisan-cgu", "/artisan-cgv")
+        case .prestataire: ("/prestataire-cgu", "/prestataire-cgv")
+        }
+    }
+
+    private var roleLabel: String {
+        switch role {
+        case .particulier: "Particuliers"
+        case .professionnel: "Professionnels de l’immobilier"
+        case .courtier: "Courtiers"
+        case .artisan, .diagnostiqueur: "Artisans et diagnostiqueurs"
+        case .prestataire: "Prestataires"
+        case .hebergeur: "Hébergeurs"
+        }
+    }
+
+    private var canAccept: Bool { cguOpened && cgvOpened && cguAccepted && cgvAccepted }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text("Avant de créer votre espace \(roleLabel.lowercased()), consultez et acceptez les Conditions Générales d’Utilisation et les Conditions Générales de Vente applicables à votre compte.")
+                    Text("Vous pouvez lire chaque document avant de donner votre accord.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                } header: {
+                    Text("Acceptation des conditions légales")
+                }
+
+                Section("Conditions Générales d’Utilisation") {
+                    Button {
+                        lastOpenedDocument = .cgu
+                        selectedDocument = .cgu
+                    } label: {
+                        Label(cguOpened ? "CGU consultées · Relire" : "Lire les CGU \(roleLabel)", systemImage: cguOpened ? "checkmark.circle.fill" : "doc.text")
+                    }
+                    Toggle("J’accepte les CGU \(roleLabel)", isOn: $cguAccepted)
+                        .disabled(!cguOpened)
+                }
+
+                Section("Conditions Générales de Vente") {
+                    Button {
+                        lastOpenedDocument = .cgv
+                        selectedDocument = .cgv
+                    } label: {
+                        Label(cgvOpened ? "CGV consultées · Relire" : "Lire les CGV \(roleLabel)", systemImage: cgvOpened ? "checkmark.circle.fill" : "doc.text")
+                    }
+                    Toggle("J’accepte les CGV \(roleLabel)", isOn: $cgvAccepted)
+                        .disabled(!cgvOpened)
+                }
+
+                if !canAccept {
+                    Section {
+                        Label("Consultez les deux documents et cochez les deux accords pour continuer.", systemImage: "info.circle")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
+
+                Section {
+                    Link(destination: AppConfig.privacyURL) {
+                        Label("Lire la politique de confidentialité", systemImage: "hand.raised")
+                    }
+                    Button("Refuser et quitter", role: .destructive) { dismiss() }
+                }
+
+                Section {
+                    Button {
+                        guard canAccept else { return }
+                        onAccept()
+                    } label: {
+                        HStack {
+                            Spacer()
+                            Label("Accepter et continuer", systemImage: "checkmark.circle.fill").font(.headline)
+                            Spacer()
+                        }
+                    }
+                    .disabled(!canAccept)
+                }
+            }
+            .navigationTitle("Conditions légales")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { Button("Fermer") { dismiss() } }
+            }
+            .sheet(item: $selectedDocument, onDismiss: {
+                if lastOpenedDocument == .cgu { cguOpened = true }
+                if lastOpenedDocument == .cgv { cgvOpened = true }
+                lastOpenedDocument = nil
+            }) { document in
+                let path = document == .cgu ? documentPaths.cgu : documentPaths.cgv
+                InAppSafariView(url: URL(string: "https://www.partenairefoyer.com\(path)")!)
+                    .ignoresSafeArea()
+            }
+        }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
+        .onAppear {
+            cguOpened = false
+            cgvOpened = false
+            cguAccepted = false
+            cgvAccepted = false
+            selectedDocument = nil
+            lastOpenedDocument = nil
+        }
+    }
+}
+
+private struct InAppSafariView: UIViewControllerRepresentable {
+    let url: URL
+    func makeUIViewController(context: Context) -> SFSafariViewController { SFSafariViewController(url: url) }
+    func updateUIViewController(_ controller: SFSafariViewController, context: Context) {}
+}
+
+private struct NativeRoleDashboardView: View {
+    @StateObject private var auth = WixAuthStore.shared
+    @StateObject private var referralService = ReferralService()
+    @StateObject private var professionalImportService = ProfessionalImportService()
+    @StateObject private var buyerSearchService = BuyerSearchService()
+    @StateObject private var classifiedAdsService = ClassifiedAdsService()
+    @State private var selectedItem: DashboardItemSelection?
+    @State private var isEditingSelectedListing = false
+    @State private var selectedConversation: DashboardConversationSelection?
+    @State private var showReferralCenter = false
+    @State private var showImportCenter = false
+    @State private var showBuyerSearchForm = false
+    @State private var showProfessionalPropertyForm = false
+    @State private var showPrivatePropertyForm = false
+    @State private var showClassifiedAdForm = false
+    @State private var showSeasonalRateForm = false
+    @State private var editingSeasonalRate: [String: Any]?
+    @State private var showSeasonalCalendarEditor = false
+    @State private var showSeasonalAccommodationForm = false
+    @State private var editingSeasonalAccommodation: [String: Any]?
+    @State private var pendingAccommodationDeletion: String?
+    @State private var showAccommodationDeletionConfirmation = false
+    @State private var pendingSeasonalRateDeletion: String?
+    @State private var showSeasonalRateDeletionConfirmation = false
+    @State private var showProfileEditor = false
+    @State private var showMiniSitePreview = false
+    @State private var editingBuyerSearch: [String: Any]?
+    @State private var pendingBuyerSearchDeletion: String?
+    @State private var showBuyerSearchDeletionConfirmation = false
+    @State private var pendingMinisiteDeletion: String?
+    @State private var showMinisiteDeletionConfirmation = false
+    @State private var pendingHostBookingRequest: String?
+    @State private var showHostBookingHideConfirmation = false
+    let role: AccountRole
+    let member: WixMember
+    let onSignOut: () -> Void
+    let onSwitchSpace: () -> Void
+
+    private var sections: [(String, String, [[String: Any]])] {
+        guard let data = auth.dashboardData else { return [] }
+        let keys: [(String, String, String)]
+        switch role {
+        case .particulier:
+            keys = [
+                ("Mes biens", "house", "properties"),
+                ("Mes petites annonces", "tag", "classifieds"),
+                ("Mes favoris", "heart", "favorites"),
+                ("Mes recherches", "magnifyingglass", "savedSearches"),
+                ("Matchings reçus", "sparkles", "buyerMatchings")
+            ]
+        case .professionnel:
+            keys = [
+                ("Mes biens", "house", "properties"),
+                ("Mes matchings", "sparkles", "matchings"),
+                ("Demandes disponibles", "bolt.horizontal.circle", "availableDemands"),
+                ("Demandes acceptées", "person.2", "demands"),
+                ("Demandes du mini-site", "globe", "minisiteRequests"),
+                ("Estimations reçues", "chart.line.uptrend.xyaxis", "estimationRequests"),
+                ("Contacts sur mes annonces", "bubble.left", "propertyRequests"),
+                ("Messages", "bubble.left.and.bubble.right", "messages")
+            ]
+        case .courtier:
+            keys = [("Messages", "bubble.left.and.bubble.right", "messages")]
+        case .artisan:
+            keys = [("Demandes d’intervention", "bubble.left.and.bubble.right", "messages")]
+        case .diagnostiqueur:
+            keys = [("Demandes de diagnostic", "doc.text.magnifyingglass", "messages")]
+        case .prestataire:
+            keys = [("Demandes et messages", "bubble.left.and.bubble.right", "messages")]
+        case .hebergeur:
+            keys = [
+                ("Mes hébergements", "house", "accommodations"),
+                ("Demandes de réservation", "calendar.badge.clock", "bookingRequests"),
+                ("Réservations", "calendar", "reservations"),
+                ("Conversations", "bubble.left.and.bubble.right", "conversations"),
+                ("Calendrier des disponibilités", "calendar.badge.checkmark", "calendar"),
+                ("Réservations externes", "calendar.badge.exclamationmark", "externalBookings"),
+                ("Tarifs saisonniers", "eurosign.circle", "seasonalRates"),
+                ("Calendriers connectés", "arrow.triangle.2.circlepath.icloud", "calendarConnections")
+            ]
+        }
+        return keys.compactMap { title, icon, key in
+            guard let items = data[key] as? [[String: Any]] else { return nil }
+            return (title, icon, items)
+        }
+    }
+
+    private var profile: [String: Any]? { auth.dashboardData?["profile"] as? [String: Any] }
+
+    private func artisanPaymentURL(plan: String) -> URL? {
+        guard let profile,
+              let profileID = profile["_id"] as? String, !profileID.isEmpty else { return nil }
+        let base = plan == "monthly"
+            ? "https://buy.stripe.com/cNi14ofrZ3X9cMva476Vq05"
+            : "https://buy.stripe.com/eVq9AU6Vt9ht27Rccf6Vq06"
+        guard var components = URLComponents(string: base) else { return nil }
+        components.queryItems = [
+            URLQueryItem(name: "client_reference_id", value: "artisan:\(profileID):\(plan)"),
+            URLQueryItem(name: "prefilled_email", value: member.loginEmail),
+        ]
+        return components.url
+    }
+
+    var body: some View {
+        List {
+            Section {
+                Label(role.title, systemImage: role.symbol)
+                    .font(.title3.bold())
+                LabeledContent("Compte connecté", value: member.loginEmail)
+                if let message = auth.infoMessage {
+                    Label(message, systemImage: "envelope.badge")
+                        .font(.footnote).foregroundStyle(.orange)
+                }
+                if member.loginEmailVerified == false {
+                    Label("Adresse e-mail à confirmer", systemImage: "exclamationmark.circle")
+                        .foregroundStyle(.orange)
+                }
+            }
+
+            if auth.isLoadingDashboard && auth.dashboardData == nil {
+                Section { HStack { Spacer(); ProgressView("Chargement de vos données Wix…"); Spacer() } }
+            } else if let error = auth.dashboardError {
+                Section("Données du compte") {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .font(.subheadline)
+                        .foregroundStyle(.orange)
+                    Button("Réessayer") { Task { await auth.loadDashboard(role: role.dashboardQueryRole) } }
+                }
+            } else if let data = auth.dashboardData {
+                if let error = auth.errorMessage {
+                    Section {
+                        Label(error, systemImage: "exclamationmark.triangle")
+                            .font(.footnote).foregroundStyle(.orange)
+                    }
+                }
+                Section("Vue d’ensemble") {
+                    DashboardOverview(data: data, role: role)
+                }
+                if let profile {
+                    Section("Mon profil") {
+                        NativeProfileShowcase(profile: profile, role: role)
+                        ForEach(Array(profileKeys(for: role).filter { profile[$0.1] != nil }.enumerated()), id: \.offset) { _, field in
+                            LabeledContent(field.0, value: field.1 == "categories" ? displayCategories(profile[field.1]) : display(profile[field.1]))
+                        }
+                        Button {
+                            showProfileEditor = true
+                        } label: {
+                            Label("Modifier mon profil", systemImage: "pencil")
+                        }
+                    }
+                }
+                if role == .professionnel, let profile {
+                    Section("Mon mini-site professionnel") {
+                        Label((profile["isVisiblePublicly"] as? Bool) == true ? "Présentation publique activée" : "Présentation publique masquée",
+                              systemImage: (profile["isVisiblePublicly"] as? Bool) == true ? "eye.fill" : "eye.slash")
+                            .foregroundStyle((profile["isVisiblePublicly"] as? Bool) == true ? .green : .secondary)
+                        Text("Cette présentation reprend vos coordonnées, votre description et vos biens publiés. Vous pouvez la prévisualiser et régler sa visibilité dans la modification du profil.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                        Button { showMiniSitePreview = true } label: {
+                            Label("Prévisualiser mon mini-site", systemImage: "safari")
+                        }
+                        Button { showProfileEditor = true } label: {
+                            Label("Modifier la présentation et la visibilité", systemImage: "pencil")
+                        }
+                    }
+                    Section("Abonnement professionnel") {
+                        let active = (profile["hasActiveSubscription"] as? Bool) == true
+                        Label(active ? "Abonnement actif" : display(profile["subscriptionStatus"]),
+                              systemImage: active ? "checkmark.seal.fill" : "creditcard")
+                            .foregroundStyle(active ? Color.green : Color.secondary)
+                        if profile["subscriptionStartDate"] != nil {
+                            LabeledContent("Début", value: display(profile["subscriptionStartDate"]))
+                        }
+                        if profile["subscriptionEndDate"] != nil {
+                            LabeledContent("Échéance", value: display(profile["subscriptionEndDate"]))
+                        }
+                        Text("Le statut affiché est synchronisé avec votre espace PartenaireFoyer. La gestion des paiements reste sécurisée par le service de paiement existant.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                        Link(destination: URL(string: "https://www.partenairefoyer.com/pro/abonnement")!) {
+                            Label("Gérer mon abonnement et mes paiements", systemImage: "creditcard")
+                        }
+                    }
+                }
+                if [.artisan, .diagnostiqueur].contains(role), let profile {
+                    let subscription = data["subscription"] as? [String: Any] ?? [:]
+                    let status = (subscription["subscriptionStatus"] as? String ?? "").lowercased()
+                    let hasPaidAccess = subscription["accessEnabled"] as? Bool == true && ["active", "trialing"].contains(status)
+                    let freeAccessEnd = Calendar.current.date(from: DateComponents(year: 2027, month: 1, day: 1)) ?? Date()
+                    Section("Activité de ma fiche") {
+                        LabeledContent("Vues du profil", value: display(profile["profileViews"] ?? 0))
+                        LabeledContent("Demandes de contact", value: display(profile["contactRequestsCount"] ?? 0))
+                    }
+                    Section("Abonnement artisan / diagnostiqueur") {
+                        Label(
+                            hasPaidAccess ? "Abonnement actif" : (Date() < freeAccessEnd ? "Accès gratuit jusqu’au 31 décembre 2026" : "Abonnement inactif"),
+                            systemImage: hasPaidAccess ? "checkmark.seal.fill" : "creditcard"
+                        )
+                        .foregroundStyle(hasPaidAccess ? Color.green : Color.secondary)
+                        if let start = subscription["subscriptionStartDate"] {
+                            LabeledContent("Début", value: display(start))
+                        }
+                        if let end = subscription["subscriptionEndDate"] {
+                            LabeledContent("Échéance", value: display(end))
+                        }
+                        if let monthly = artisanPaymentURL(plan: "monthly") {
+                            Link(destination: monthly) { Label("Choisir la formule mensuelle", systemImage: "creditcard") }
+                        }
+                        if let annual = artisanPaymentURL(plan: "annual") {
+                            Link(destination: annual) { Label("Choisir la formule annuelle", systemImage: "calendar") }
+                        }
+                        Link(destination: URL(string: "https://billing.stripe.com/p/login/7sY4gAenV3X95k32BF6Vq00")!) {
+                            Label("Gérer mon abonnement Stripe", systemImage: "arrow.up.right.square")
+                        }
+                        Text("Le paiement et le statut d’abonnement restent gérés par les services Stripe et Wix du site.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
+                if let account = data["account"] as? [String: Any],
+                   account["cguAccepted"] != nil || account["cgvAccepted"] != nil {
+                    Section("Documents du compte") {
+                        if account["cguAccepted"] != nil {
+                            LabeledContent("Conditions d’utilisation", value: display(account["cguAccepted"]))
+                        }
+                        if account["cgvAccepted"] != nil {
+                            LabeledContent("Conditions de vente", value: display(account["cgvAccepted"]))
+                        }
+                    }
+                }
+                ForEach(Array(sections.enumerated()), id: \.offset) { _, section in
+                    Section {
+                        if role == .particulier, section.0 == "Mes biens" {
+                            Button { showPrivatePropertyForm = true } label: {
+                                Label("Déposer un bien immobilier", systemImage: "house.badge.plus").font(.headline)
+                            }
+                        }
+                        if role == .particulier, section.0 == "Mes petites annonces" {
+                            Button { showClassifiedAdForm = true } label: {
+                                Label("Déposer une petite annonce", systemImage: "tag.badge.plus").font(.headline)
+                            }
+                            Link(destination: URL(string: "https://www.partenairefoyer.com/vendeur-petites-annonces")!) {
+                                Label("Gérer mes annonces, ventes et paiements", systemImage: "shippingbox")
+                            }
+                            Text("La gestion des ventes et des paiements s’ouvre dans votre espace sécurisé PartenaireFoyer.")
+                                .font(.footnote).foregroundStyle(.secondary)
+                        }
+                        if role == .particulier, section.0 == "Mes recherches" {
+                            Button { showBuyerSearchForm = true } label: {
+                                Label("Créer une recherche", systemImage: "plus.circle.fill")
+                                    .font(.headline)
+                            }
+                            if let message = buyerSearchService.statusMessage {
+                                Label(message, systemImage: "checkmark.circle.fill")
+                                    .font(.footnote).foregroundStyle(.green)
+                            }
+                            if let error = buyerSearchService.errorMessage {
+                                Label(error, systemImage: "exclamationmark.triangle")
+                                    .font(.footnote).foregroundStyle(.orange)
+                            }
+                        }
+                        if role == .hebergeur, section.0 == "Tarifs saisonniers" {
+                            Button {
+                                editingSeasonalRate = nil
+                                showSeasonalRateForm = true
+                            } label: {
+                                Label("Ajouter un tarif saisonnier", systemImage: "plus.circle.fill")
+                                    .font(.headline)
+                            }
+                        }
+                        if role == .hebergeur, section.0 == "Mes hébergements" {
+                            Button {
+                                editingSeasonalAccommodation = nil
+                                showSeasonalAccommodationForm = true
+                            } label: {
+                                Label("Ajouter un hébergement", systemImage: "plus.circle.fill")
+                                    .font(.headline)
+                            }
+                        }
+                        if role == .hebergeur, section.0 == "Calendrier des disponibilités" {
+                            Button { showSeasonalCalendarEditor = true } label: {
+                                Label("Gérer les disponibilités", systemImage: "calendar.badge.checkmark")
+                                    .font(.headline)
+                            }
+                        }
+                        if section.2.isEmpty {
+                            Text("Aucun élément pour le moment.")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(Array(section.2.enumerated()), id: \.offset) { index, item in
+                                WixDashboardItem(item: item, fallbackTitle: "Élément \(index + 1)", onOpen: {
+                                        if role == .particulier, section.0 == "Mes recherches" {
+                                            editingBuyerSearch = item
+                                            showBuyerSearchForm = true
+                                        } else if role == .professionnel, section.0 == "Messages",
+                                           let conversationID = item["conversationId"] as? String,
+                                           !conversationID.isEmpty {
+                                            selectedConversation = DashboardConversationSelection(id: conversationID, preview: item)
+                                        } else if role == .hebergeur, section.0 == "Conversations",
+                                                  let conversationID = (item["_id"] as? String) ?? (item["id"] as? String),
+                                                  !conversationID.isEmpty {
+                                            selectedConversation = DashboardConversationSelection(id: conversationID, preview: item)
+                                        } else if role == .hebergeur, section.0 == "Tarifs saisonniers" {
+                                            editingSeasonalRate = item
+                                            showSeasonalRateForm = true
+                                        } else if role == .hebergeur, section.0 == "Mes hébergements" {
+                                            editingSeasonalAccommodation = item
+                                            showSeasonalAccommodationForm = true
+                                        } else {
+                                            let list: String?
+                                            if section.0 == "Mes biens" && [.particulier, .professionnel].contains(role) {
+                                                list = "properties"
+                                            } else if role == .particulier && section.0 == "Mes petites annonces" {
+                                                list = "classifieds"
+                                            } else {
+                                                list = nil
+                                            }
+                                            selectedItem = DashboardItemSelection(item: item, list: list)
+                                        }
+                                }, onClaim: role == .professionnel && section.0 == "Demandes disponibles" ? {
+                                    if let demandID = item["_id"] as? String {
+                                        await auth.claimDemand(demandID: demandID)
+                                    }
+                                } : nil, onHostBookingTransition: role == .hebergeur && section.0 == "Demandes de réservation" ? { status in
+                                    guard let requestID = (item["_id"] as? String) ?? (item["id"] as? String) else { return }
+                                    await auth.transitionHostBookingRequest(requestID: requestID, status: status)
+                                } : nil)
+                                .swipeActions {
+                                    if (role == .particulier && ["Mes biens", "Mes petites annonces"].contains(section.0)) ||
+                                        (role == .professionnel && section.0 == "Mes biens"),
+                                       let itemID = (item["_id"] as? String) ?? (item["id"] as? String) {
+                                        Button("Archiver", systemImage: "archivebox", role: .destructive) {
+                                            let list = section.0 == "Mes petites annonces" ? "classifieds" : "properties"
+                                            Task { await auth.archiveListing(role: role.rawValue, list: list, itemID: itemID) }
+                                        }
+                                    }
+                                    if role == .particulier, section.0 == "Mes recherches",
+                                       let searchID = (item["_id"] as? String) ?? (item["id"] as? String) {
+                                        Button("Modifier", systemImage: "pencil") {
+                                            editingBuyerSearch = item
+                                            showBuyerSearchForm = true
+                                        }
+                                        .tint(.blue)
+                                        Button("Alertes", systemImage: (item["emailAlertsEnabled"] as? Bool == true) ? "bell.slash" : "bell") {
+                                            Task {
+                                                _ = await buyerSearchService.setEmailAlerts(searchID: searchID, enabled: item["emailAlertsEnabled"] as? Bool != true)
+                                            }
+                                        }
+                                        .tint(.orange)
+                                        Button(item["isActive"] as? Bool == false ? "Activer" : "Désactiver",
+                                               systemImage: item["isActive"] as? Bool == false ? "play.circle" : "pause.circle",
+                                               role: item["isActive"] as? Bool == false ? nil : .destructive) {
+                                            Task {
+                                                if item["isActive"] as? Bool == false {
+                                                    _ = await buyerSearchService.activate(searchID: searchID)
+                                                } else {
+                                                    await buyerSearchService.deactivate(searchID: searchID)
+                                                }
+                                            }
+                                        }
+                                        Button("Supprimer", systemImage: "trash", role: .destructive) {
+                                            pendingBuyerSearchDeletion = searchID
+                                            showBuyerSearchDeletionConfirmation = true
+                                        }
+                                    }
+                                    if role == .particulier, section.0 == "Matchings reçus",
+                                       let matchingID = (item["_id"] as? String) ?? (item["id"] as? String) {
+                                        Button("Masquer", systemImage: "eye.slash", role: .destructive) {
+                                            Task { _ = await buyerSearchService.dismissMatching(matchingID: matchingID) }
+                                        }
+                                    }
+                                    if role == .professionnel,
+                                       section.0 == "Mes matchings" || section.0 == "Demandes acceptées",
+                                       let itemID = (item["_id"] as? String) ?? (item["id"] as? String),
+                                       item["seen"] as? Bool != true || (section.0 == "Demandes acceptées" && item["isViewed"] as? Bool != true) {
+                                        Button("Marquer comme vu", systemImage: "eye") {
+                                            Task {
+                                                await auth.markMatchingSeen(
+                                                    list: section.0 == "Mes matchings" ? "matchings" : "demands",
+                                                    itemID: itemID
+                                                )
+                                            }
+                                        }
+                                        .tint(.teal)
+                                    }
+                                    if role == .professionnel, section.0 == "Demandes du mini-site",
+                                       item["status"] as? String != "processed",
+                                       let requestID = (item["_id"] as? String) ?? (item["id"] as? String) {
+                                        Button("Marquer comme traité", systemImage: "checkmark.circle") {
+                                            Task { await auth.markMinisiteRequestProcessed(requestID: requestID) }
+                                        }
+                                        .tint(.green)
+                                    }
+                                    if role == .professionnel, section.0 == "Demandes du mini-site",
+                                       let requestID = (item["_id"] as? String) ?? (item["id"] as? String) {
+                                        Button("Supprimer", systemImage: "trash", role: .destructive) {
+                                            pendingMinisiteDeletion = requestID
+                                            showMinisiteDeletionConfirmation = true
+                                        }
+                                    }
+                                    if role == .hebergeur, section.0 == "Demandes de réservation",
+                                       item["hiddenByHost"] as? Bool != true,
+                                       let requestID = (item["_id"] as? String) ?? (item["id"] as? String) {
+                                        Button("Masquer", systemImage: "eye.slash", role: .destructive) {
+                                            pendingHostBookingRequest = requestID
+                                            showHostBookingHideConfirmation = true
+                                        }
+                                    }
+                                    if role == .hebergeur, section.0 == "Tarifs saisonniers" {
+                                        Button("Modifier", systemImage: "pencil") {
+                                            editingSeasonalRate = item
+                                            showSeasonalRateForm = true
+                                        }
+                                        .tint(.blue)
+                                        if let rateID = (item["_id"] as? String) ?? (item["id"] as? String) {
+                                            Button("Supprimer", systemImage: "trash", role: .destructive) {
+                                                pendingSeasonalRateDeletion = rateID
+                                                showSeasonalRateDeletionConfirmation = true
+                                            }
+                                        }
+                                    }
+                                    if role == .hebergeur, section.0 == "Mes hébergements",
+                                       let accommodationID = (item["_id"] as? String) ?? (item["id"] as? String) {
+                                        Button("Modifier", systemImage: "pencil") {
+                                            editingSeasonalAccommodation = item
+                                            showSeasonalAccommodationForm = true
+                                        }
+                                        .tint(.blue)
+                                        Button("Supprimer", systemImage: "trash", role: .destructive) {
+                                            pendingAccommodationDeletion = accommodationID
+                                            showAccommodationDeletionConfirmation = true
+                                        }
+                                    }
+                                    if [.courtier, .artisan, .diagnostiqueur, .prestataire].contains(role),
+                                       section.0.contains("Messages") || section.0.contains("Demandes"),
+                                       let messageID = (item["_id"] as? String) ?? (item["id"] as? String),
+                                       item["isRead"] as? Bool != true {
+                                        Button("Marquer comme lu", systemImage: "envelope.open") {
+                                            Task { await auth.markInquiryRead(role: role.rawValue, messageID: messageID) }
+                                        }
+                                        .tint(.teal)
+                                    }
+                                }
+                            }
+                        }
+                    } header: {
+                        let unread = section.2.filter { $0["isRead"] as? Bool == false }.count
+                        Label(unread > 0 ? "\(section.0) (\(section.2.count) · \(unread) non lus)" : "\(section.0) (\(section.2.count))",
+                              systemImage: section.1)
+                    }
+                }
+                if role == .professionnel {
+                    Section("Mes biens") {
+                        Button { showProfessionalPropertyForm = true } label: {
+                            Label("Créer une annonce immobilière", systemImage: "house.badge.plus")
+                        }
+                        Text("Créez un bien dans la collection Wix de votre compte. Vous choisissez s’il reste masqué ou s’il est publié immédiatement.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                        Text("Balayez une annonce vers la gauche pour l’archiver. Les annonces archivées ne sont plus publiées.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                    Section("Mes annonces importées") {
+                        Button { showImportCenter = true } label: {
+                            Label("Gérer les imports de mon réseau", systemImage: "arrow.down.doc")
+                        }
+                        Text("Autorisation de republication, import automatique et visibilité des biens.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                    Section("Développer mon réseau") {
+                        Button {
+                            showReferralCenter = true
+                        } label: {
+                            Label("Parrainage de mandataires", systemImage: "person.3.sequence.fill")
+                        }
+                        Text("Consultez les candidatures, attribuez un contact ou recommandez un futur mandataire.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                        Link(destination: URL(string: "https://www.partenairefoyer.com/pro/parrainage")!) {
+                            Label("Programme Ambassadeurs et commissions", systemImage: "gift")
+                        }
+                    }
+                }
+                if role == .particulier {
+                    Section("Parrainage et récompenses") {
+                        Text("Retrouvez votre code, vos parrainages, vos points et les campagnes du programme sur votre compte PartenaireFoyer.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                        Link(destination: URL(string: "https://www.partenairefoyer.com/parrainage")!) {
+                            Label("Ouvrir mon programme de parrainage", systemImage: "person.2.badge.plus")
+                        }
+                    }
+                }
+                if role == .hebergeur {
+                    Section("Mon activité") {
+                        Text("Hébergements et réservations chargés depuis vos collections Wix. Les demandes masquées dans Wix ne sont pas affichées ici.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                        if let subscription = data["subscription"] as? [String: Any] {
+                            LabeledContent("Abonnement", value: display(subscription["subscriptionTier"] ?? subscription["status"] ?? "Statut indisponible"))
+                            LabeledContent("Statut", value: display(subscription["status"] ?? "Inconnu"))
+                            if subscription["endDate"] != nil {
+                                LabeledContent("Fin de période", value: display(subscription["endDate"]))
+                            }
+                            if subscription["renewalDate"] != nil {
+                                LabeledContent("Prochain renouvellement", value: display(subscription["renewalDate"]))
+                            }
+                        } else {
+                            Label("Aucun abonnement saisonnier associé à ce profil.", systemImage: "info.circle")
+                                .font(.footnote).foregroundStyle(.secondary)
+                        }
+                        Link(destination: URL(string: "https://www.partenairefoyer.com/hebergeur-abonnement")!) {
+                            Label("Gérer l’abonnement et le paiement", systemImage: "creditcard")
+                        }
+                    }
+                }
+                if data["profile"] is NSNull {
+                    Section("Profil métier") {
+                        Text("Le compte est reconnu, mais aucune fiche de profil correspondante n’a été trouvée dans Wix.")
+                            .font(.subheadline).foregroundStyle(.orange)
+                    }
+                }
+            }
+
+            Section {
+                Button(action: onSwitchSpace) {
+                    Label("Changer d’espace", systemImage: "person.2")
+                }
+                Button(role: .destructive, action: onSignOut) {
+                    Label("Se déconnecter", systemImage: "rectangle.portrait.and.arrow.right")
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .confirmationDialog(
+            "Supprimer définitivement cette demande ?",
+            isPresented: $showMinisiteDeletionConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Supprimer définitivement", role: .destructive) {
+                guard let requestID = pendingMinisiteDeletion else { return }
+                Task { await auth.deleteMinisiteRequest(requestID: requestID) }
+                pendingMinisiteDeletion = nil
+            }
+            Button("Annuler", role: .cancel) { pendingMinisiteDeletion = nil }
+        } message: {
+            Text("La demande sera supprimée du CMS Wix et ne pourra pas être restaurée.")
+        }
+        .confirmationDialog(
+            "Supprimer cette recherche ?",
+            isPresented: $showBuyerSearchDeletionConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Supprimer définitivement", role: .destructive) {
+                guard let searchID = pendingBuyerSearchDeletion else { return }
+                Task { _ = await buyerSearchService.delete(searchID: searchID) }
+                pendingBuyerSearchDeletion = nil
+            }
+            Button("Annuler", role: .cancel) { pendingBuyerSearchDeletion = nil }
+        } message: {
+            Text("Cette recherche sera supprimée de votre espace Wix.")
+        }
+        .confirmationDialog(
+            "Masquer cette demande de réservation ?",
+            isPresented: $showHostBookingHideConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Masquer la demande", role: .destructive) {
+                guard let requestID = pendingHostBookingRequest else { return }
+                Task { await auth.hideHostBookingRequest(requestID: requestID) }
+                pendingHostBookingRequest = nil
+            }
+            Button("Annuler", role: .cancel) { pendingHostBookingRequest = nil }
+        } message: {
+            Text("La demande sera masquée dans votre espace et dans Wix. Elle restera enregistrée pour le suivi de la réservation.")
+        }
+        .confirmationDialog(
+            "Supprimer ce tarif saisonnier ?",
+            isPresented: $showSeasonalRateDeletionConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Supprimer le tarif", role: .destructive) {
+                guard let rateID = pendingSeasonalRateDeletion else { return }
+                Task {
+                    do { try await auth.deleteSeasonalRate(rateID: rateID) }
+                    catch { auth.errorMessage = error.localizedDescription }
+                }
+                pendingSeasonalRateDeletion = nil
+            }
+            Button("Annuler", role: .cancel) { pendingSeasonalRateDeletion = nil }
+        } message: {
+            Text("Ce tarif sera supprimé de Wix et ne pourra pas être restauré.")
+        }
+        .confirmationDialog(
+            "Supprimer cet hébergement ?",
+            isPresented: $showAccommodationDeletionConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Supprimer l’hébergement", role: .destructive) {
+                guard let accommodationID = pendingAccommodationDeletion else { return }
+                Task {
+                    do { try await auth.deleteHostAccommodation(accommodationID: accommodationID) }
+                    catch { auth.errorMessage = error.localizedDescription }
+                }
+                pendingAccommodationDeletion = nil
+            }
+            Button("Annuler", role: .cancel) { pendingAccommodationDeletion = nil }
+        } message: {
+            Text("La suppression est possible seulement si cet hébergement n’a aucune demande, réservation, période tarifaire ou entrée de calendrier liée.")
+        }
+        .navigationTitle("Tableau de bord")
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $selectedItem) { selection in
+            NavigationStack {
+                if isEditingSelectedListing, let list = selection.list {
+                    NativeListingEditForm(role: role.rawValue, list: list, item: selection.item, classifiedAds: classifiedAdsService) {
+                        Task { await auth.loadDashboard(role: role.dashboardQueryRole) }
+                        selectedItem = nil
+                        isEditingSelectedListing = false
+                    }
+                } else {
+                    DashboardItemDetailView(item: selection.item, role: role.rawValue, list: selection.list) {
+                        isEditingSelectedListing = true
+                    }
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Fermer") { selectedItem = nil; isEditingSelectedListing = false }
+                        }
+                    }
+                }
+            }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $selectedConversation) { selection in
+            NavigationStack {
+                Group {
+                    if role == .hebergeur {
+                        NativeHostConversationView(conversationID: selection.id, preview: selection.preview)
+                    } else {
+                        NativeProfessionalConversationView(
+                            conversationID: selection.id,
+                            preview: selection.preview,
+                            professionalID: (auth.dashboardData?["profile"] as? [String: Any])?["_id"] as? String ?? ""
+                        )
+                    }
+                }
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Fermer") { selectedConversation = nil }
+                    }
+                }
+            }
+        }
+        .sheet(isPresented: $showReferralCenter) {
+            NavigationStack {
+                ReferralCenterView(service: referralService)
+            }
+        }
+        .sheet(isPresented: $showBuyerSearchForm) {
+            NavigationStack {
+                NativeBuyerSearchForm(service: buyerSearchService, initialData: editingBuyerSearch)
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .onDisappear { editingBuyerSearch = nil }
+        }
+        .sheet(isPresented: $showProfessionalPropertyForm) {
+            NavigationStack {
+                NativeProfessionalPropertyForm {
+                    Task { await auth.loadDashboard(role: role.dashboardQueryRole) }
+                }
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showPrivatePropertyForm) {
+            NavigationStack {
+                NativePrivatePropertyForm {
+                    Task { await auth.loadDashboard(role: role.dashboardQueryRole) }
+                }
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showClassifiedAdForm) {
+            NavigationStack {
+                NativeClassifiedAdForm(classifiedAds: classifiedAdsService) {
+                    Task { await auth.loadDashboard(role: role.dashboardQueryRole) }
+                }
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showProfileEditor) {
+            RoleEntryView(role: role, onSignedIn: {
+                showProfileEditor = false
+                Task { await auth.loadDashboard(role: role.dashboardQueryRole) }
+            }, initialProfile: profile, isEditing: true)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showMiniSitePreview) {
+            NavigationStack {
+                ProfessionalMiniSitePreviewView(
+                    profile: profile ?? [:],
+                    properties: (auth.dashboardData?["properties"] as? [[String: Any]] ?? [])
+                        .filter { $0["status"] as? String == "active" }
+                )
+                .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fermer") { showMiniSitePreview = false } } }
+            }
+        }
+        .sheet(isPresented: $showImportCenter) {
+            NavigationStack {
+                ProfessionalImportCenterView(service: professionalImportService)
+            }
+        }
+        .sheet(isPresented: $showSeasonalRateForm) {
+            NavigationStack {
+                NativeSeasonalRateForm(
+                    accommodations: auth.dashboardData?["accommodations"] as? [[String: Any]] ?? [],
+                    initialRate: editingSeasonalRate
+                ) {
+                    showSeasonalRateForm = false
+                    editingSeasonalRate = nil
+                }
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showSeasonalCalendarEditor) {
+            NavigationStack {
+                NativeSeasonalCalendarEditor(
+                    accommodations: auth.dashboardData?["accommodations"] as? [[String: Any]] ?? [],
+                    calendarEntries: auth.dashboardData?["calendar"] as? [[String: Any]] ?? [],
+                    reservations: auth.dashboardData?["reservations"] as? [[String: Any]] ?? [],
+                    onSave: { accommodationID, dates, status, price, minimumStay in
+                        try await auth.saveSeasonalCalendarDates(
+                            accommodationID: accommodationID, dates: dates,
+                            availabilityStatus: status, pricePerNight: price, minimumStay: minimumStay
+                        )
+                    }
+                )
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showSeasonalAccommodationForm) {
+            NavigationStack {
+                NativeSeasonalAccommodationForm(initialAccommodation: editingSeasonalAccommodation) {
+                    showSeasonalAccommodationForm = false
+                    editingSeasonalAccommodation = nil
+                }
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
+        .refreshable { await auth.loadDashboard(role: role.dashboardQueryRole) }
+        .task(id: role.rawValue) {
+            await auth.loadDashboard(role: role.dashboardQueryRole)
+            await auth.registerPushDevice(role: role.rawValue)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .partenaireFoyerFCMTokenDidChange)) { _ in
+            Task { await auth.registerPushDevice(role: role.rawValue) }
+        }
+    }
+
+    private func profileKeys(for role: AccountRole) -> [(String, String)] {
+        switch role {
+        case .particulier: [("Prénom", "firstName"), ("Nom", "lastName"), ("Ville", "city"), ("Téléphone", "phone")]
+        case .professionnel: [("Société", "companyName"), ("Contact", "contactName"), ("Ville", "city"), ("Code postal", "postalCode"), ("Téléphone", "phoneNumber"), ("Type d’activité", "professionalType"), ("Catégories", "categories"), ("Visible publiquement", "isVisiblePublicly")]
+        case .courtier: [("Nom", "fullName"), ("Titre", "professionalTitle"), ("Ville", "city"), ("Téléphone", "phoneNumber"), ("Expérience (ans)", "yearsOfExperience")]
+        case .artisan, .diagnostiqueur: [("Entreprise", "companyName"), ("Contact", "contactName"), ("Activité", "category"), ("Spécialités", "categories"), ("Ville", "city"), ("Code postal", "postalCode"), ("Téléphone", "phoneNumber"), ("Site internet", "website"), ("Fiche visible", "isVisiblePublicly")]
+        case .prestataire: [("Entreprise", "businessName"), ("Activité", "category"), ("Spécialité", "subcategory"), ("Ville", "city"), ("Code postal", "postalCode"), ("Téléphone", "phone"), ("Vérifié", "verified"), ("Statut", "status")]
+        case .hebergeur: [("Nom", "fullName"), ("Téléphone", "phoneNumber"), ("Vérifié", "isVerified")]
+        }
+    }
+
+    private func display(_ value: Any?) -> String {
+        guard let value, !(value is NSNull) else { return "—" }
+        if let flag = value as? Bool { return flag ? "Oui" : "Non" }
+        if let values = value as? [String] { return values.joined(separator: ", ") }
+        if let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() { return number.boolValue ? "Oui" : "Non" }
+        return String(describing: value)
+    }
+
+    private func displayCategories(_ value: Any?) -> String {
+        guard let value else { return "—" }
+        let rows: [[String: Any]]
+        if let string = value as? String, let data = string.data(using: .utf8),
+           let parsed = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+            rows = parsed
+        } else if let parsed = value as? [[String: Any]] {
+            rows = parsed
+        } else {
+            return display(value)
+        }
+        let names = rows.flatMap { $0["subCategories"] as? [String] ?? [] }
+        return names.isEmpty ? display(value) : names.joined(separator: ", ")
+    }
+}
+
+private struct DashboardConversationSelection: Identifiable {
+    let id: String
+    let preview: [String: Any]
+}
+
+private struct NativeProfessionalConversationView: View {
+    @StateObject private var auth = WixAuthStore.shared
+    @State private var messages: [[String: Any]] = []
+    @State private var error: String?
+    @State private var sendError: String?
+    @State private var composerText = ""
+    @State private var isLoading = false
+    @State private var isSending = false
+    let conversationID: String
+    let preview: [String: Any]
+    let professionalID: String
+
+    private var contactName: String {
+        [preview["senderName"] as? String, preview["senderEmail"] as? String]
+            .compactMap { $0 }.first(where: { !$0.isEmpty }) ?? "Votre contact"
+    }
+
+    var body: some View {
+        Group {
+            if isLoading && messages.isEmpty {
+                ProgressView("Chargement de la conversation…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let error, messages.isEmpty {
+                ContentUnavailableView {
+                    Label("Conversation indisponible", systemImage: "bubble.left.and.exclamationmark.bubble.right")
+                } description: {
+                    Text(error)
+                } actions: {
+                    Button("Réessayer") { Task { await reload() } }
+                        .buttonStyle(.borderedProminent)
+                }
+            } else if messages.isEmpty {
+                ContentUnavailableView("Aucun message", systemImage: "bubble.left.and.bubble.right")
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(spacing: 12) {
+                            ForEach(Array(messages.enumerated()), id: \.offset) { index, message in
+                                let outgoing = (message["senderId"] as? String) == professionalID
+                                HStack {
+                                    if outgoing { Spacer(minLength: 42) }
+                                    VStack(alignment: .leading, spacing: 5) {
+                                        Text((message["content"] as? String) ?? "")
+                                            .font(.body).textSelection(.enabled)
+                                        if let date = message["createdAt"] as? String, !date.isEmpty {
+                                            Text(date).font(.caption2).foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    .padding(12)
+                                    .background(outgoing ? Color.teal.opacity(0.14) : Color(uiColor: .secondarySystemGroupedBackground),
+                                                in: RoundedRectangle(cornerRadius: 16))
+                                    if !outgoing { Spacer(minLength: 42) }
+                                }
+                                .id(index)
+                            }
+                        }
+                        .padding(16)
+                    }
+                    .refreshable { await reload() }
+                    .onChange(of: messages.count) { _, count in
+                        if count > 0 { proxy.scrollTo(count - 1, anchor: .bottom) }
+                    }
+                }
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            VStack(spacing: 6) {
+                HStack(alignment: .bottom, spacing: 10) {
+                    TextField("Écrire un message…", text: $composerText, axis: .vertical)
+                        .lineLimit(1...4)
+                        .padding(.horizontal, 13).padding(.vertical, 10)
+                        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20))
+                        .accessibilityLabel("Votre message")
+                    Button {
+                        Task { await sendMessage() }
+                    } label: {
+                        if isSending { ProgressView() }
+                        else { Image(systemName: "arrow.up.circle.fill").font(.system(size: 34)) }
+                    }
+                    .disabled(isSending || composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityLabel("Envoyer le message")
+                }
+                .padding(.horizontal).padding(.top, 8)
+                if let email = preview["senderEmail"] as? String,
+                   let url = URL(string: "mailto:\(email)") {
+                    Link("Contacter aussi par e-mail", destination: url)
+                        .font(.caption).padding(.bottom, 5)
+                }
+            }
+            .background(.bar)
+        }
+        .navigationTitle(contactName)
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await reload() }
+        .alert("Envoi impossible", isPresented: Binding(
+            get: { sendError != nil },
+            set: { if !$0 { sendError = nil } }
+        )) {
+            Button("OK", role: .cancel) { sendError = nil }
+        } message: {
+            Text(sendError ?? "Réessayez dans un instant.")
+        }
+    }
+
+    @MainActor
+    private func reload() async {
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            let loaded = try await auth.loadProfessionalConversation(id: conversationID)
+            messages = loaded
+            error = nil
+            do {
+                try await auth.markProfessionalConversationRead(conversationID: conversationID)
+                messages = messages.map { message in
+                    var updated = message
+                    if (updated["receiverId"] as? String) == professionalID {
+                        updated["isRead"] = true
+                        updated["seen"] = true
+                    }
+                    return updated
+                }
+            } catch {
+                // Keep the thread readable even if Wix declines the optional read receipt.
+            }
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func sendMessage() async {
+        let content = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !content.isEmpty, !isSending else { return }
+        isSending = true
+        defer { isSending = false }
+        do {
+            let sent = try await auth.sendProfessionalMessage(conversationID: conversationID, content: content)
+            messages.append(sent)
+            composerText = ""
+        } catch {
+            sendError = error.localizedDescription
+        }
+    }
+}
+
+private struct NativeHostConversationView: View {
+    @StateObject private var auth = WixAuthStore.shared
+    @State private var messages: [[String: Any]] = []
+    @State private var hostID = ""
+    @State private var error: String?
+    @State private var sendError: String?
+    @State private var composerText = ""
+    @State private var isLoading = false
+    @State private var isSending = false
+    let conversationID: String
+    let preview: [String: Any]
+
+    private var title: String {
+        if let name = preview["vacationerName"] as? String, !name.isEmpty { return name }
+        return "Conversation hébergement"
+    }
+
+    var body: some View {
+        Group {
+            if isLoading && messages.isEmpty {
+                ProgressView("Chargement de la conversation…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let error, messages.isEmpty {
+                ContentUnavailableView {
+                    Label("Conversation indisponible", systemImage: "bubble.left.and.exclamationmark.bubble.right")
+                } description: {
+                    Text(error)
+                } actions: {
+                    Button("Réessayer") { Task { await reload() } }
+                        .buttonStyle(.borderedProminent)
+                }
+            } else if messages.isEmpty {
+                ContentUnavailableView("Aucun message", systemImage: "bubble.left.and.bubble.right")
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(spacing: 12) {
+                            ForEach(Array(messages.enumerated()), id: \.offset) { index, message in
+                                let outgoing = (message["senderId"] as? String) == hostID
+                                HStack {
+                                    if outgoing { Spacer(minLength: 42) }
+                                    VStack(alignment: .leading, spacing: 5) {
+                                        Text((message["messageContent"] as? String) ?? "")
+                                            .font(.body).textSelection(.enabled)
+                                        if let date = message["sentAt"] as? String, !date.isEmpty {
+                                            Text(date).font(.caption2).foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    .padding(12)
+                                    .background(outgoing ? Color.teal.opacity(0.14) : Color(uiColor: .secondarySystemGroupedBackground),
+                                                in: RoundedRectangle(cornerRadius: 16))
+                                    if !outgoing { Spacer(minLength: 42) }
+                                }
+                                .id(index)
+                            }
+                        }
+                        .padding(16)
+                    }
+                    .refreshable { await reload() }
+                    .onChange(of: messages.count) { _, count in
+                        if count > 0 { proxy.scrollTo(count - 1, anchor: .bottom) }
+                    }
+                }
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            HStack(alignment: .bottom, spacing: 10) {
+                TextField("Écrire un message…", text: $composerText, axis: .vertical)
+                    .lineLimit(1...4)
+                    .padding(.horizontal, 13).padding(.vertical, 10)
+                    .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20))
+                    .accessibilityLabel("Votre message")
+                Button { Task { await sendMessage() } } label: {
+                    if isSending { ProgressView() }
+                    else { Image(systemName: "arrow.up.circle.fill").font(.system(size: 34)) }
+                }
+                .disabled(isSending || composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .accessibilityLabel("Envoyer le message")
+            }
+            .padding(.horizontal).padding(.vertical, 8).background(.bar)
+        }
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await reload() }
+        .alert("Envoi impossible", isPresented: Binding(
+            get: { sendError != nil },
+            set: { if !$0 { sendError = nil } }
+        )) {
+            Button("OK", role: .cancel) { sendError = nil }
+        } message: {
+            Text(sendError ?? "Réessayez dans un instant.")
+        }
+    }
+
+    @MainActor
+    private func reload() async {
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            let loaded = try await auth.loadHostConversation(id: conversationID)
+            hostID = loaded.hostID
+            messages = loaded.messages
+            error = nil
+            try await auth.markHostConversationRead(conversationID: conversationID)
+            messages = messages.map { message in
+                var updated = message
+                if (updated["receiverId"] as? String) == hostID { updated["isRead"] = true }
+                return updated
+            }
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func sendMessage() async {
+        let content = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !content.isEmpty, !isSending else { return }
+        isSending = true
+        defer { isSending = false }
+        do {
+            let sent = try await auth.sendHostMessage(conversationID: conversationID, content: content)
+            messages.append(sent)
+            composerText = ""
+        } catch {
+            sendError = error.localizedDescription
+        }
+    }
+}
+
+private struct DashboardOverview: View {
+    let data: [String: Any]
+    let role: AccountRole
+
+    private var metrics: [(String, String, String)] {
+        switch role {
+        case .particulier:
+            [("Biens", "properties", "house.fill"), ("Petites annonces", "classifieds", "tag.fill"), ("Favoris", "favorites", "heart.fill")]
+        case .professionnel:
+            [("Biens", "properties", "house.fill"), ("Matchings", "matchings", "sparkles"), ("Demandes", "demands", "person.2.fill"), ("Messages", "messages", "bubble.left.and.bubble.right.fill")]
+        case .courtier:
+            [("Messages", "messages", "bubble.left.and.bubble.right.fill")]
+        case .artisan:
+            [("Demandes", "messages", "wrench.and.screwdriver.fill")]
+        case .diagnostiqueur:
+            [("Demandes", "messages", "doc.text.magnifyingglass")]
+        case .prestataire:
+            [("Contacts", "messages", "person.2.fill")]
+        case .hebergeur:
+            [
+                ("Hébergements", "accommodations", "house.fill"),
+                ("Demandes", "bookingRequests", "calendar.badge.clock"),
+                ("Réservations", "reservations", "calendar"),
+                ("Conversations", "conversations", "bubble.left.and.bubble.right.fill"),
+                ("Disponibilités", "calendar", "calendar.badge.checkmark"),
+                ("Imports externes", "externalBookings", "calendar.badge.exclamationmark"),
+                ("Tarifs", "seasonalRates", "eurosign.circle"),
+                ("iCal", "calendarConnections", "arrow.triangle.2.circlepath.icloud")
+            ]
+        }
+    }
+
+    var body: some View {
+        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+            ForEach(Array(metrics.enumerated()), id: \.offset) { _, metric in
+                let items = data[metric.1] as? [[String: Any]] ?? []
+                VStack(alignment: .leading, spacing: 7) {
+                    Label(metric.0, systemImage: metric.2)
+                        .font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                        .lineLimit(1).minimumScaleFactor(0.8)
+                    Text(items.count.formatted())
+                        .font(.title2.bold()).contentTransition(.numericText())
+                    if metric.1 == "messages" {
+                        let unread = items.filter { $0["isRead"] as? Bool == false || $0["seen"] as? Bool == false }.count
+                        Text(unread == 0 ? "À jour" : "\(unread) non lu(s)")
+                            .font(.caption2).foregroundStyle(unread == 0 ? .secondary : .orange)
+                    } else {
+                        Text(items.isEmpty ? "Aucun élément" : "Données Wix")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, minHeight: 88, alignment: .leading)
+                .padding(12)
+                .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
+            }
+        }
+        .padding(.vertical, 3)
+    }
+}
+
+private struct NativeSeasonalAccommodationForm: View {
+    @Environment(\.dismiss) private var dismiss
+    @StateObject private var auth = WixAuthStore.shared
+    @State private var itemName: String
+    @State private var itemDescription: String
+    @State private var accommodationType: String
+    @State private var locationAddress: String
+    @State private var city: String
+    @State private var postalCode: String
+    @State private var maxGuests: Int
+    @State private var numberOfBedrooms: Int
+    @State private var itemPrice: String
+    @State private var amenities: String
+    @State private var slug: String
+    @State private var checkInMode: String
+    @State private var checkInTime: String
+    @State private var checkInUntil: String
+    @State private var accessMethod: String
+    @State private var arrivalInstructions: String
+    @State private var status: String
+    @State private var retainedPhotoURLs: [String]
+    @State private var newPhotos: [Data] = []
+    @State private var photosEdited = false
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+
+    let initialAccommodation: [String: Any]?
+    let onSaved: () -> Void
+
+    init(initialAccommodation: [String: Any]?, onSaved: @escaping () -> Void) {
+        self.initialAccommodation = initialAccommodation
+        self.onSaved = onSaved
+        let photoKeys = ["itemImage"] + (1...30).map { "photo\($0)" } + ["galleryImage2", "galleryImage3", "galleryImage4", "galleryImage5"]
+        var seenPhotos = Set<String>()
+        let existingPhotos = photoKeys.compactMap { initialAccommodation?[$0] as? String }
+            .filter { !$0.isEmpty && seenPhotos.insert($0).inserted }
+        _retainedPhotoURLs = State(initialValue: existingPhotos)
+        _itemName = State(initialValue: initialAccommodation?["itemName"] as? String ?? "")
+        _itemDescription = State(initialValue: initialAccommodation?["itemDescription"] as? String ?? "")
+        _accommodationType = State(initialValue: initialAccommodation?["accommodationType"] as? String ?? "apartment")
+        _locationAddress = State(initialValue: initialAccommodation?["locationAddress"] as? String ?? "")
+        _city = State(initialValue: initialAccommodation?["city"] as? String ?? "")
+        _postalCode = State(initialValue: initialAccommodation?["postalCode"] as? String ?? "")
+        _maxGuests = State(initialValue: (initialAccommodation?["maxGuests"] as? Int) ?? 2)
+        _numberOfBedrooms = State(initialValue: (initialAccommodation?["numberOfBedrooms"] as? Int) ?? 1)
+        _itemPrice = State(initialValue: initialAccommodation?["itemPrice"].map { String(describing: $0) } ?? "")
+        _amenities = State(initialValue: initialAccommodation?["amenities"] as? String ?? "")
+        _slug = State(initialValue: initialAccommodation?["slug"] as? String ?? "")
+        _checkInMode = State(initialValue: initialAccommodation?["checkInMode"] as? String ?? "FLEXIBLE")
+        _checkInTime = State(initialValue: initialAccommodation?["checkInTime"] as? String ?? "15:00")
+        _checkInUntil = State(initialValue: initialAccommodation?["checkInUntil"] as? String ?? "20:00")
+        _accessMethod = State(initialValue: initialAccommodation?["accessMethod"] as? String ?? "HOST")
+        _arrivalInstructions = State(initialValue: initialAccommodation?["arrivalInstructions"] as? String ?? "")
+        _status = State(initialValue: "draft")
+    }
+
+    private var accommodationTypes: [(String, String)] {
+        [("apartment", "Appartement"), ("house", "Maison"), ("villa", "Villa"), ("cottage", "Cottage"), ("studio", "Studio"), ("room", "Chambre")]
+    }
+    private var checkInModes: [(String, String)] {
+        [("FLEXIBLE", "Arrivée libre"), ("FROM_TIME", "À partir d’une heure"), ("TIME_WINDOW", "Entre deux horaires"), ("BY_AGREEMENT", "À convenir")]
+    }
+    private var accessMethods: [(String, String)] {
+        [("HOST", "Remise par l’hébergeur"), ("LOCKBOX", "Boîte à clés"), ("SMART_LOCK", "Serrure connectée"), ("RECEPTION", "Accueil ou réception"), ("KEY_PICKUP", "Retrait ailleurs"), ("OTHER", "Autre")]
+    }
+
+    var body: some View {
+        Form {
+            Section(initialAccommodation == nil ? "Nouvel hébergement" : "Modifier l’hébergement") {
+                TextField("Nom de l’établissement", text: $itemName)
+                Picker("Type", selection: $accommodationType) {
+                    ForEach(accommodationTypes, id: \.0) { Text($0.1).tag($0.0) }
+                }
+                TextField("Adresse", text: $locationAddress)
+                TextField("Ville", text: $city)
+                TextField("Code postal", text: $postalCode).keyboardType(.numberPad)
+                TextField("URL personnalisée", text: $slug)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                TextField("Description", text: $itemDescription, axis: .vertical).lineLimit(4...9)
+            }
+            Section("Capacité et tarif") {
+                Stepper("Voyageurs maximum : \(maxGuests)", value: $maxGuests, in: 1...100)
+                Stepper("Chambres : \(numberOfBedrooms)", value: $numberOfBedrooms, in: 1...100)
+                TextField("Prix par nuit (€)", text: $itemPrice).keyboardType(.decimalPad)
+            }
+            Section("Équipements et arrivée") {
+                TextField("Équipements (séparés par des virgules)", text: $amenities, axis: .vertical).lineLimit(2...4)
+                Picker("Modalité d’arrivée", selection: $checkInMode) {
+                    ForEach(checkInModes, id: \.0) { Text($0.1).tag($0.0) }
+                }
+                if ["FROM_TIME", "TIME_WINDOW"].contains(checkInMode) {
+                    TextField("Arrivée à partir de (HH:mm)", text: $checkInTime)
+                    if checkInMode == "TIME_WINDOW" { TextField("Arrivée jusqu’à (HH:mm)", text: $checkInUntil) }
+                }
+                Picker("Accès au logement", selection: $accessMethod) {
+                    ForEach(accessMethods, id: \.0) { Text($0.1).tag($0.0) }
+                }
+                TextField("Consignes d’arrivée (sans code confidentiel)", text: $arrivalInstructions, axis: .vertical).lineLimit(3...6)
+            }
+            Section("Photos de l’hébergement") {
+                if retainedPhotoURLs.isEmpty && newPhotos.isEmpty {
+                    Text("Aucune photo ajoutée.").foregroundStyle(.secondary)
+                }
+                if !retainedPhotoURLs.isEmpty {
+                    ScrollView(.horizontal) {
+                        HStack(spacing: 10) {
+                            ForEach(Array(retainedPhotoURLs.enumerated()), id: \.offset) { index, source in
+                                ZStack(alignment: .topTrailing) {
+                                    AsyncImage(url: WixImageSource.url(source)) { phase in
+                                        if let image = phase.image { image.resizable().scaledToFill() }
+                                        else { Image(systemName: "house.fill").foregroundStyle(.teal).frame(maxWidth: .infinity, maxHeight: .infinity).background(Color.teal.opacity(0.1)) }
+                                    }
+                                    .frame(width: 84, height: 72)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                                    Button(role: .destructive) {
+                                        retainedPhotoURLs.remove(at: index)
+                                        photosEdited = true
+                                    } label: {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .font(.title3).symbolRenderingMode(.palette)
+                                            .foregroundStyle(.white, .black.opacity(0.6))
+                                    }
+                                    .buttonStyle(.plain).padding(4)
+                                    .accessibilityLabel("Supprimer la photo existante \(index + 1)")
+                                }
+                            }
+                        }
+                    }
+                    .scrollIndicators(.hidden)
+                }
+                NativeListingPhotoPicker(photos: $newPhotos, maxPhotos: max(0, 35 - retainedPhotoURLs.count))
+                    .onChange(of: newPhotos) { _, _ in photosEdited = true }
+                Text("Vous pouvez ajouter ou retirer jusqu’à 35 photos. Les changements sont enregistrés dans l’hébergement Wix.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            if initialAccommodation == nil {
+                Section("Statut") {
+                    Picker("Publication", selection: $status) {
+                        Text("Brouillon").tag("draft")
+                        Text("À valider").tag("pending")
                     }
                     .pickerStyle(.segmented)
                 }
