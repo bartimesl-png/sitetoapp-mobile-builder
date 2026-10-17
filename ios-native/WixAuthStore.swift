@@ -659,7 +659,8 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
     }
 
     func uploadListingPhotos(_ photos: [Data], role: String) async throws -> [String] {
-        guard ["particulier", "professionnel", "hebergeur"].contains(role), photos.count <= 35 else {
+        let maximumPhotos = role == "hebergeur" ? 35 : 12
+        guard ["particulier", "professionnel", "hebergeur"].contains(role), photos.count <= maximumPhotos else {
             throw AuthError.api("La sélection de photos est invalide.")
         }
         let token = try await validAccessToken()
