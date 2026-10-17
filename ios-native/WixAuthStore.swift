@@ -2037,6 +2037,64 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         return brokers
     }
 
+    func fetchPublicSeasonalAccommodations() async throws -> [WixSeasonalAccommodation] {
+        let visitor = try await requestToken([
+            "clientId": clientID,
+            "grantType": "anonymous"
+        ])
+        let photoFields = (1...30).map { "photo\($0)" } + ["galleryImage2", "galleryImage3", "galleryImage4", "galleryImage5"]
+        let fields = [
+            "itemName", "itemPrice", "itemImage", "itemDescription", "slug", "accommodationType",
+            "city", "postalCode", "department", "maxGuests", "numberOfBedrooms", "minimumStay",
+            "petsAllowed", "amenities", "latitude", "longitude"
+        ] + photoFields
+        var offset = 0
+        var accommodations: [WixSeasonalAccommodation] = []
+        while true {
+            let response = try await post(
+                "https://www.wixapis.com/wix-data/v2/items/query",
+                bearer: visitor.accessToken,
+                body: [
+                    "dataCollectionId": "seasonalaccommodations",
+                    "query": [
+                        "paging": ["limit": 100, "offset": offset],
+                        "fields": fields
+                    ]
+                ],
+                as: WixRawDirectoryResponse.self
+            )
+            accommodations.append(contentsOf: response.dataItems.compactMap { item in
+                let data = item.data.mapValues(\.value)
+                guard let name = importedString(data, ["itemName"]), !name.isEmpty else { return nil }
+                let photos = (["itemImage"] + photoFields).compactMap { importedString(data, [$0]) }
+                return WixSeasonalAccommodation(
+                    id: item.id,
+                    slug: importedString(data, ["slug"]),
+                    name: name,
+                    accommodationType: importedString(data, ["accommodationType"]),
+                    description: importedString(data, ["itemDescription"]),
+                    city: importedString(data, ["city"]),
+                    postalCode: importedString(data, ["postalCode"]),
+                    department: importedString(data, ["department"]),
+                    guestCapacity: (data["maxGuests"] as? NSNumber)?.intValue,
+                    bedroomCount: (data["numberOfBedrooms"] as? NSNumber)?.intValue,
+                    minimumStay: (data["minimumStay"] as? NSNumber)?.intValue,
+                    nightlyPrice: (data["itemPrice"] as? NSNumber)?.doubleValue,
+                    petsAllowed: data["petsAllowed"] as? Bool ?? false,
+                    amenities: importedString(data, ["amenities"]),
+                    photos: photos,
+                    latitude: (data["latitude"] as? NSNumber)?.doubleValue,
+                    longitude: (data["longitude"] as? NSNumber)?.doubleValue
+                )
+            })
+            guard response.dataItems.count == 100 else { break }
+            let nextOffset = offset + response.dataItems.count
+            guard nextOffset > offset else { break }
+            offset = nextOffset
+        }
+        return accommodations
+    }
+
     func fetchPublicProfessionalListings() async throws -> [Listing] {
         let visitor = try await requestToken([
             "clientId": clientID,

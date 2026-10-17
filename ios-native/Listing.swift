@@ -204,6 +204,45 @@ struct ProfessionalDirectoryResult {
     let warning: String?
 }
 
+struct WixSeasonalAccommodation: Identifiable, Hashable {
+    let id: String
+    let slug: String?
+    let name: String
+    let accommodationType: String?
+    let description: String?
+    let city: String?
+    let postalCode: String?
+    let department: String?
+    let guestCapacity: Int?
+    let bedroomCount: Int?
+    let minimumStay: Int?
+    let nightlyPrice: Double?
+    let petsAllowed: Bool
+    let amenities: String?
+    let photos: [String]
+    let latitude: Double?
+    let longitude: Double?
+
+    var locationLabel: String {
+        [postalCode, city, department].compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " · ")
+    }
+
+    var gallery: [URL] {
+        var seen = Set<String>()
+        return photos.compactMap { value in
+            guard seen.insert(value).inserted else { return nil }
+            return WixImageSource.url(value)
+        }
+    }
+
+    var formattedPrice: String {
+        guard let nightlyPrice, nightlyPrice > 0 else { return "Tarif sur demande" }
+        return nightlyPrice.formatted(.currency(code: "EUR").locale(Locale(identifier: "fr_FR"))) + " / nuit"
+    }
+}
+
 struct WixPublicPropertyItem: Decodable {
     let id: String
     let data: WixPublicProperty

@@ -23,19 +23,263 @@ struct RootView: View {
                 .tabItem { Label("Annonces", systemImage: "magnifyingglass") }
                 .tag(1)
 
+            NativeSeasonalStaysView()
+                .tabItem { Label("Séjours", systemImage: "bed.double") }
+                .tag(2)
+
             NativeProfessionalsView(service: professionalsService)
                 .tabItem { Label("Professionnels", systemImage: "person.2") }
-                .tag(2)
+                .tag(3)
 
             NativeFavoritesView(service: listingsService, classifiedAds: classifiedAdsService, professionalsService: professionalsService)
                 .tabItem { Label("Favoris", systemImage: "heart.fill") }
-                .tag(3)
+                .tag(4)
 
             NativeSpacePickerView()
                 .tabItem { Label("Menu", systemImage: "line.3.horizontal") }
-                .tag(4)
+                .tag(5)
         }
         .tint(Color(red: 0.02, green: 0.38, blue: 0.34))
+    }
+}
+
+private struct NativeSeasonalStaysView: View {
+    @State private var accommodations: [WixSeasonalAccommodation] = []
+    @State private var searchText = ""
+    @State private var selectedType = "Tous"
+    @State private var guests = 1
+    @State private var petsOnly = false
+    @State private var sortByPrice = false
+    @State private var isLoading = false
+    @State private var hasLoaded = false
+    @State private var errorMessage: String?
+
+    private var accommodationTypes: [String] {
+        ["Tous"] + Array(Set(accommodations.compactMap { $0.accommodationType?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty })).sorted()
+    }
+
+    private var filtered: [WixSeasonalAccommodation] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let matches = accommodations.filter { accommodation in
+            let text = [accommodation.name, accommodation.accommodationType, accommodation.city,
+                        accommodation.postalCode, accommodation.department, accommodation.description,
+                        accommodation.amenities].compactMap { $0 }.joined(separator: " ")
+            return (query.isEmpty || text.localizedCaseInsensitiveContains(query)) &&
+                (selectedType == "Tous" || accommodation.accommodationType == selectedType) &&
+                ((accommodation.guestCapacity ?? guests) >= guests) &&
+                (!petsOnly || accommodation.petsAllowed)
+        }
+        return sortByPrice ? matches.sorted { ($0.nightlyPrice ?? .greatestFiniteMagnitude) < ($1.nightlyPrice ?? .greatestFiniteMagnitude) } : matches
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if isLoading && accommodations.isEmpty {
+                    ProgressView("Chargement des séjours…").frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let errorMessage, accommodations.isEmpty {
+                    ContentUnavailableView {
+                        Label("Séjours indisponibles", systemImage: "wifi.exclamationmark")
+                    } description: {
+                        Text(errorMessage)
+                    } actions: {
+                        Button("Réessayer") { Task { await load() } }.buttonStyle(.borderedProminent)
+                    }
+                } else if filtered.isEmpty {
+                    ContentUnavailableView.search(text: searchText)
+                } else {
+                    List {
+                        Section {
+                            HStack {
+                                Label("\(filtered.count) hébergement\(filtered.count > 1 ? "s" : "")", systemImage: "bed.double")
+                                    .font(.footnote).foregroundStyle(.secondary)
+                                Spacer()
+                                if isLoading { ProgressView().controlSize(.small) }
+                            }
+                        }
+                        ForEach(filtered) { accommodation in
+                            NavigationLink(value: accommodation.id) {
+                                SeasonalAccommodationRow(accommodation: accommodation)
+                            }
+                            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                        }
+                    }
+                    .listStyle(.plain)
+                    .refreshable { await load() }
+                    .navigationDestination(for: String.self) { id in
+                        if let accommodation = accommodations.first(where: { $0.id == id }) {
+                            NativeSeasonalAccommodationDetail(accommodation: accommodation)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Séjours saisonniers")
+            .searchable(text: $searchText, prompt: "Destination, ville, hébergement…")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Picker("Type d’hébergement", selection: $selectedType) {
+                            ForEach(accommodationTypes, id: \.self) { Text($0).tag($0) }
+                        }
+                        Stepper("Voyageurs : \(guests)", value: $guests, in: 1...30)
+                        Toggle("Animaux acceptés", isOn: $petsOnly)
+                        Toggle("Trier par prix", isOn: $sortByPrice)
+                    } label: {
+                        Image(systemName: selectedType == "Tous" && guests == 1 && !petsOnly && !sortByPrice
+                              ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+                    }
+                    .accessibilityLabel("Filtrer les séjours")
+                }
+            }
+            .task { if !hasLoaded { await load() } }
+        }
+    }
+
+    @MainActor
+    private func load() async {
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false; hasLoaded = true }
+        do {
+            accommodations = try await WixAuthStore.shared.fetchPublicSeasonalAccommodations()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+
+private struct SeasonalAccommodationRow: View {
+    let accommodation: WixSeasonalAccommodation
+
+    var body: some View {
+        HStack(spacing: 14) {
+            if let url = accommodation.gallery.first {
+                AsyncImage(url: url) { image in
+                    image.resizable().scaledToFill()
+                } placeholder: {
+                    RoundedRectangle(cornerRadius: 12).fill(Color.teal.opacity(0.12))
+                        .overlay { Image(systemName: "house.lodge").foregroundStyle(.teal) }
+                }
+                .frame(width: 92, height: 92).clipShape(RoundedRectangle(cornerRadius: 12))
+            } else {
+                RoundedRectangle(cornerRadius: 12).fill(Color.teal.opacity(0.12))
+                    .overlay { Image(systemName: "house.lodge").foregroundStyle(.teal) }
+                    .frame(width: 92, height: 92)
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                Text(accommodation.name).font(.headline).lineLimit(2)
+                if let type = accommodation.accommodationType, !type.isEmpty {
+                    Text(type).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                }
+                if !accommodation.locationLabel.isEmpty {
+                    Label(accommodation.locationLabel, systemImage: "mappin.and.ellipse")
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+                HStack(spacing: 10) {
+                    if let capacity = accommodation.guestCapacity { Label("\(capacity)", systemImage: "person.2") }
+                    Text(accommodation.formattedPrice).fontWeight(.semibold).foregroundStyle(.teal)
+                }
+                .font(.caption)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+    }
+}
+
+private struct NativeSeasonalAccommodationDetail: View {
+    let accommodation: WixSeasonalAccommodation
+    @State private var showHostedBooking = false
+
+    private var amenities: [String] {
+        guard let raw = accommodation.amenities?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { return [] }
+        if let data = raw.data(using: .utf8),
+           let values = try? JSONSerialization.jsonObject(with: data) as? [String] {
+            return values.filter { !$0.isEmpty }
+        }
+        if let data = raw.data(using: .utf8),
+           let values = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            return values.filter { ($0.value as? Bool) == true }.map(\.key).sorted()
+        }
+        return raw.split(whereSeparator: { $0 == "," || $0 == ";" || $0 == "\n" }).map { String($0).trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    }
+
+    private var bookingURL: URL? {
+        let slug = accommodation.slug?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let pathID = slug.isEmpty ? accommodation.id : slug
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        guard let pathComponent = pathID.addingPercentEncoding(withAllowedCharacters: allowed) else { return nil }
+        return URL(string: "https://www.partenairefoyer.com/location-saisonniere/\(pathComponent)")
+    }
+
+    var body: some View {
+        List {
+            if !accommodation.gallery.isEmpty {
+                Section {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            ForEach(accommodation.gallery, id: \.self) { url in
+                                AsyncImage(url: url) { image in image.resizable().scaledToFill() } placeholder: {
+                                    RoundedRectangle(cornerRadius: 14).fill(Color.teal.opacity(0.12))
+                                }
+                                .frame(width: 280, height: 190).clipShape(RoundedRectangle(cornerRadius: 14))
+                            }
+                        }
+                    }
+                    .listRowInsets(EdgeInsets())
+                }
+            }
+            Section {
+                Text(accommodation.name).font(.title2.bold())
+                if let type = accommodation.accommodationType, !type.isEmpty {
+                    Label(type, systemImage: "house.lodge").foregroundStyle(.teal)
+                }
+                if !accommodation.locationLabel.isEmpty {
+                    Label(accommodation.locationLabel, systemImage: "mappin.and.ellipse").foregroundStyle(.secondary)
+                }
+                Text(accommodation.formattedPrice).font(.headline).foregroundStyle(.teal)
+            }
+            Section("Le logement") {
+                if let guests = accommodation.guestCapacity { LabeledContent("Capacité", value: "\(guests) voyageurs") }
+                if let bedrooms = accommodation.bedroomCount { LabeledContent("Chambres", value: "\(bedrooms)") }
+                if let minimumStay = accommodation.minimumStay { LabeledContent("Séjour minimum", value: "\(minimumStay) nuit\(minimumStay > 1 ? "s" : "")") }
+                LabeledContent("Animaux", value: accommodation.petsAllowed ? "Acceptés" : "Non indiqué comme acceptés")
+            }
+            if let description = accommodation.description?.trimmingCharacters(in: .whitespacesAndNewlines), !description.isEmpty {
+                Section("Description") { Text(description).textSelection(.enabled) }
+            }
+            if !amenities.isEmpty {
+                Section("Équipements et services") {
+                    ForEach(amenities, id: \.self) { Label($0, systemImage: "checkmark.circle") }
+                }
+            }
+            if let latitude = accommodation.latitude, let longitude = accommodation.longitude,
+               let url = URL(string: "https://maps.apple.com/?ll=\(latitude),\(longitude)") {
+                Section { Link(destination: url) { Label("Voir la zone dans Plans", systemImage: "map") } }
+            }
+            Section("Dates et réservation") {
+                Text("Vérifiez les disponibilités et envoyez votre demande à l’hébergeur.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                if let bookingURL {
+                    Button { showHostedBooking = true } label: {
+                        Label("Ouvrir le calendrier de réservation", systemImage: "calendar.badge.clock")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent).tint(.teal)
+                    .sheet(isPresented: $showHostedBooking) {
+                        NavigationStack { InAppSafariView(url: bookingURL) }
+                            .ignoresSafeArea(edges: .bottom)
+                    }
+                }
+                Text("La vérification des dates et l’envoi de la demande s’effectuent sur le parcours sécurisé du site, dans cette fenêtre.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .listStyle(.insetGrouped)
+        .navigationTitle("Hébergement")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -2081,6 +2325,26 @@ private struct HomeDashboardView: View {
 
                     Button { selectedTab = 2 } label: {
                         HStack(spacing: 14) {
+                            Image(systemName: "bed.double")
+                                .font(.title3.weight(.semibold))
+                                .foregroundStyle(.teal)
+                                .frame(width: 46, height: 46)
+                                .background(Color.teal.opacity(0.11), in: RoundedRectangle(cornerRadius: 14))
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Trouver un séjour saisonnier").font(.headline).foregroundStyle(.primary)
+                                Text("Parcourez les hébergements et leurs équipements").font(.subheadline).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "arrow.right").foregroundStyle(.secondary)
+                        }
+                        .padding(16)
+                        .background(.background, in: RoundedRectangle(cornerRadius: 20))
+                        .overlay(RoundedRectangle(cornerRadius: 20).stroke(.quaternary, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+
+                    Button { selectedTab = 3 } label: {
+                        HStack(spacing: 14) {
                             Image(systemName: "person.2")
                                 .font(.title3.weight(.semibold))
                                 .foregroundStyle(.teal)
@@ -2160,7 +2424,7 @@ private struct HomeDashboardView: View {
                     .background(.background, in: RoundedRectangle(cornerRadius: 20))
                     .overlay(RoundedRectangle(cornerRadius: 20).stroke(.quaternary, lineWidth: 1))
 
-                    Button { selectedTab = 4 } label: {
+                    Button { selectedTab = 5 } label: {
                         Label("Vous êtes… ? Choisir mon espace", systemImage: "person.crop.circle.badge.questionmark")
                             .font(.headline)
                             .frame(maxWidth: .infinity)
