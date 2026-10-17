@@ -1302,6 +1302,18 @@ private struct RoleEntryView: View {
     @State private var password = ""
     @State private var firstName = ""
     @State private var lastName = ""
+    @State private var phone = ""
+    @State private var city = ""
+    @State private var postalCode = ""
+    @State private var companyName = ""
+    @State private var category = ""
+    @State private var subcategory = ""
+    @State private var description = ""
+    @State private var website = ""
+    @State private var professionalTitle = ""
+    @State private var yearsOfExperience = ""
+    @State private var professionalType = "mandataire"
+    @State private var acceptedTerms = false
     @State private var isCreatingAccount = false
     let role: AccountRole
     let onSignedIn: () -> Void
@@ -1332,6 +1344,14 @@ private struct RoleEntryView: View {
                             .autocorrectionDisabled()
                         SecureField("Mot de passe (8 caractères minimum)", text: $password)
                             .textContentType(.newPassword)
+                        TextField("Téléphone", text: $phone)
+                            .textContentType(.telephoneNumber)
+                            .keyboardType(.phonePad)
+                        roleRegistrationFields
+                        Toggle("J’accepte les conditions générales de PartenaireFoyer et sa politique de confidentialité.", isOn: $acceptedTerms)
+                        Link(destination: AppConfig.privacyURL) {
+                            Label("Consulter la politique de confidentialité", systemImage: "hand.raised")
+                        }
                     }
                 } else {
                     Section("Connexion à votre compte") {
@@ -1362,11 +1382,35 @@ private struct RoleEntryView: View {
                     Button {
                         Task {
                             if isCreatingAccount {
-                                await auth.signUp(email: email, password: password, firstName: firstName, lastName: lastName)
+                                let profile: [String: String] = [
+                                    "firstName": firstName,
+                                    "lastName": lastName,
+                                    "phone": phone,
+                                    "city": city,
+                                    "postalCode": postalCode,
+                                    "companyName": companyName,
+                                    "contactName": "\(firstName) \(lastName)",
+                                    "category": category,
+                                    "subcategory": subcategory,
+                                    "description": description,
+                                    "website": website,
+                                    "professionalTitle": professionalTitle,
+                                    "yearsOfExperience": yearsOfExperience,
+                                    "professionalType": professionalType
+                                ]
+                                let didComplete = await auth.signUp(
+                                    email: email,
+                                    password: password,
+                                    firstName: firstName,
+                                    lastName: lastName,
+                                    role: role.rawValue,
+                                    profile: profile
+                                )
+                                if didComplete { onSignedIn() }
                             } else {
                                 await auth.signIn(email: email, password: password)
+                                if auth.member != nil { onSignedIn() }
                             }
-                            if auth.member != nil { onSignedIn() }
                         }
                     } label: {
                         HStack {
@@ -1377,7 +1421,7 @@ private struct RoleEntryView: View {
                             Spacer()
                         }
                     }
-                    .disabled(email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || password.isEmpty || auth.isSigningIn)
+                    .disabled(email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || password.isEmpty || auth.isSigningIn || (isCreatingAccount && !acceptedTerms))
 
                     Button {
                         isCreatingAccount.toggle()
@@ -1397,6 +1441,49 @@ private struct RoleEntryView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { Button("Fermer") { dismiss() } }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var roleRegistrationFields: some View {
+        switch role {
+        case .particulier:
+            TextField("Ville (facultatif)", text: $city).textContentType(.addressCity)
+            TextField("Code postal (facultatif)", text: $postalCode).keyboardType(.numberPad)
+        case .professionnel:
+            TextField("Société / réseau", text: $companyName)
+            Picker("Profil professionnel", selection: $professionalType) {
+                Text("Mandataire immobilier").tag("mandataire")
+                Text("Agence immobilière").tag("agency")
+            }
+            TextField("Activité", text: $category)
+            TextField("Ville", text: $city).textContentType(.addressCity)
+            TextField("Code postal", text: $postalCode).keyboardType(.numberPad)
+            TextField("Site internet (facultatif)", text: $website).keyboardType(.URL).textInputAutocapitalization(.never)
+        case .courtier:
+            TextField("Spécialité / titre professionnel", text: $professionalTitle)
+            TextField("Ville", text: $city).textContentType(.addressCity)
+            TextField("Années d’expérience (facultatif)", text: $yearsOfExperience).keyboardType(.numberPad)
+            TextField("Site internet (facultatif)", text: $website).keyboardType(.URL).textInputAutocapitalization(.never)
+        case .artisan, .diagnostiqueur, .prestataire:
+            TextField("Entreprise", text: $companyName)
+            if role == .artisan {
+                TextField("Activité artisanale", text: $subcategory)
+                TextField("Activité", text: $category).disabled(true).onAppear { category = "Artisan" }
+            } else if role == .diagnostiqueur {
+                TextField("Spécialité (DPE, amiante…)", text: $subcategory)
+                TextField("Activité", text: $category).disabled(true).onAppear { category = "Diagnostiqueur" }
+            } else {
+                TextField("Activité", text: $category)
+                TextField("Spécialité (facultatif)", text: $subcategory)
+            }
+            TextField("Ville", text: $city).textContentType(.addressCity)
+            TextField("Code postal", text: $postalCode).keyboardType(.numberPad)
+            TextField("Présentation (facultatif)", text: $description, axis: .vertical).lineLimit(3...6)
+            TextField("Site internet (facultatif)", text: $website).keyboardType(.URL).textInputAutocapitalization(.never)
+        case .hebergeur:
+            TextField("Nom de l’hébergement / activité", text: $companyName)
+            TextField("Présentation (facultatif)", text: $description, axis: .vertical).lineLimit(3...6)
         }
     }
 }

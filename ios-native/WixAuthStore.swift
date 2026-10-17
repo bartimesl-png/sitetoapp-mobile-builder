@@ -176,8 +176,8 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         }
     }
 
-    func signUp(email: String, password: String, firstName: String, lastName: String) async {
-        guard !isSigningIn else { return }
+    func signUp(email: String, password: String, firstName: String, lastName: String, role: String, profile: [String: String]) async -> Bool {
+        guard !isSigningIn else { return false }
         isSigningIn = true
         errorMessage = nil
         infoMessage = nil
@@ -188,43 +188,70 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         let familyName = lastName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard normalizedEmail.contains("@"), givenName.count >= 2, familyName.count >= 2, password.count >= 8 else {
             errorMessage = "Indiquez un e-mail valide, vos prénom et nom, et un mot de passe d’au moins 8 caractères."
-            return
+            return false
+        }
+        if let member, member.loginEmail.caseInsensitiveCompare(normalizedEmail) != .orderedSame {
+            errorMessage = "Un compte Wix est déjà connecté. Utilisez l’adresse e-mail de ce compte pour terminer son inscription."
+            return false
         }
 
         do {
-            let visitor = try await requestToken([
-                "clientId": clientID,
-                "grantType": "anonymous"
-            ])
-            let registration = try await post(
-                "https://www.wixapis.com/_api/iam/authentication/v2/register",
-                bearer: visitor.accessToken,
-                body: [
-                    "login_id": ["email": normalizedEmail],
-                    "password": password,
-                    "profile": [
-                        "firstName": givenName,
-                        "lastName": familyName,
-                        "nickname": "\(givenName) \(familyName)",
-                        "privacyStatus": "PRIVATE"
-                    ]
-                ],
-                as: RegistrationResponse.self
-            )
-            guard registration.state?.uppercased() == "SUCCESS",
-                  let sessionToken = registration.sessionToken, !sessionToken.isEmpty else {
-                let state = registration.state?.uppercased() ?? ""
-                if state.contains("EMAIL") || state.contains("VERIFY") {
-                    infoMessage = "Un code de vérification a été envoyé à \(normalizedEmail). Après validation, connectez-vous avec vos identifiants."
-                    return
+            if member == nil {
+                let visitor = try await requestToken([
+                    "clientId": clientID,
+                    "grantType": "anonymous"
+                ])
+                let registration = try await post(
+                    "https://www.wixapis.com/_api/iam/authentication/v2/register",
+                    bearer: visitor.accessToken,
+                    body: [
+                        "login_id": ["email": normalizedEmail],
+                        "password": password,
+                        "profile": [
+                            "firstName": givenName,
+                            "lastName": familyName,
+                            "nickname": "\(givenName) \(familyName)",
+                            "privacyStatus": "PRIVATE"
+                        ]
+                    ],
+                    as: RegistrationResponse.self
+                )
+                guard registration.state?.uppercased() == "SUCCESS",
+                      let sessionToken = registration.sessionToken, !sessionToken.isEmpty else {
+                    let state = registration.state?.uppercased() ?? ""
+                    if state.contains("EMAIL") || state.contains("VERIFY") {
+                        infoMessage = "Un code de vérification a été envoyé à \(normalizedEmail). Après validation, connectez-vous avec vos identifiants."
+                        return false
+                    }
+                    throw AuthError.login(registration.message ?? "L’inscription n’a pas abouti (\(registration.state ?? "état inconnu")).")
                 }
-                throw AuthError.login(registration.message ?? "L’inscription n’a pas abouti (\(registration.state ?? "état inconnu")).")
+                try await establishMemberSession(sessionToken: sessionToken, visitorAccessToken: visitor.accessToken)
             }
-            try await establishMemberSession(sessionToken: sessionToken, visitorAccessToken: visitor.accessToken)
+            try await createRoleProfile(role: role, profile: profile)
+            return true
         } catch is CancellationError {
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
+        }
+        return false
+    }
+
+    private func createRoleProfile(role: String, profile: [String: String]) async throws {
+        var body: [String: Any] = ["role": role, "acceptedTerms": true]
+        body.merge(profile) { _, new in new }
+        let token = try await validAccessToken()
+        var request = URLRequest(url: URL(string: "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/ios-native-role-registration")!, timeoutInterval: 35)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw AuthError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else {
+            let payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            throw AuthError.api(payload?["error"] as? String ?? "Impossible de créer votre espace métier Wix.")
         }
     }
 
