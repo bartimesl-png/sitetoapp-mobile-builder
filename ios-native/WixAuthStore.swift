@@ -427,6 +427,42 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         }
     }
 
+    func fetchPublicClassifiedAds() async throws -> [ClassifiedAd] {
+        let visitor = try await requestToken([
+            "clientId": clientID,
+            "grantType": "anonymous"
+        ])
+        let fields = [
+            "itemName", "itemDescription", "itemPrice", "category", "subcategory",
+            "itemCondition", "city", "postalCode", "status", "itemImage",
+            "photo2", "photo3", "photo4", "photo5", "photo6", "photo7", "photo8",
+            "photo9", "photo10", "photo11", "photo12", "photo13", "photo14",
+            "photo15", "photo16", "photo17", "photo18", "photo19", "photo20"
+        ]
+        var offset = 0
+        var ads: [ClassifiedAd] = []
+        let pageSize = 100
+        for _ in 0..<20 {
+            let response = try await post(
+                "https://www.wixapis.com/wix-data/v2/items/query",
+                bearer: visitor.accessToken,
+                body: [
+                    "dataCollectionId": "classifiedads-1",
+                    "query": [
+                        "filter": ["status": ["$eq": "published"]],
+                        "paging": ["limit": pageSize, "offset": offset],
+                        "fields": fields
+                    ]
+                ],
+                as: WixPublicClassifiedAdsResponse.self
+            )
+            ads.append(contentsOf: response.dataItems.compactMap { $0.data.classifiedAd(id: $0.id) })
+            guard response.dataItems.count == pageSize else { break }
+            offset += pageSize
+        }
+        return ads
+    }
+
     func fetchPublicPrivateListings() async throws -> [Listing] {
         let visitor = try await requestToken([
             "clientId": clientID,
