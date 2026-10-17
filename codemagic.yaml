@@ -168,9 +168,16 @@ workflows:
 
       - name: Compiler l’IPA iOS
         script: |
+          set -o pipefail
           xcode-project build-ipa \
             --project "$CM_BUILD_DIR/$XCODE_PROJECT" \
-            --scheme "$XCODE_SCHEME"
+            --scheme "$XCODE_SCHEME" 2>&1 | tee /tmp/partenairefoyer-xcode-build.log
+          BUILD_STATUS=${PIPESTATUS[0]}
+          if [ "$BUILD_STATUS" -ne 0 ]; then
+            echo "Diagnostics Xcode pertinents :"
+            grep -nE "(error:|fatal error:|warning:|SwiftDriver|SwiftCompile|signal [0-9]+|unable to)" /tmp/partenairefoyer-xcode-build.log | tail -n 100 || true
+          fi
+          exit "$BUILD_STATUS"
 
     artifacts:
       - build/ios/ipa/*.ipa
