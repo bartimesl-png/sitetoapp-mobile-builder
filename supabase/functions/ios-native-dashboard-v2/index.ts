@@ -165,6 +165,42 @@ Deno.serve(async (req: Request) => {
       return response({ error: "Le compte Wix n’est pas vérifié." }, 403);
     }
     if (req.method === "POST") {
+      if (body.action === "mark_matching_seen") {
+        if (role !== "professionnel") return response({ error: "Cette action est réservée à l’espace professionnel." }, 403);
+        const itemId = String(body.itemId ?? "").trim();
+        const list = String(body.list ?? "");
+        if (!/^[A-Za-z0-9_-]{1,160}$/.test(itemId) || !["matchings", "demands"].includes(list)) {
+          return response({ error: "Élément de matching invalide." }, 400);
+        }
+        const dashboard = await loadDashboard(role, email, result.member.id, token);
+        const rows = (dashboard?.[list] as Record<string, unknown>[] | undefined) ?? [];
+        const item = rows.find((entry) => String(entry._id ?? entry.id ?? "") === itemId);
+        if (!item) return response({ error: "Ce matching n’est pas associé à votre espace." }, 404);
+        if (item.seen === true && (list !== "demands" || item.isViewed === true)) {
+          return response({ success: true, alreadySeen: true, itemId });
+        }
+        const collection = list === "matchings" ? "matchings" : "demandespromatchings";
+        const modifications = [{
+          fieldPath: "seen",
+          action: "SET_FIELD",
+          setFieldOptions: { value: true },
+        }];
+        if (list === "demands") {
+          modifications.push({
+            fieldPath: "isViewed",
+            action: "SET_FIELD",
+            setFieldOptions: { value: true },
+          });
+        }
+        await wixRequest(`/wix-data/v2/items/${encodeURIComponent(itemId)}`, token, {
+          method: "PATCH",
+          body: JSON.stringify({
+            dataCollectionId: collection,
+            patch: { dataItemId: itemId, fieldModifications: modifications },
+          }),
+        });
+        return response({ success: true, itemId, list });
+      }
       if (body.action !== "mark_inquiry_read" || !["courtier", "artisan", "diagnostiqueur", "prestataire"].includes(role)) {
         return response({ error: "Action de messagerie inconnue." }, 400);
       }
