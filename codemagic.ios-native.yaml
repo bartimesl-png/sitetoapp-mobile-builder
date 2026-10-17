@@ -17,6 +17,9 @@ workflows:
       - name: Configurer la signature Apple
         script: xcode-project use-profiles
 
+      - name: Préparer le logo et l’icône iOS
+        script: bash scripts/prepare-ios-assets.sh
+
       - name: Compiler l’IPA iOS
         script: |
           xcode-project build-ipa \

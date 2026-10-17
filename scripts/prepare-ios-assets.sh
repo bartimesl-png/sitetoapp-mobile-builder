@@ -5,7 +5,9 @@ ROOT_DIR="${CM_BUILD_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 ASSETS_DIR="$ROOT_DIR/ios-native/PartenaireFoyer/Assets.xcassets"
 APPICON_DIR="$ASSETS_DIR/AppIcon.appiconset"
 ICON_PATH="$APPICON_DIR/AppIcon.png"
-LOGO_URL="https://static.wixstatic.com/media/476a15_d601a17fe7c4406aac35fac85d309948~mv2.jpg"
+BRAND_IMAGESET_DIR="$ASSETS_DIR/BrandLogo.imageset"
+BRAND_IMAGE_PATH="$BRAND_IMAGESET_DIR/BrandLogo.jpg"
+BRAND_SOURCE_B64="$ROOT_DIR/ios-native/Branding/partenairefoyer-logo.jpg.b64"
 TMP_DIR="$(mktemp -d)"
 
 cleanup() {
@@ -16,16 +18,38 @@ trap cleanup EXIT
 echo "Préparation des assets iOS dans : $ASSETS_DIR"
 mkdir -p "$APPICON_DIR"
 
-curl \
-  --fail \
-  --location \
-  --retry 5 \
-  --retry-delay 2 \
-  --connect-timeout 20 \
-  "$LOGO_URL" \
-  --output "$TMP_DIR/logo-source.jpg"
+if [ ! -s "$BRAND_SOURCE_B64" ]; then
+  echo "ERREUR : logo source manquant : $BRAND_SOURCE_B64"
+  exit 1
+fi
+
+mkdir -p "$BRAND_IMAGESET_DIR"
+if base64 --decode "$BRAND_SOURCE_B64" > "$TMP_DIR/logo-source.jpg" 2>/dev/null; then
+  :
+else
+  base64 -D -i "$BRAND_SOURCE_B64" -o "$TMP_DIR/logo-source.jpg"
+fi
 
 test -s "$TMP_DIR/logo-source.jpg"
+
+cp "$TMP_DIR/logo-source.jpg" "$BRAND_IMAGE_PATH"
+
+cat > "$BRAND_IMAGESET_DIR/Contents.json" <<'JSON'
+{
+  "images": [
+    {
+      "filename": "BrandLogo.jpg",
+      "idiom": "universal"
+    }
+  ],
+  "info": {
+    "author": "xcode",
+    "version": 1
+  }
+}
+JSON
+
+sips -g pixelWidth "$BRAND_IMAGE_PATH" | awk '/pixelWidth/ {print $2}' >/dev/null
 
 sips -s format png "$TMP_DIR/logo-source.jpg" \
   --out "$TMP_DIR/logo.png" >/dev/null
@@ -90,4 +114,4 @@ if [ "$FINAL_WIDTH" != "1024" ] || [ "$FINAL_HEIGHT" != "1024" ]; then
   exit 1
 fi
 
-echo "OK : AppIcon.png créé et vérifié en 1024x1024."
+echo "OK : logo natif et AppIcon.png créés ; icône vérifiée en 1024x1024."

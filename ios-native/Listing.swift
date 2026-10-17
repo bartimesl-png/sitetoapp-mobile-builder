@@ -1,154 +1,381 @@
 import Foundation
 
-struct Listing: Identifiable, Codable, Hashable {
-    let id: String
-    let title: String
-    let city: String
-    let postalCode: String
-    let price: Double?
-    let livingArea: Double?
-    let rooms: Int?
-    let propertyType: String
-    let transactionType: String
-    let summary: String
-    let imageURL: URL?
-    let sourceURL: URL?
-    let phone: String?
-    let latitude: Double?
-    let longitude: Double?
-
-    private struct AnyKey: CodingKey {
-        var stringValue: String
-        var intValue: Int? { nil }
-
-        init?(stringValue: String) {
-            self.stringValue = stringValue
+enum WixImageSource {
+    static func url(_ rawValue: String) -> URL? {
+        let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.hasPrefix("https://") || value.hasPrefix("http://") { return URL(string: value) }
+        for prefix in ["wix:image://v1/", "image://v1/"] where value.hasPrefix(prefix) {
+            let remainder = value.dropFirst(prefix.count)
+            guard let mediaId = remainder.split(separator: "/", maxSplits: 1).first,
+                  !mediaId.isEmpty else { return nil }
+            return URL(string: "https://static.wixstatic.com/media/\(mediaId)")
         }
-
-        init?(intValue: Int) {
-            return nil
-        }
+        return nil
     }
+}
 
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: AnyKey.self)
+/// Public listing DTO returned by the existing PartenaireFoyer Supabase feed.
+/// Unknown fields from the API are intentionally ignored for forward compatibility.
+struct Listing: Decodable, Identifiable, Hashable {
+    let id: String
+    let title: String?
+    let description: String?
+    let city: String?
+    let postalCode: String?
+    let price: Double?
+    let surface: Double?
+    let rooms: Int?
+    let bedrooms: Int?
+    let bathrooms: Int?
+    let images: [String]?
+    let imageUrl: String?
+    let transactionType: String?
+    let propertyType: String?
+    let sourceUrl: String?
+    let ownerType: String?
 
-        func value(_ names: [String]) -> Any? {
-            for name in names {
-                guard let key = AnyKey(stringValue: name),
-                      let decoded = try? container.decode(AnyCodable.self, forKey: key)
-                else {
-                    continue
-                }
-                return decoded.value
-            }
-            return nil
+    var gallery: [URL] {
+        var candidates = images ?? []
+        if let imageUrl { candidates.insert(imageUrl, at: 0) }
+        var seen = Set<String>()
+        return candidates.compactMap { value in
+            guard seen.insert(value).inserted else { return nil }
+            return WixImageSource.url(value)
         }
-
-        func string(_ names: [String], default fallback: String = "") -> String {
-            guard let raw = value(names) else { return fallback }
-            if let text = raw as? String {
-                return text.trimmingCharacters(in: .whitespacesAndNewlines)
-            }
-            return String(describing: raw)
-        }
-
-        func number(_ names: [String]) -> Double? {
-            guard let raw = value(names) else { return nil }
-            if let number = raw as? NSNumber {
-                return number.doubleValue
-            }
-            if let text = raw as? String {
-                let normalized = text
-                    .replacingOccurrences(of: "\u{00A0}", with: "")
-                    .replacingOccurrences(of: " ", with: "")
-                    .replacingOccurrences(of: ",", with: ".")
-                return Double(normalized.filter {
-                    $0.isNumber || $0 == "." || $0 == "-"
-                })
-            }
-            return nil
-        }
-
-        id = string(
-            ["id", "listing_id", "property_id", "external_id", "url"],
-            default: UUID().uuidString
-        )
-        title = string(
-            ["title", "name", "headline", "titre"],
-            default: "Annonce immobilière"
-        )
-        city = string(["city", "city_name", "ville", "locality"])
-        postalCode = string([
-            "postal_code", "postalCode", "zip_code", "zipcode", "code_postal"
-        ])
-        price = number(["price", "price_eur", "prix", "amount"])
-        livingArea = number([
-            "living_area", "surface", "surface_area", "area", "surface_habitable"
-        ])
-        rooms = number([
-            "rooms", "room_count", "pieces", "number_of_rooms"
-        ]).map(Int.init)
-        propertyType = string([
-            "property_type", "propertyType", "type", "type_bien"
-        ])
-        transactionType = string([
-            "transaction_type", "transactionType", "offer_type",
-            "deal_type", "transaction"
-        ])
-        summary = string([
-            "description", "summary", "description_text", "details", "resume"
-        ])
-
-        let imageValue = string([
-            "image_url", "imageUrl", "photo_url", "main_image",
-            "cover_image", "image"
-        ])
-        imageURL = imageValue.isEmpty ? nil : URL(string: imageValue)
-
-        let sourceValue = string([
-            "source_url", "sourceUrl", "listing_url", "url", "permalink", "link"
-        ])
-        sourceURL = sourceValue.isEmpty ? nil : URL(string: sourceValue)
-
-        let phoneValue = string(["phone", "telephone", "contact_phone"])
-        phone = phoneValue.isEmpty ? nil : phoneValue
-
-        latitude = number(["latitude", "lat", "geo_lat"])
-        longitude = number(["longitude", "lng", "lon", "geo_lng"])
     }
 
     var locationLabel: String {
-        [postalCode, city]
-            .filter { !$0.isEmpty }
-            .joined(separator: " ")
+        [postalCode, city].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
     }
 
-    var priceLabel: String {
+    var formattedPrice: String {
         guard let price else { return "Prix sur demande" }
-        return price.formatted(
-            .currency(code: "EUR")
-                .locale(Locale(identifier: "fr_FR"))
+        return price.formatted(.currency(code: "EUR").locale(Locale(identifier: "fr_FR")))
+    }
+
+    var formattedSurface: String? {
+        guard let surface, surface > 0 else { return nil }
+        return "\(surface.formatted(.number.precision(.fractionLength(0...1)).locale(Locale(identifier: "fr_FR")))) m²"
+    }
+}
+
+struct ListingFeedResponse: Decodable {
+    let items: [Listing]
+    let total: Int?
+}
+
+struct WixPublicPropertiesResponse: Decodable {
+    let dataItems: [WixPublicPropertyItem]
+}
+
+struct WixPublicProfessionalsResponse: Decodable {
+    let dataItems: [WixPublicProfessionalItem]
+}
+
+struct WixPublicProfessionalItem: Decodable {
+    let id: String
+    let data: WixPublicProfessionalData
+}
+
+struct WixPublicProfessionalData: Decodable {
+    let companyName: String?
+    let firstName: String?
+    let lastName: String?
+    let network: String?
+    let city: String?
+    let postalCode: String?
+    let businessSector: String?
+    let description: String?
+    let photo: String?
+    let website: String?
+    let memberId: String?
+    let isVisibleInDirectory: Bool?
+    let isActive: Bool?
+
+    func professional(id: String) -> WixPublicProfessional {
+        WixPublicProfessional(
+            id: id,
+            companyName: companyName,
+            firstName: firstName,
+            lastName: lastName,
+            network: network,
+            city: city,
+            postalCode: postalCode,
+            businessSector: businessSector,
+            description: description,
+            logo: photo,
+            website: website
         )
     }
 }
 
-private struct AnyCodable: Decodable {
-    let value: Any
+struct WixPublicProfessional: Identifiable {
+    let id: String
+    let companyName: String?
+    let firstName: String?
+    let lastName: String?
+    let network: String?
+    let city: String?
+    let postalCode: String?
+    let businessSector: String?
+    let description: String?
+    let logo: String?
+    let website: String?
 
-    init(from decoder: Decoder) throws {
-        let container = try decoder.singleValueContainer()
-
-        if container.decodeNil() {
-            value = NSNull()
-        } else if let text = try? container.decode(String.self) {
-            value = text
-        } else if let number = try? container.decode(Double.self) {
-            value = number
-        } else if let boolean = try? container.decode(Bool.self) {
-            value = boolean
-        } else {
-            value = ""
-        }
+    var resolvedName: String {
+        let company = companyName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !company.isEmpty { return company }
+        let person = [firstName, lastName].compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        return person.isEmpty ? "Professionnel immobilier" : person
+    }
+    var resolvedActivity: String? {
+        [businessSector, network]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty }
+    }
+    var locationLabel: String {
+        [postalCode, city].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
     }
 }
+
+struct WixPublicPropertyItem: Decodable {
+    let id: String
+    let data: WixPublicProperty
+}
+
+struct WixPublicProperty: Decodable {
+    let title: String?
+    let description: String?
+    let city: String?
+    let postalCode: String?
+    let sellingPrice: Double?
+    let estimatedPrice: Double?
+    let status: String?
+    let surface: Double?
+    let rooms: Double?
+    let bedrooms: Double?
+    let propertyType: String?
+    let transactionType: String?
+    let mainImage: String?
+    let isPublic: Bool?
+    let photo1: String?
+    let photo2: String?
+    let photo3: String?
+    let photo4: String?
+    let photo5: String?
+    let photo6: String?
+    let photo7: String?
+    let photo8: String?
+    let photo9: String?
+    let photo10: String?
+    let photo11: String?
+    let photo12: String?
+    let photo13: String?
+    let photo14: String?
+    let photo15: String?
+    let photo16: String?
+    let photo17: String?
+    let photo18: String?
+    let photo19: String?
+    let photo20: String?
+    let galleryImages: String?
+
+    var photos: [String] {
+        var result = [mainImage, photo1, photo2, photo3, photo4, photo5,
+                      photo6, photo7, photo8, photo9, photo10, photo11,
+                      photo12, photo13, photo14, photo15, photo16, photo17,
+                      photo18, photo19, photo20].compactMap { $0 }
+        if let galleryImages, let data = galleryImages.data(using: .utf8),
+           let decoded = try? JSONSerialization.jsonObject(with: data) as? [Any] {
+            for image in decoded {
+                if let url = image as? String {
+                    result.append(url)
+                } else if let object = image as? [String: Any],
+                          let url = (object["url"] as? String) ?? (object["src"] as? String) {
+                    result.append(url)
+                }
+            }
+        }
+        var seen = Set<String>()
+        return result.filter { !$0.isEmpty && seen.insert($0).inserted }
+    }
+
+    var listing: Listing {
+        Listing(
+            id: "wix-private-\(id)",
+            title: title,
+            description: description,
+            city: city,
+            postalCode: postalCode,
+            price: sellingPrice ?? estimatedPrice,
+            surface: surface,
+            rooms: rooms.map(Int.init),
+            bedrooms: bedrooms.map(Int.init),
+            bathrooms: nil,
+            images: photos,
+            imageUrl: photos.first,
+            transactionType: transactionType,
+            propertyType: propertyType,
+            sourceUrl: nil,
+            ownerType: "particulier"
+        )
+    }
+}
+
+struct WixPublicProfessionalPropertiesResponse: Decodable {
+    let dataItems: [WixPublicProfessionalPropertyItem]
+}
+
+struct WixPublicProfessionalPropertyItem: Decodable {
+    let id: String
+    let data: WixPublicProfessionalProperty
+}
+
+struct WixPublicProfessionalProperty: Decodable {
+    let title: String?
+    let description: String?
+    let city: String?
+    let postalCode: String?
+    let price: Double?
+    let surface: Double?
+    let surfaceHouse: Double?
+    let surfaceLand: Double?
+    let landSurface: Double?
+    let rooms: Double?
+    let bedrooms: Double?
+    let bathrooms: Double?
+    let propertyType: String?
+    let transactionType: String?
+    let mainImageUrl: String?
+    let galleryImages: String?
+    let commercialStatus: String?
+    let status: String?
+    let slug: String?
+
+    func listing(id: String) -> Listing {
+        var gallery: [String] = []
+        if let galleryImages, let data = galleryImages.data(using: .utf8),
+           let values = try? JSONSerialization.jsonObject(with: data) as? [Any] {
+            for value in values {
+                if let url = value as? String {
+                    gallery.append(url)
+                } else if let object = value as? [String: Any],
+                          let url = (object["url"] as? String) ?? (object["src"] as? String) {
+                    gallery.append(url)
+                }
+            }
+        }
+        if let mainImageUrl, !gallery.contains(mainImageUrl) { gallery.insert(mainImageUrl, at: 0) }
+        var seen = Set<String>()
+        gallery = gallery.filter { !$0.isEmpty && seen.insert($0).inserted }
+        return Listing(
+            id: "wix-pro-\(id)",
+            title: title,
+            description: description,
+            city: city,
+            postalCode: postalCode,
+            price: price,
+            surface: surfaceHouse ?? surface,
+            rooms: rooms.map(Int.init),
+            bedrooms: bedrooms.map(Int.init),
+            bathrooms: bathrooms.map(Int.init),
+            images: gallery,
+            imageUrl: mainImageUrl ?? gallery.first,
+            transactionType: transactionType,
+            propertyType: propertyType,
+            sourceUrl: nil,
+            ownerType: "professionnel"
+        )
+    }
+}
+/// Public classified-ad content loaded from the existing Wix CMS collection.
+struct ClassifiedAd: Identifiable, Hashable {
+    let id: String
+    let title: String
+    let description: String?
+    let price: Double?
+    let category: String?
+    let subcategory: String?
+    let condition: String?
+    let city: String?
+    let postalCode: String?
+    let images: [URL]
+
+    var locationLabel: String {
+        [postalCode, city].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
+    }
+
+    var formattedPrice: String {
+        guard let price else { return "Prix sur demande" }
+        return price.formatted(.currency(code: "EUR").locale(Locale(identifier: "fr_FR")))
+    }
+}
+
+struct WixPublicClassifiedAdsResponse: Decodable {
+    let dataItems: [WixPublicClassifiedAdItem]
+}
+
+struct WixPublicClassifiedAdItem: Decodable {
+    let id: String
+    let data: WixPublicClassifiedAdData
+}
+
+struct WixPublicClassifiedAdData: Decodable {
+    let itemName: String?
+    let itemDescription: String?
+    let itemPrice: Double?
+    let category: String?
+    let subcategory: String?
+    let itemCondition: String?
+    let city: String?
+    let postalCode: String?
+    let status: String?
+    let itemImage: String?
+    let photo2: String?
+    let photo3: String?
+    let photo4: String?
+    let photo5: String?
+    let photo6: String?
+    let photo7: String?
+    let photo8: String?
+    let photo9: String?
+    let photo10: String?
+    let photo11: String?
+    let photo12: String?
+    let photo13: String?
+    let photo14: String?
+    let photo15: String?
+    let photo16: String?
+    let photo17: String?
+    let photo18: String?
+    let photo19: String?
+    let photo20: String?
+
+    func classifiedAd(id: String) -> ClassifiedAd? {
+        guard status == "published",
+              let title = itemName?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !title.isEmpty else { return nil }
+        var seen = Set<String>()
+        let images = [itemImage, photo2, photo3, photo4, photo5, photo6, photo7, photo8,
+                      photo9, photo10, photo11, photo12, photo13, photo14, photo15, photo16,
+                      photo17, photo18, photo19, photo20]
+            .compactMap { $0 }
+            .compactMap(WixImageSource.url)
+            .filter { seen.insert($0.absoluteString).inserted }
+        return ClassifiedAd(
+            id: "wix-classified-\(id)",
+            title: title,
+            description: itemDescription,
+            price: itemPrice,
+            category: category,
+            subcategory: subcategory,
+            condition: itemCondition,
+            city: city,
+            postalCode: postalCode,
+            images: images
+        )
+    }
+}
+

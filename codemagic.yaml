@@ -41,7 +41,7 @@ workflows:
         script: |
           npx cap sync android
 
-      - name: Compiler APK Android
+      - name: Compiler APK
         script: |
           cd android
           chmod +x gradlew
@@ -122,6 +122,8 @@ workflows:
 
     name: PartenaireFoyer iOS natif
 
+    # Déclenchement manuel uniquement jusqu’à validation complète du parcours iOS natif.
+
     max_build_duration: 120
 
     instance_type: mac_mini_m2
@@ -131,6 +133,8 @@ workflows:
 
     environment:
       xcode: latest
+      groups:
+        - firebase_ios
 
       ios_signing:
         distribution_type: app_store
@@ -147,10 +151,14 @@ workflows:
           xcode-project use-profiles \
             --project "$CM_BUILD_DIR/$XCODE_PROJECT"
 
-      - name: Préparer les assets iOS manquants
+      - name: Préparer la configuration Firebase iOS
+        script: |
+          chmod +x ./scripts/prepare-ios-firebase.sh
+          ./scripts/prepare-ios-firebase.sh
+
+      - name: Préparer le logo et l’icône iOS
         script: |
           chmod +x ./scripts/prepare-ios-assets.sh
-          export PARTENAIREFOYER_LOGO_URL="https://static.wixstatic.com/media/476a15_d601a17fe7c4406aac35fac85d309948~mv2.jpg"
           ./scripts/prepare-ios-assets.sh
 
       - name: Compiler l’IPA iOS
@@ -163,6 +171,8 @@ workflows:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
 
+    # Téléverse l'IPA dans App Store Connect pour la sélection du build.
+    # Ne soumet pas à la bêta TestFlight et ne publie pas sur l'App Store.
     publishing:
       app_store_connect:
         auth: integration
