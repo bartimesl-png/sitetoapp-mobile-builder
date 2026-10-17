@@ -86,6 +86,32 @@ final class ListingsService: ObservableObject {
 }
 
 @MainActor
+final class ClassifiedAdsService: ObservableObject {
+    @Published private(set) var ads: [ClassifiedAd] = []
+    @Published private(set) var isLoading = false
+    @Published private(set) var errorMessage: String?
+    @Published private(set) var hasLoaded = false
+
+    func loadIfNeeded() async {
+        guard !hasLoaded else { return }
+        await reload()
+    }
+
+    func reload() async {
+        guard !isLoading else { return }
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+        do {
+            ads = try await WixAuthStore.shared.fetchPublicClassifiedAds()
+            hasLoaded = true
+        } catch {
+            errorMessage = "Les petites annonces ne sont pas disponibles pour le moment. Réessayez."
+        }
+    }
+}
+
+@MainActor
 final class ProfessionalsService: ObservableObject {
     @Published private(set) var professionals: [WixPublicProfessional] = []
     @Published private(set) var isLoading = false
