@@ -281,7 +281,9 @@ private struct NativeListingsView: View {
                     } else {
                         ForEach(filteredClassifiedAds) { ad in
                             NavigationLink(value: ad) {
-                                ClassifiedAdRow(ad: ad)
+                                ClassifiedAdRow(ad: ad, isFavorite: favorites.contains(ad)) {
+                                    favorites.toggle(ad)
+                                }
                             }
                             .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                         }
