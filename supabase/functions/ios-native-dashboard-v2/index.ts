@@ -131,7 +131,50 @@ async function loadDashboard(role: string, email: string, memberID: string, toke
   if (role === "hebergeur") {
     const profile = first(await query("seasonalhostprofiles", emailFilter(email), ["email", "fullName", "phoneNumber", "profilePicture", "biography", "isVerified"], token, 2));
     if (!profile) return null;
-    return { role, profile };
+    const hostId = String(profile._id ?? "");
+    if (!hostId) return { role, profile, accommodations: [], bookingRequests: [], reservations: [], conversations: [] };
+
+    // These are existing Wix CMS collections. Scope every list through the
+    // authenticated host profile or an accommodation owned by that profile.
+    const [accommodations, reservations, conversations] = await Promise.all([
+      query("seasonalaccommodations", { hostId: { $eq: hostId } }, [
+        "hostId", "itemName", "itemPrice", "itemDescription", "itemImage", "photo1", "photo2", "photo3",
+        "galleryImage2", "galleryImage3", "galleryImage4", "galleryImage5", "photo4", "photo5", "photo6",
+        "photo7", "photo8", "photo9", "photo10", "photo11", "photo12", "photo13", "photo14",
+        "photo15", "photo16", "photo17", "photo18", "photo19", "photo20", "photo21", "photo22",
+        "photo23", "photo24", "photo25", "photo26", "photo27", "photo28", "photo29", "photo30",
+        "accommodationType", "locationAddress", "city", "postalCode", "maxGuests", "numberOfBedrooms",
+        "amenities", "slug",
+      ], token),
+      query("seasonalreservations", { hostId: { $eq: hostId } }, [
+        "hostId", "accommodationId", "vacationerId", "source", "vacationerName", "vacationerEmail",
+        "accommodationTitle", "checkInDate", "checkOutDate", "numberOfGuests", "reservationStatus",
+        "paymentStatus", "totalPrice", "bookingDateTime",
+      ], token),
+      query("seasonalconversations", { hostId: { $eq: hostId } }, [
+        "hostId", "vacationerId", "accommodationId", "lastMessageTimestamp", "status",
+      ], token, 50),
+    ]);
+
+    const accommodationIDs = [...new Set(accommodations.map((item) => String(item._id ?? "")).filter(Boolean))];
+    const bookingRequestPages: Record<string, unknown>[][] = [];
+    for (let start = 0; start < accommodationIDs.length; start += 10) {
+      const accommodationBatch = accommodationIDs.slice(start, start + 10);
+      bookingRequestPages.push(...await Promise.all(accommodationBatch.map((accommodationId) =>
+        query("seasonalbookingrequests", { accommodationId: { $eq: accommodationId } }, [
+          "accommodationId", "vacationerId", "vacationerName", "vacationerEmail", "vacationerPhone",
+          "checkInDate", "checkOutDate", "proposedCheckInDate", "proposedCheckOutDate", "numberOfNights",
+          "numberOfAdults", "numberOfChildren", "numberOfBabies", "petsIncluded", "guestMessage", "status",
+          "totalPrice", "hiddenByHost",
+        ], token, 100),
+      )));
+    }
+    const bookingRequests = [...new Map(bookingRequestPages.flat()
+      .filter((item) => item.hiddenByHost !== true)
+      .map((item) => [String(item._id ?? ""), item] as const)
+      .filter(([id]) => Boolean(id))).values()];
+
+    return { role, profile, accommodations, bookingRequests, reservations, conversations };
   }
   return null;
 }

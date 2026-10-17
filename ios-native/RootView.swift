@@ -1595,7 +1595,12 @@ private struct NativeRoleDashboardView: View {
         case .prestataire:
             keys = [("Demandes et messages", "bubble.left.and.bubble.right", "messages")]
         case .hebergeur:
-            keys = []
+            keys = [
+                ("Mes hébergements", "house", "accommodations"),
+                ("Demandes de réservation", "calendar.badge.clock", "bookingRequests"),
+                ("Réservations", "calendar", "reservations"),
+                ("Conversations", "bubble.left.and.bubble.right", "conversations")
+            ]
         }
         return keys.compactMap { title, icon, key in
             guard let items = data[key] as? [[String: Any]] else { return nil }
@@ -1759,8 +1764,8 @@ private struct NativeRoleDashboardView: View {
                 }
                 if role == .hebergeur {
                     Section("Mon activité") {
-                        Text("Votre fiche hébergeur est reliée à Wix. Les réservations apparaîtront ici lorsque la collection correspondante sera associée à ce compte.")
-                            .font(.subheadline).foregroundStyle(.secondary)
+                        Text("Hébergements et réservations chargés depuis vos collections Wix. Les demandes masquées dans Wix ne sont pas affichées ici.")
+                            .font(.footnote).foregroundStyle(.secondary)
                     }
                 }
                 if data["profile"] is NSNull {
@@ -2033,7 +2038,12 @@ private struct DashboardOverview: View {
         case .prestataire:
             [("Contacts", "messages", "person.2.fill")]
         case .hebergeur:
-            []
+            [
+                ("Hébergements", "accommodations", "house.fill"),
+                ("Demandes", "bookingRequests", "calendar.badge.clock"),
+                ("Réservations", "reservations", "calendar"),
+                ("Conversations", "conversations", "bubble.left.and.bubble.right.fill")
+            ]
         }
     }
 
@@ -2569,7 +2579,7 @@ private struct DashboardItemDetailView: View {
 
     private let displayFields: [(String, String)] = [
         ("description", "Description"), ("itemDescription", "Description"),
-        ("message", "Message"), ("messageContent", "Message"), ("content", "Message"),
+        ("message", "Message"), ("messageContent", "Message"), ("guestMessage", "Message du voyageur"), ("content", "Message"),
         ("searchName", "Nom de la recherche"), ("propertyTitle", "Bien correspondant"),
         ("city", "Ville"), ("propertyCity", "Ville du bien"), ("postalCode", "Code postal"),
         ("propertyType", "Type de bien"), ("propertyTypes", "Types recherchés"), ("transactionType", "Transaction"),
@@ -2583,11 +2593,24 @@ private struct DashboardItemDetailView: View {
         ("senderEmail", "E-mail du contact"), ("senderPhone", "Téléphone du contact"),
         ("contactEmail", "E-mail"), ("phoneNumber", "Téléphone"),
         ("propertyId", "Bien associé"), ("acquereurId", "Acquéreur associé"),
-        ("createdAt", "Reçu le"), ("notifiedAt", "Notification envoyée le")
+        ("createdAt", "Reçu le"), ("notifiedAt", "Notification envoyée le"),
+        ("accommodationTitle", "Hébergement"), ("accommodationType", "Type d’hébergement"),
+        ("vacationerName", "Voyageur"), ("vacationerEmail", "E-mail du voyageur"),
+        ("vacationerPhone", "Téléphone du voyageur"), ("checkInDate", "Arrivée"),
+        ("checkOutDate", "Départ"), ("proposedCheckInDate", "Arrivée proposée"),
+        ("proposedCheckOutDate", "Départ proposé"), ("numberOfNights", "Nombre de nuits"),
+        ("numberOfGuests", "Nombre de voyageurs"), ("numberOfAdults", "Adultes"),
+        ("numberOfChildren", "Enfants"), ("numberOfBabies", "Bébés"),
+        ("petsIncluded", "Animaux inclus"), ("reservationStatus", "Statut de la réservation"),
+        ("paymentStatus", "Statut du paiement"), ("totalPrice", "Montant total"),
+        ("bookingDateTime", "Date de la réservation"), ("lastMessageTimestamp", "Dernier message le"),
+        ("status", "Statut"), ("maxGuests", "Capacité maximale"),
+        ("numberOfBedrooms", "Chambres"), ("amenities", "Équipements"),
+        ("locationAddress", "Adresse")
     ]
 
     private var title: String {
-        ["title", "itemName", "businessName", "senderName", "fullName"]
+        ["title", "itemName", "accommodationTitle", "businessName", "vacationerName", "senderName", "fullName"]
             .compactMap { item[$0] as? String }
             .first ?? "Détail"
     }
@@ -2597,6 +2620,8 @@ private struct DashboardItemDetailView: View {
             "mainImageUrl", "mainImage", "itemImage", "photo",
             "photo2", "photo3", "photo4", "photo5", "photo6", "photo7", "photo8", "photo9", "photo10",
             "photo11", "photo12", "photo13", "photo14", "photo15", "photo16", "photo17", "photo18", "photo19", "photo20",
+            "photo21", "photo22", "photo23", "photo24", "photo25", "photo26", "photo27", "photo28", "photo29", "photo30",
+            "galleryImage2", "galleryImage3", "galleryImage4", "galleryImage5",
         ]
             .compactMap { item[$0] as? String }
         values += item["photoUrls"] as? [String] ?? []
@@ -2649,7 +2674,7 @@ private struct DashboardItemDetailView: View {
 
                 Text(title).font(.title2.bold())
 
-                if let price = item["price"] ?? item["itemPrice"] {
+                if let price = item["price"] ?? item["itemPrice"] ?? item["totalPrice"] {
                     Text("\(String(describing: price)) €")
                         .font(.title3.weight(.semibold))
                         .foregroundStyle(.teal)
@@ -2662,12 +2687,12 @@ private struct DashboardItemDetailView: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                if let email = ["senderEmail", "contactEmail", "email"].compactMap({ item[$0] as? String }).first,
+                if let email = ["senderEmail", "vacationerEmail", "contactEmail", "email"].compactMap({ item[$0] as? String }).first,
                    let emailURL = URL(string: "mailto:\(email)") {
                     Link(destination: emailURL) { Label("Répondre par e-mail", systemImage: "envelope") }
                         .buttonStyle(.borderedProminent)
                 }
-                if let phone = ["senderPhone", "phoneNumber", "phone"].compactMap({ item[$0] as? String }).first {
+                if let phone = ["senderPhone", "vacationerPhone", "phoneNumber", "phone"].compactMap({ item[$0] as? String }).first {
                     let number = phone.filter { $0.isNumber || $0 == "+" }
                     if let phoneURL = URL(string: "tel:\(number)") {
                         Link(destination: phoneURL) { Label("Appeler le contact", systemImage: "phone") }
