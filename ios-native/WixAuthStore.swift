@@ -425,6 +425,41 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         }
     }
 
+    func markMatchingSeen(list: String, itemID: String) async {
+        errorMessage = nil
+        guard ["matchings", "demands"].contains(list) else { return }
+        do {
+            let token = try await validAccessToken()
+            let endpoint = URL(string: "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/ios-native-dashboard-v2")!
+            var request = URLRequest(url: endpoint, timeoutInterval: 35)
+            request.httpMethod = "POST"
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            request.httpBody = try JSONSerialization.data(withJSONObject: [
+                "action": "mark_matching_seen", "role": "professionnel", "list": list, "itemId": itemID
+            ])
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else { throw AuthError.invalidResponse }
+            guard (200..<300).contains(http.statusCode) else {
+                let payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+                throw AuthError.api(payload?["error"] as? String ?? "Impossible d’actualiser ce matching.")
+            }
+            guard var dashboard = dashboardData, var items = dashboard[list] as? [[String: Any]] else { return }
+            items = items.map { item in
+                guard (item["_id"] as? String ?? item["id"] as? String) == itemID else { return item }
+                var updated = item
+                updated["seen"] = true
+                if list == "demands" { updated["isViewed"] = true }
+                return updated
+            }
+            dashboard[list] = items
+            dashboardData = dashboard
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func registerPushDevice(role: String) async {
         // The host dashboard has no push owner type in the current notification
         // service. Do not register a token against an unrelated Wix profile.
