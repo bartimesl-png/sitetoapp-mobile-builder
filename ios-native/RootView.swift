@@ -5,6 +5,7 @@ import UIKit
 struct RootView: View {
     @State private var selectedTab = 0
     @StateObject private var listingsService = ListingsService()
+    @StateObject private var classifiedAdsService = ClassifiedAdsService()
     @StateObject private var professionalsService = ProfessionalsService()
 
     var body: some View {
@@ -13,7 +14,7 @@ struct RootView: View {
                 .tabItem { Label("Accueil", systemImage: "house.fill") }
                 .tag(0)
 
-            NativeListingsView(service: listingsService)
+            NativeListingsView(service: listingsService, classifiedAds: classifiedAdsService)
                 .tabItem { Label("Annonces", systemImage: "magnifyingglass") }
                 .tag(1)
 
@@ -177,12 +178,20 @@ private struct ProfessionalDetailView: View {
     }
 }
 
+private enum NativeCatalogSection: String, CaseIterable, Identifiable {
+    case realEstate = "Immobilier"
+    case classifiedAds = "Petites annonces"
+    var id: String { rawValue }
+}
+
 private struct NativeListingsView: View {
     @ObservedObject var service: ListingsService
+    @ObservedObject var classifiedAds: ClassifiedAdsService
     @ObservedObject private var favorites = FavoritesStore.shared
     @State private var searchText = ""
+    @State private var catalogSection: NativeCatalogSection = .realEstate
 
-    private var filtered: [Listing] {
+    private var filteredListings: [Listing] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return service.listings }
         return service.listings.filter {
@@ -193,60 +202,186 @@ private struct NativeListingsView: View {
         }
     }
 
+    private var filteredClassifiedAds: [ClassifiedAd] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return classifiedAds.ads }
+        return classifiedAds.ads.filter {
+            $0.title.localizedCaseInsensitiveContains(query) ||
+            ($0.category ?? "").localizedCaseInsensitiveContains(query) ||
+            ($0.subcategory ?? "").localizedCaseInsensitiveContains(query) ||
+            ($0.city ?? "").localizedCaseInsensitiveContains(query) ||
+            ($0.postalCode ?? "").localizedCaseInsensitiveContains(query) ||
+            ($0.description ?? "").localizedCaseInsensitiveContains(query)
+        }
+    }
+
     var body: some View {
         NavigationStack {
-            Group {
-                if service.isLoading && service.listings.isEmpty {
-                    ProgressView("Chargement des annonces…")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if let error = service.errorMessage, service.listings.isEmpty {
-                    ContentUnavailableView {
-                        Label("Annonces indisponibles", systemImage: "wifi.exclamationmark")
-                    } description: {
-                        Text(error)
-                    } actions: {
-                        Button("Réessayer") { Task { await service.reload() } }
-                            .buttonStyle(.borderedProminent)
+            List {
+                Section {
+                    Picker("Type d’annonce", selection: $catalogSection) {
+                        ForEach(NativeCatalogSection.allCases) { section in
+                            Text(section.rawValue).tag(section)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
+                }
+
+                if catalogSection == .realEstate {
+                    Section {
+                        HStack(spacing: 10) {
+                            Image(systemName: "sparkles").foregroundStyle(.teal)
+                            Text("Biens particuliers et professionnels publiés sur Wix, avec les annonces immobilières importées du catalogue PartenaireFoyer.")
+                                .font(.footnote).foregroundStyle(.secondary)
+                        }
+                        .listRowBackground(Color.teal.opacity(0.07))
+                    }
+                    if service.isLoading && service.listings.isEmpty {
+                        Section { HStack { Spacer(); ProgressView("Chargement des biens…"); Spacer() } }
+                    } else if let error = service.errorMessage, service.listings.isEmpty {
+                        Section("Annonces immobilières") {
+                            Label(error, systemImage: "wifi.exclamationmark").font(.footnote).foregroundStyle(.orange)
+                            Button("Réessayer") { Task { await service.reload() } }
+                        }
+                    } else if filteredListings.isEmpty {
+                        ContentUnavailableView.search(text: searchText)
+                    } else {
+                        ForEach(filteredListings) { listing in
+                            NavigationLink(value: listing) {
+                                ListingRow(listing: listing, isFavorite: favorites.contains(listing)) {
+                                    favorites.toggle(listing)
+                                }
+                            }
+                            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                        }
                     }
                 } else {
-                    List {
-                        Section {
-                            HStack(spacing: 10) {
-                                Image(systemName: "sparkles")
-                                    .foregroundStyle(.teal)
-                                Text("Biens particuliers et professionnels publiés sur Wix, avec les annonces importées du catalogue PartenaireFoyer.")
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                            }
-                            .listRowBackground(Color.teal.opacity(0.07))
+                    Section {
+                        HStack(spacing: 10) {
+                            Image(systemName: "tag.fill").foregroundStyle(.teal)
+                            Text("Petites annonces publiées sur Wix, avec leurs photos, prix, catégorie et localisation.")
+                                .font(.footnote).foregroundStyle(.secondary)
                         }
-
-                        if filtered.isEmpty {
-                            ContentUnavailableView.search(text: searchText)
-                        } else {
-                            ForEach(filtered) { listing in
-                                NavigationLink(value: listing) {
-                                    ListingRow(listing: listing, isFavorite: favorites.contains(listing)) {
-                                        favorites.toggle(listing)
-                                    }
-                                }
-                                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-                            }
-                        }
-
+                        .listRowBackground(Color.teal.opacity(0.07))
                     }
-                    .listStyle(.plain)
-                    .refreshable { await service.reload() }
-                    .navigationDestination(for: Listing.self) { listing in
-                        ListingDetailView(listing: listing)
+                    if classifiedAds.isLoading && classifiedAds.ads.isEmpty {
+                        Section { HStack { Spacer(); ProgressView("Chargement des petites annonces…"); Spacer() } }
+                    } else if let error = classifiedAds.errorMessage, classifiedAds.ads.isEmpty {
+                        Section("Petites annonces") {
+                            Label(error, systemImage: "wifi.exclamationmark").font(.footnote).foregroundStyle(.orange)
+                            Button("Réessayer") { Task { await classifiedAds.reload() } }
+                        }
+                    } else if filteredClassifiedAds.isEmpty {
+                        ContentUnavailableView {
+                            Label("Aucune petite annonce trouvée", systemImage: "tag")
+                        } description: {
+                            Text(searchText.isEmpty ? "Les nouvelles annonces publiées sur PartenaireFoyer apparaîtront ici." : "Essayez une autre recherche.")
+                        }
+                    } else {
+                        ForEach(filteredClassifiedAds) { ad in
+                            NavigationLink(value: ad) {
+                                ClassifiedAdRow(ad: ad)
+                            }
+                            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                        }
                     }
                 }
             }
+            .listStyle(.plain)
+            .refreshable {
+                if catalogSection == .realEstate { await service.reload() }
+                else { await classifiedAds.reload() }
+            }
+            .navigationDestination(for: Listing.self) { listing in
+                ListingDetailView(listing: listing)
+            }
+            .navigationDestination(for: ClassifiedAd.self) { ad in
+                NativeClassifiedAdDetailView(ad: ad)
+            }
             .navigationTitle("Annonces")
             .navigationBarTitleDisplayMode(.large)
-            .searchable(text: $searchText, prompt: "Ville, code postal, bien…")
-            .task { await service.loadIfNeeded() }
+            .searchable(text: $searchText, prompt: catalogSection == .realEstate ? "Ville, code postal, bien…" : "Article, catégorie, ville…")
+            .task {
+                await service.loadIfNeeded()
+                await classifiedAds.loadIfNeeded()
+            }
         }
+    }
+}
+
+private struct ClassifiedAdRow: View {
+    let ad: ClassifiedAd
+
+    var body: some View {
+        HStack(spacing: 13) {
+            ListingImage(url: ad.images.first)
+                .frame(width: 112, height: 98)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            VStack(alignment: .leading, spacing: 6) {
+                Text(ad.formattedPrice).font(.headline.weight(.bold))
+                Text(ad.title).font(.subheadline.weight(.semibold)).lineLimit(2)
+                if let category = ad.category {
+                    Text([category, ad.subcategory].compactMap { $0 }.joined(separator: " · "))
+                        .font(.caption).foregroundStyle(.teal).lineLimit(1)
+                }
+                if !ad.locationLabel.isEmpty {
+                    Label(ad.locationLabel, systemImage: "mappin.and.ellipse")
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+    }
+}
+
+private struct NativeClassifiedAdDetailView: View {
+    let ad: ClassifiedAd
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                if ad.images.isEmpty {
+                    ListingImage(url: nil).frame(height: 290)
+                } else {
+                    TabView {
+                        ForEach(Array(ad.images.enumerated()), id: \.offset) { _, url in
+                            ListingImage(url: url)
+                        }
+                    }
+                    .tabViewStyle(.page)
+                    .frame(height: 290)
+                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .accessibilityLabel("Galerie de photos de la petite annonce")
+                }
+                Text(ad.formattedPrice).font(.title2.bold())
+                Text(ad.title).font(.title3.weight(.semibold))
+                if let category = ad.category {
+                    Label([category, ad.subcategory].compactMap { $0 }.joined(separator: " · "), systemImage: "tag")
+                        .font(.subheadline).foregroundStyle(.teal)
+                }
+                if let condition = ad.condition, !condition.isEmpty {
+                    Label(condition, systemImage: "checkmark.seal")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+                if !ad.locationLabel.isEmpty {
+                    Label(ad.locationLabel, systemImage: "mappin.and.ellipse")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+                if let description = ad.description, !description.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Description").font(.headline)
+                        Text(description).font(.body).foregroundStyle(.secondary).textSelection(.enabled)
+                    }
+                }
+            }
+            .padding(18)
+        }
+        .background(Color(uiColor: .systemGroupedBackground))
+        .navigationTitle("Petite annonce")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
