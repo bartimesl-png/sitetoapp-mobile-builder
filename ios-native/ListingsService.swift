@@ -39,9 +39,17 @@ final class ListingsService: ObservableObject {
                 privateListings = []
             }
 
+            let professionalListings: [Listing]
+            do {
+                professionalListings = try await WixAuthStore.shared.fetchPublicProfessionalListings()
+                successfulSources += 1
+            } catch {
+                professionalListings = []
+            }
+
             guard successfulSources > 0 else { throw URLError(.badServerResponse) }
             var seen = Set<String>()
-            listings = (imported + privateListings).filter { seen.insert($0.id).inserted }
+            listings = (imported + privateListings + professionalListings).filter { seen.insert($0.id).inserted }
             errorMessage = nil
             hasLoaded = true
         } catch {
