@@ -1,4 +1,5 @@
 import SwiftUI
+import CoreFoundation
 
 struct RootView: View {
     @State private var selectedTab = 0
@@ -435,10 +436,36 @@ private struct HomeDashboardView: View {
 
 private struct NativeSpacePickerView: View {
     @State private var selectedRole: AccountRole?
+    @StateObject private var auth = WixAuthStore.shared
+    @AppStorage("partenairefoyer.activeRole") private var activeRoleRaw = ""
 
     var body: some View {
         NavigationStack {
-            List {
+            Group {
+                if let member = auth.member, let role = AccountRole(rawValue: activeRoleRaw) {
+                    NativeRoleDashboardView(role: role, member: member) {
+                        auth.signOut()
+                        activeRoleRaw = ""
+                    }
+                } else {
+                    rolePicker
+                }
+            }
+            .navigationTitle("Mon espace")
+            .navigationBarTitleDisplayMode(.inline)
+            .sheet(item: $selectedRole) { role in
+                RoleEntryView(role: role) {
+                    activeRoleRaw = role.rawValue
+                    selectedRole = nil
+                }
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+            }
+        }
+    }
+
+    private var rolePicker: some View {
+        List {
                 Section {
                     VStack(alignment: .leading, spacing: 7) {
                         Text("Vous êtes… ?")
@@ -474,14 +501,13 @@ private struct NativeSpacePickerView: View {
                         .buttonStyle(.plain)
                     }
                 }
-            }
-            .listStyle(.insetGrouped)
-            .navigationTitle("Mon espace")
-            .navigationBarTitleDisplayMode(.inline)
-            .sheet(item: $selectedRole) { role in
-                RoleEntryView(role: role)
-                    .presentationDetents([.medium, .large])
-                    .presentationDragIndicator(.visible)
+        }
+        .listStyle(.insetGrouped)
+        .overlay {
+            if auth.isSigningIn {
+                ProgressView("Connexion sécurisée Wix…")
+                    .padding(22)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
             }
         }
     }
@@ -550,45 +576,228 @@ private enum AccountRole: String, CaseIterable, Identifiable {
 
 private struct RoleEntryView: View {
     @Environment(\.dismiss) private var dismiss
+    @StateObject private var auth = WixAuthStore.shared
+    @State private var email = ""
+    @State private var password = ""
     let role: AccountRole
+    let onSignedIn: () -> Void
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 18) {
-                Label(role.title, systemImage: role.symbol)
-                    .font(.title2.bold())
-                Text(role.subtitle)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                Text("Vous n’êtes pas connecté à cet espace.")
-                    .font(.subheadline.weight(.medium))
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.teal.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
-                Link(destination: role.loginURL) {
-                    Label("Se connecter", systemImage: "person.crop.circle.badge.checkmark")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
+            Form {
+                Section {
+                    Label(role.title, systemImage: role.symbol)
+                        .font(.title3.bold())
+                    Text(role.subtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(Color(red: 0.02, green: 0.38, blue: 0.34))
-                Link(destination: role.signupURL) {
-                    Label("Créer un compte", systemImage: "person.badge.plus")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
+
+                Section("Connexion à votre compte") {
+                    TextField("Adresse e-mail", text: $email)
+                        .textContentType(.username)
+                        .keyboardType(.emailAddress)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    SecureField("Mot de passe", text: $password)
+                        .textContentType(.password)
                 }
-                .buttonStyle(.bordered)
-                Text("Ces liens ouvrent le formulaire Wix correspondant à ce profil. Les tableaux de bord ne sont pas exposés dans l’application tant que la session native de ce rôle n’est pas confirmée.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                Spacer()
+
+                if let error = auth.errorMessage {
+                    Section {
+                        Text(error).font(.footnote).foregroundStyle(.red)
+                    }
+                }
+
+                Section {
+                    Button {
+                        Task {
+                            await auth.signIn(email: email, password: password)
+                            if auth.member != nil { onSignedIn() }
+                        }
+                    } label: {
+                        HStack {
+                            Spacer()
+                            Label("Se connecter", systemImage: "lock.shield")
+                                .font(.headline)
+                            Spacer()
+                        }
+                    }
+                    .disabled(email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || password.isEmpty || auth.isSigningIn)
+
+                    Link(destination: role.signupURL) {
+                        Label("Créer un compte", systemImage: "person.badge.plus")
+                    }
+                } footer: {
+                    Text("La validation du compte passe par l’authentification Wix sécurisée. Le mot de passe n’est pas conservé par l’application.")
+                }
             }
-            .padding(22)
             .navigationTitle("Accès à l’espace")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { Button("Fermer") { dismiss() } }
             }
         }
+    }
+}
+
+private struct NativeRoleDashboardView: View {
+    @StateObject private var auth = WixAuthStore.shared
+    let role: AccountRole
+    let member: WixMember
+    let onSignOut: () -> Void
+
+    private var sections: [(String, String, [[String: Any]])] {
+        guard let data = auth.dashboardData else { return [] }
+        let keys: [(String, String, String)]
+        switch role {
+        case .particulier:
+            keys = [("Mes biens", "house", "properties"), ("Mes petites annonces", "tag", "classifieds"), ("Mes favoris", "heart", "favorites")]
+        case .professionnel:
+            keys = [("Mes biens", "house", "properties"), ("Mes matchings", "sparkles", "matchings"), ("Demandes reçues", "person.2", "demands"), ("Messages", "bubble.left.and.bubble.right", "messages")]
+        case .courtier:
+            keys = [("Messages", "bubble.left.and.bubble.right", "messages")]
+        case .artisan:
+            keys = [("Demandes et messages", "bubble.left.and.bubble.right", "messages")]
+        case .prestataire:
+            keys = [("Demandes et messages", "bubble.left.and.bubble.right", "messages")]
+        case .hebergeur:
+            keys = []
+        }
+        return keys.compactMap { title, icon, key in
+            guard let items = data[key] as? [[String: Any]] else { return nil }
+            return (title, icon, items)
+        }
+    }
+
+    private var profile: [String: Any]? { auth.dashboardData?["profile"] as? [String: Any] }
+
+    var body: some View {
+        List {
+            Section {
+                Label(role.title, systemImage: role.symbol)
+                    .font(.title3.bold())
+                LabeledContent("Compte connecté", value: member.loginEmail)
+                if member.loginEmailVerified == false {
+                    Label("Adresse e-mail à confirmer", systemImage: "exclamationmark.circle")
+                        .foregroundStyle(.orange)
+                }
+            }
+
+            if auth.isLoadingDashboard && auth.dashboardData == nil {
+                Section { HStack { Spacer(); ProgressView("Chargement de vos données Wix…"); Spacer() } }
+            } else if let error = auth.dashboardError {
+                Section("Données du compte") {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .font(.subheadline)
+                        .foregroundStyle(.orange)
+                    Button("Réessayer") { Task { await auth.loadDashboard(role: role.rawValue) } }
+                }
+            } else if let data = auth.dashboardData {
+                if let profile {
+                    Section("Mon profil") {
+                        ForEach(Array(profileKeys(for: role).filter { profile[$0.1] != nil }.enumerated()), id: \.offset) { _, field in
+                            LabeledContent(field.0, value: display(profile[field.1]))
+                        }
+                    }
+                }
+                ForEach(Array(sections.enumerated()), id: \.offset) { _, section in
+                    Section {
+                        if section.2.isEmpty {
+                            Text("Aucun élément pour le moment.")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(Array(section.2.enumerated()), id: \.offset) { index, item in
+                                WixDashboardItem(item: item, fallbackTitle: "Élément \(index + 1)")
+                            }
+                        }
+                    } header: {
+                        Label("\(section.0) (\(section.2.count))", systemImage: section.1)
+                    }
+                }
+                if role == .hebergeur {
+                    Section("Mon activité") {
+                        Text("Votre fiche hébergeur est reliée à Wix. Les réservations apparaîtront ici lorsque la collection correspondante sera associée à ce compte.")
+                            .font(.subheadline).foregroundStyle(.secondary)
+                    }
+                }
+                if data["profile"] is NSNull {
+                    Section("Profil métier") {
+                        Text("Le compte est reconnu, mais aucune fiche de profil correspondante n’a été trouvée dans Wix.")
+                            .font(.subheadline).foregroundStyle(.orange)
+                    }
+                }
+            }
+
+            Section {
+                Button(role: .destructive, action: onSignOut) {
+                    Label("Se déconnecter", systemImage: "rectangle.portrait.and.arrow.right")
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .navigationTitle("Tableau de bord")
+        .navigationBarTitleDisplayMode(.inline)
+        .refreshable { await auth.loadDashboard(role: role.rawValue) }
+        .task(id: role.rawValue) { await auth.loadDashboard(role: role.rawValue) }
+    }
+
+    private func profileKeys(for role: AccountRole) -> [(String, String)] {
+        switch role {
+        case .particulier: [("Prénom", "firstName"), ("Nom", "lastName"), ("Ville", "city"), ("Téléphone", "phone")]
+        case .professionnel: [("Société", "companyName"), ("Contact", "contactName"), ("Ville", "city"), ("Téléphone", "phoneNumber"), ("Type d’activité", "professionalType"), ("Abonnement", "subscriptionStatus")]
+        case .courtier: [("Nom", "fullName"), ("Titre", "professionalTitle"), ("Ville", "city"), ("Téléphone", "phoneNumber")]
+        case .artisan, .prestataire: [("Entreprise", "businessName"), ("Activité", "category"), ("Ville", "city"), ("Téléphone", "phone")]
+        case .hebergeur: [("Nom", "fullName"), ("Téléphone", "phoneNumber"), ("Vérifié", "isVerified")]
+        }
+    }
+
+    private func display(_ value: Any?) -> String {
+        guard let value, !(value is NSNull) else { return "—" }
+        if let flag = value as? Bool { return flag ? "Oui" : "Non" }
+        if let values = value as? [String] { return values.joined(separator: ", ") }
+        if let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() { return number.boolValue ? "Oui" : "Non" }
+        return String(describing: value)
+    }
+}
+
+private struct WixDashboardItem: View {
+    let item: [String: Any]
+    let fallbackTitle: String
+
+    private var title: String {
+        ["title", "itemName", "businessName", "senderName", "fullName"].compactMap { item[$0] as? String }.first ?? fallbackTitle
+    }
+    private var subtitle: String {
+        ["city", "postalCode", "propertyType", "category", "status", "matchingType", "demandType"].compactMap { item[$0] as? String }.filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+    private var detail: String? {
+        ["description", "itemDescription", "message", "messageContent", "content"].compactMap { item[$0] as? String }.first
+    }
+    private var imageURL: URL? {
+        ["mainImageUrl", "mainImage", "itemImage", "photo"].compactMap { item[$0] as? String }.compactMap(URL.init(string:)).first
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            if let imageURL {
+                AsyncImage(url: imageURL) { phase in
+                    if let image = phase.image { image.resizable().scaledToFill() }
+                    else { Image(systemName: "house.fill").foregroundStyle(.teal).frame(maxWidth: .infinity, maxHeight: .infinity).background(Color.teal.opacity(0.1)) }
+                }
+                .frame(width: 68, height: 68)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+            VStack(alignment: .leading, spacing: 5) {
+                Text(title).font(.subheadline.weight(.semibold)).lineLimit(2)
+                if !subtitle.isEmpty { Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
+                if let detail, !detail.isEmpty { Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(3) }
+                if let price = item["price"] ?? item["itemPrice"] {
+                    Text("\(String(describing: price)) €").font(.caption.weight(.semibold)).foregroundStyle(.teal)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 3)
     }
 }
