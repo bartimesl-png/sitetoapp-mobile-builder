@@ -4131,6 +4131,10 @@ private struct NativeRoleDashboardView: View {
     @State private var showSeasonalRateForm = false
     @State private var editingSeasonalRate: [String: Any]?
     @State private var showSeasonalCalendarEditor = false
+    @State private var showSeasonalAccommodationForm = false
+    @State private var editingSeasonalAccommodation: [String: Any]?
+    @State private var pendingAccommodationDeletion: String?
+    @State private var showAccommodationDeletionConfirmation = false
     @State private var pendingSeasonalRateDeletion: String?
     @State private var showSeasonalRateDeletionConfirmation = false
     @State private var showProfileEditor = false
@@ -4377,6 +4381,15 @@ private struct NativeRoleDashboardView: View {
                                     .font(.headline)
                             }
                         }
+                        if role == .hebergeur, section.0 == "Mes hébergements" {
+                            Button {
+                                editingSeasonalAccommodation = nil
+                                showSeasonalAccommodationForm = true
+                            } label: {
+                                Label("Ajouter un hébergement", systemImage: "plus.circle.fill")
+                                    .font(.headline)
+                            }
+                        }
                         if role == .hebergeur, section.0 == "Calendrier des disponibilités" {
                             Button { showSeasonalCalendarEditor = true } label: {
                                 Label("Gérer les disponibilités", systemImage: "calendar.badge.checkmark")
@@ -4403,6 +4416,9 @@ private struct NativeRoleDashboardView: View {
                                         } else if role == .hebergeur, section.0 == "Tarifs saisonniers" {
                                             editingSeasonalRate = item
                                             showSeasonalRateForm = true
+                                        } else if role == .hebergeur, section.0 == "Mes hébergements" {
+                                            editingSeasonalAccommodation = item
+                                            showSeasonalAccommodationForm = true
                                         } else {
                                             let list: String?
                                             if section.0 == "Mes biens" && [.particulier, .professionnel].contains(role) {
@@ -4514,6 +4530,18 @@ private struct NativeRoleDashboardView: View {
                                                 pendingSeasonalRateDeletion = rateID
                                                 showSeasonalRateDeletionConfirmation = true
                                             }
+                                        }
+                                    }
+                                    if role == .hebergeur, section.0 == "Mes hébergements",
+                                       let accommodationID = (item["_id"] as? String) ?? (item["id"] as? String) {
+                                        Button("Modifier", systemImage: "pencil") {
+                                            editingSeasonalAccommodation = item
+                                            showSeasonalAccommodationForm = true
+                                        }
+                                        .tint(.blue)
+                                        Button("Supprimer", systemImage: "trash", role: .destructive) {
+                                            pendingAccommodationDeletion = accommodationID
+                                            showAccommodationDeletionConfirmation = true
                                         }
                                     }
                                     if [.courtier, .artisan, .diagnostiqueur, .prestataire].contains(role),
@@ -4672,6 +4700,23 @@ private struct NativeRoleDashboardView: View {
         } message: {
             Text("Ce tarif sera supprimé de Wix et ne pourra pas être restauré.")
         }
+        .confirmationDialog(
+            "Supprimer cet hébergement ?",
+            isPresented: $showAccommodationDeletionConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Supprimer l’hébergement", role: .destructive) {
+                guard let accommodationID = pendingAccommodationDeletion else { return }
+                Task {
+                    do { try await auth.deleteHostAccommodation(accommodationID: accommodationID) }
+                    catch { auth.errorMessage = error.localizedDescription }
+                }
+                pendingAccommodationDeletion = nil
+            }
+            Button("Annuler", role: .cancel) { pendingAccommodationDeletion = nil }
+        } message: {
+            Text("La suppression est possible seulement si cet hébergement n’a aucune demande, réservation, période tarifaire ou entrée de calendrier liée.")
+        }
         .navigationTitle("Tableau de bord")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $selectedItem) { selection in
@@ -4805,6 +4850,16 @@ private struct NativeRoleDashboardView: View {
                         )
                     }
                 )
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showSeasonalAccommodationForm) {
+            NavigationStack {
+                NativeSeasonalAccommodationForm(initialAccommodation: editingSeasonalAccommodation) {
+                    showSeasonalAccommodationForm = false
+                    editingSeasonalAccommodation = nil
+                }
             }
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
@@ -5192,6 +5247,163 @@ private struct DashboardOverview: View {
             }
         }
         .padding(.vertical, 3)
+    }
+}
+
+private struct NativeSeasonalAccommodationForm: View {
+    @Environment(\.dismiss) private var dismiss
+    @StateObject private var auth = WixAuthStore.shared
+    @State private var itemName: String
+    @State private var itemDescription: String
+    @State private var accommodationType: String
+    @State private var locationAddress: String
+    @State private var city: String
+    @State private var postalCode: String
+    @State private var maxGuests: Int
+    @State private var numberOfBedrooms: Int
+    @State private var itemPrice: String
+    @State private var amenities: String
+    @State private var slug: String
+    @State private var checkInMode: String
+    @State private var checkInTime: String
+    @State private var checkInUntil: String
+    @State private var accessMethod: String
+    @State private var arrivalInstructions: String
+    @State private var status: String
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+
+    let initialAccommodation: [String: Any]?
+    let onSaved: () -> Void
+
+    init(initialAccommodation: [String: Any]?, onSaved: @escaping () -> Void) {
+        self.initialAccommodation = initialAccommodation
+        self.onSaved = onSaved
+        _itemName = State(initialValue: initialAccommodation?["itemName"] as? String ?? "")
+        _itemDescription = State(initialValue: initialAccommodation?["itemDescription"] as? String ?? "")
+        _accommodationType = State(initialValue: initialAccommodation?["accommodationType"] as? String ?? "apartment")
+        _locationAddress = State(initialValue: initialAccommodation?["locationAddress"] as? String ?? "")
+        _city = State(initialValue: initialAccommodation?["city"] as? String ?? "")
+        _postalCode = State(initialValue: initialAccommodation?["postalCode"] as? String ?? "")
+        _maxGuests = State(initialValue: (initialAccommodation?["maxGuests"] as? Int) ?? 2)
+        _numberOfBedrooms = State(initialValue: (initialAccommodation?["numberOfBedrooms"] as? Int) ?? 1)
+        _itemPrice = State(initialValue: initialAccommodation?["itemPrice"].map { String(describing: $0) } ?? "")
+        _amenities = State(initialValue: initialAccommodation?["amenities"] as? String ?? "")
+        _slug = State(initialValue: initialAccommodation?["slug"] as? String ?? "")
+        _checkInMode = State(initialValue: initialAccommodation?["checkInMode"] as? String ?? "FLEXIBLE")
+        _checkInTime = State(initialValue: initialAccommodation?["checkInTime"] as? String ?? "15:00")
+        _checkInUntil = State(initialValue: initialAccommodation?["checkInUntil"] as? String ?? "20:00")
+        _accessMethod = State(initialValue: initialAccommodation?["accessMethod"] as? String ?? "HOST")
+        _arrivalInstructions = State(initialValue: initialAccommodation?["arrivalInstructions"] as? String ?? "")
+        _status = State(initialValue: "draft")
+    }
+
+    private var accommodationTypes: [(String, String)] {
+        [("apartment", "Appartement"), ("house", "Maison"), ("villa", "Villa"), ("cottage", "Cottage"), ("studio", "Studio"), ("room", "Chambre")]
+    }
+    private var checkInModes: [(String, String)] {
+        [("FLEXIBLE", "Arrivée libre"), ("FROM_TIME", "À partir d’une heure"), ("TIME_WINDOW", "Entre deux horaires"), ("BY_AGREEMENT", "À convenir")]
+    }
+    private var accessMethods: [(String, String)] {
+        [("HOST", "Remise par l’hébergeur"), ("LOCKBOX", "Boîte à clés"), ("SMART_LOCK", "Serrure connectée"), ("RECEPTION", "Accueil ou réception"), ("KEY_PICKUP", "Retrait ailleurs"), ("OTHER", "Autre")]
+    }
+
+    var body: some View {
+        Form {
+            Section(initialAccommodation == nil ? "Nouvel hébergement" : "Modifier l’hébergement") {
+                TextField("Nom de l’établissement", text: $itemName)
+                Picker("Type", selection: $accommodationType) {
+                    ForEach(accommodationTypes, id: \.0) { Text($0.1).tag($0.0) }
+                }
+                TextField("Adresse", text: $locationAddress)
+                TextField("Ville", text: $city)
+                TextField("Code postal", text: $postalCode).keyboardType(.numberPad)
+                TextField("URL personnalisée", text: $slug)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                TextField("Description", text: $itemDescription, axis: .vertical).lineLimit(4...9)
+            }
+            Section("Capacité et tarif") {
+                Stepper("Voyageurs maximum : \(maxGuests)", value: $maxGuests, in: 1...100)
+                Stepper("Chambres : \(numberOfBedrooms)", value: $numberOfBedrooms, in: 1...100)
+                TextField("Prix par nuit (€)", text: $itemPrice).keyboardType(.decimalPad)
+            }
+            Section("Équipements et arrivée") {
+                TextField("Équipements (séparés par des virgules)", text: $amenities, axis: .vertical).lineLimit(2...4)
+                Picker("Modalité d’arrivée", selection: $checkInMode) {
+                    ForEach(checkInModes, id: \.0) { Text($0.1).tag($0.0) }
+                }
+                if ["FROM_TIME", "TIME_WINDOW"].contains(checkInMode) {
+                    TextField("Arrivée à partir de (HH:mm)", text: $checkInTime)
+                    if checkInMode == "TIME_WINDOW" { TextField("Arrivée jusqu’à (HH:mm)", text: $checkInUntil) }
+                }
+                Picker("Accès au logement", selection: $accessMethod) {
+                    ForEach(accessMethods, id: \.0) { Text($0.1).tag($0.0) }
+                }
+                TextField("Consignes d’arrivée (sans code confidentiel)", text: $arrivalInstructions, axis: .vertical).lineLimit(3...6)
+            }
+            if initialAccommodation == nil {
+                Section("Statut") {
+                    Picker("Publication", selection: $status) {
+                        Text("Brouillon").tag("draft")
+                        Text("À valider").tag("pending")
+                    }
+                    .pickerStyle(.segmented)
+                }
+            } else {
+                Section {
+                    Text("Les photos existantes restent attachées à l’annonce. Leur ajout ou leur suppression doit encore être fait depuis la gestion complète du site.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+            if let errorMessage {
+                Section { Label(errorMessage, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange) }
+            }
+            Section {
+                Button { Task { await save() } } label: {
+                    HStack { Spacer(); if isSaving { ProgressView("Enregistrement…") } else { Label("Enregistrer", systemImage: "checkmark.circle.fill") }; Spacer() }
+                }
+                .buttonStyle(.borderedProminent).tint(.teal)
+                .disabled(isSaving || !isValid)
+            }
+        }
+        .navigationTitle(initialAccommodation == nil ? "Ajouter un hébergement" : "Modifier l’hébergement")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { ToolbarItem(placement: .topBarLeading) { Button("Fermer") { dismiss() } } }
+    }
+
+    private var isValid: Bool {
+        itemName.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 &&
+        !itemDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        locationAddress.trimmingCharacters(in: .whitespacesAndNewlines).count >= 4 &&
+        city.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 &&
+        postalCode.range(of: "^\\d{4,10}$", options: .regularExpression) != nil &&
+        Double(itemPrice.replacingOccurrences(of: ",", with: ".")) != nil
+    }
+
+    @MainActor
+    private func save() async {
+        guard isValid, let price = Double(itemPrice.replacingOccurrences(of: ",", with: ".")) else { return }
+        isSaving = true
+        errorMessage = nil
+        defer { isSaving = false }
+        do {
+            try await auth.saveHostAccommodation(
+                accommodationID: initialAccommodation?["_id"] as? String,
+                fields: [
+                    "itemName": itemName, "itemDescription": itemDescription,
+                    "accommodationType": accommodationType, "locationAddress": locationAddress,
+                    "city": city, "postalCode": postalCode, "maxGuests": maxGuests,
+                    "numberOfBedrooms": numberOfBedrooms, "itemPrice": price,
+                    "amenities": amenities, "slug": slug, "checkInMode": checkInMode,
+                    "checkInTime": checkInTime, "checkInUntil": checkInUntil,
+                    "accessMethod": accessMethod, "arrivalInstructions": arrivalInstructions,
+                ],
+                status: status
+            )
+            onSaved()
+            dismiss()
+        } catch { errorMessage = error.localizedDescription }
     }
 }
 

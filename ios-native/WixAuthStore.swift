@@ -883,6 +883,25 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         await loadDashboard(role: "hebergeur")
     }
 
+    func saveHostAccommodation(accommodationID: String?, fields: [String: Any], status: String) async throws {
+        var payload = fields
+        payload["action"] = "save_host_accommodation"
+        payload["role"] = "hebergeur"
+        payload["status"] = status
+        if let accommodationID, !accommodationID.isEmpty { payload["accommodationId"] = accommodationID }
+        try await sendDashboardAction(payload, fallback: "Impossible d’enregistrer cet hébergement.")
+        await loadDashboard(role: "hebergeur")
+    }
+
+    func deleteHostAccommodation(accommodationID: String) async throws {
+        let cleanID = accommodationID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanID.isEmpty else { throw AuthError.api("Hébergement invalide.") }
+        try await sendDashboardAction([
+            "action": "delete_host_accommodation", "role": "hebergeur", "accommodationId": cleanID,
+        ], fallback: "Impossible de supprimer cet hébergement.")
+        await loadDashboard(role: "hebergeur")
+    }
+
     func markMinisiteRequestProcessed(requestID: String) async {
         errorMessage = nil
         let cleanID = requestID.trimmingCharacters(in: .whitespacesAndNewlines)

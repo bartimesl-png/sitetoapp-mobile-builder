@@ -399,7 +399,8 @@ async function loadDashboard(role: string, email: string, memberID: string, toke
         "photo15", "photo16", "photo17", "photo18", "photo19", "photo20", "photo21", "photo22",
         "photo23", "photo24", "photo25", "photo26", "photo27", "photo28", "photo29", "photo30",
         "accommodationType", "locationAddress", "city", "postalCode", "maxGuests", "numberOfBedrooms",
-        "amenities", "slug",
+        "amenities", "slug", "status", "latitude", "longitude", "department", "checkInMode",
+        "checkInTime", "checkInUntil", "accessMethod", "arrivalInstructions",
       ], token),
       queryAll("seasonalreservations", { hostId: { $eq: hostId } }, [
         "hostId", "accommodationId", "vacationerId", "source", "vacationerName", "vacationerEmail",
@@ -993,6 +994,94 @@ Deno.serve(async (req: Request) => {
         const createdId = String(inserted.dataItem?.id ?? inserted.dataItem?.data?._id ?? "");
         if (!createdId) return response({ error: "Wix n’a pas confirmé la création du tarif." }, 502);
         return response({ success: true, rateId: createdId, accommodationId });
+      }
+
+      if (body.action === "save_host_accommodation") {
+        if (role !== "hebergeur") return response({ error: "Cette action est réservée à l’espace hébergeur." }, 403);
+        const accommodationId = String(body.accommodationId ?? "").trim();
+        const itemName = String(body.itemName ?? "").trim();
+        const itemDescription = String(body.itemDescription ?? "").trim();
+        const accommodationType = String(body.accommodationType ?? "").trim();
+        const locationAddress = String(body.locationAddress ?? "").trim();
+        const city = String(body.city ?? "").trim();
+        const postalCode = String(body.postalCode ?? "").trim();
+        const maxGuests = Number(body.maxGuests);
+        const numberOfBedrooms = Number(body.numberOfBedrooms);
+        const itemPrice = Number(body.itemPrice);
+        const amenities = String(body.amenities ?? "").trim();
+        const slug = String(body.slug ?? "").trim().toLowerCase();
+        const checkInMode = String(body.checkInMode ?? "FLEXIBLE").trim().toUpperCase();
+        const checkInTime = String(body.checkInTime ?? "15:00").trim();
+        const checkInUntil = String(body.checkInUntil ?? "20:00").trim();
+        const accessMethod = String(body.accessMethod ?? "HOST").trim().toUpperCase();
+        const arrivalInstructions = String(body.arrivalInstructions ?? "").trim();
+        const typeOptions = new Set(["apartment", "house", "villa", "cottage", "studio", "room"]);
+        const timeIsValid = (value: string) => /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+        if ((accommodationId && !/^[A-Za-z0-9_-]{1,160}$/.test(accommodationId)) ||
+            itemName.length < 2 || itemName.length > 140 || itemDescription.length < 1 || itemDescription.length > 8000 ||
+            !typeOptions.has(accommodationType) || locationAddress.length < 4 || locationAddress.length > 250 ||
+            city.length < 2 || city.length > 100 || !/^\d{4,10}$/.test(postalCode) ||
+            !Number.isInteger(maxGuests) || maxGuests < 1 || maxGuests > 100 ||
+            !Number.isInteger(numberOfBedrooms) || numberOfBedrooms < 1 || numberOfBedrooms > 100 ||
+            !Number.isFinite(itemPrice) || itemPrice < 0 || itemPrice > 100_000 || amenities.length > 2000 ||
+            (slug && !/^[a-z0-9-]{2,120}$/.test(slug)) ||
+            !["FLEXIBLE", "FROM_TIME", "TIME_WINDOW", "BY_AGREEMENT"].includes(checkInMode) || !timeIsValid(checkInTime) || !timeIsValid(checkInUntil) ||
+            !["HOST", "LOCKBOX", "SMART_LOCK", "RECEPTION", "KEY_PICKUP", "OTHER"].includes(accessMethod) || arrivalInstructions.length > 3000) {
+          return response({ error: "Vérifiez les informations de l’hébergement, la capacité, le prix et les horaires d’arrivée." }, 400);
+        }
+        const dashboard = await loadDashboard(role, email, result.member.id, token);
+        const profile = dashboard?.profile as Record<string, unknown> | null | undefined;
+        const hostId = String(profile?._id ?? "");
+        if (!hostId) return response({ error: "Aucun profil hébergeur n’est associé à ce compte." }, 403);
+        const accommodations = (dashboard?.accommodations as Record<string, unknown>[] | undefined) ?? [];
+        const data: Record<string, unknown> = {
+          itemName, itemDescription, accommodationType, locationAddress, city, postalCode,
+          maxGuests, numberOfBedrooms, itemPrice, amenities, slug: slug || itemName.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 120),
+          checkInMode, checkInTime, checkInUntil, accessMethod, arrivalInstructions,
+        };
+        if (accommodationId) {
+          const accommodation = accommodations.find((item) => String(item._id ?? item.id ?? "") === accommodationId);
+          if (!accommodation || String(accommodation.hostId ?? "") !== hostId) {
+            return response({ error: "Cet hébergement n’appartient pas à votre espace." }, 403);
+          }
+          await wixRequest(`/wix-data/v2/items/${encodeURIComponent(accommodationId)}`, token, {
+            method: "PATCH", body: JSON.stringify({ dataCollectionId: "seasonalaccommodations", patch: {
+              dataItemId: accommodationId,
+              fieldModifications: Object.entries(data).map(([fieldPath, value]) => ({ fieldPath, action: "SET_FIELD", setFieldOptions: { value } })),
+            } }),
+          });
+          return response({ success: true, accommodationId });
+        }
+        const status = String(body.status ?? "draft").trim().toLowerCase();
+        if (!["draft", "pending"].includes(status)) return response({ error: "Choisissez un brouillon ou une demande de validation." }, 400);
+        const inserted = await wixRequest<{ dataItem?: WixItem }>("/wix-data/v2/items", token, {
+          method: "POST", body: JSON.stringify({ dataCollectionId: "seasonalaccommodations", dataItem: { data: { ...data, hostId, status } } }),
+        });
+        const createdId = String(inserted.dataItem?.id ?? inserted.dataItem?.data?._id ?? "");
+        if (!createdId) return response({ error: "Wix n’a pas confirmé la création de l’hébergement." }, 502);
+        return response({ success: true, accommodationId: createdId });
+      }
+
+      if (body.action === "delete_host_accommodation") {
+        if (role !== "hebergeur") return response({ error: "Cette action est réservée à l’espace hébergeur." }, 403);
+        const accommodationId = String(body.accommodationId ?? "").trim();
+        if (!/^[A-Za-z0-9_-]{1,160}$/.test(accommodationId)) return response({ error: "Hébergement invalide." }, 400);
+        const dashboard = await loadDashboard(role, email, result.member.id, token);
+        const accommodations = (dashboard?.accommodations as Record<string, unknown>[] | undefined) ?? [];
+        if (!accommodations.some((item) => String(item._id ?? item.id ?? "") === accommodationId)) {
+          return response({ error: "Cet hébergement n’appartient pas à votre espace." }, 403);
+        }
+        const [requests, reservations, rates, calendar] = await Promise.all([
+          queryAll("seasonalbookingrequests", { accommodationId: { $eq: accommodationId } }, ["status"], token),
+          queryAll("seasonalreservations", { accommodationId: { $eq: accommodationId } }, ["reservationStatus"], token),
+          queryAll("seasonalrates", { accommodationId: { $eq: accommodationId } }, [], token),
+          queryAll("seasonalcalendars", { linkedEntityId: { $eq: accommodationId } }, [], token),
+        ]);
+        if (requests.length || reservations.length || rates.length || calendar.length) {
+          return response({ error: "Cet hébergement contient des demandes, réservations ou réglages de calendrier. Supprimez ou traitez-les d’abord depuis votre espace." }, 409);
+        }
+        await wixRequest(`/wix-data/v2/items/${encodeURIComponent(accommodationId)}?dataCollectionId=seasonalaccommodations`, token, { method: "DELETE" });
+        return response({ success: true, accommodationId });
       }
 
       if (body.action === "delete_seasonal_rate") {
