@@ -14,16 +14,29 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         let center = UNUserNotificationCenter.current()
         center.delegate = self
         Messaging.messaging().delegate = self
+        return true
+    }
 
-        center.requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
-            if let error {
-                NSLog("Notifications iOS: autorisation impossible: %@", error.localizedDescription)
-            }
-            guard granted else { return }
-            DispatchQueue.main.async {
-                application.registerForRemoteNotifications()
-            }
+    static func requestPushAuthorization() async -> Bool {
+        let center = UNUserNotificationCenter.current()
+        let settings = await withCheckedContinuation { continuation in
+            center.getNotificationSettings { continuation.resume(returning: $0) }
         }
+        guard settings.authorizationStatus != .denied else { return false }
+
+        if settings.authorizationStatus == .notDetermined {
+            let granted = await withCheckedContinuation { continuation in
+                center.requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
+                    if let error {
+                        NSLog("Notifications iOS: autorisation impossible: %@", error.localizedDescription)
+                    }
+                    continuation.resume(returning: granted && error == nil)
+                }
+            }
+            guard granted else { return false }
+        }
+
+        UIApplication.shared.registerForRemoteNotifications()
         return true
     }
 

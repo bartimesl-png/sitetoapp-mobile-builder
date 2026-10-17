@@ -68,20 +68,34 @@ async function ownerForRole(role: string, email: string, token: string): Promise
     if (!profile) return null;
     return { ownerId: String(profile._id ?? ""), accountType: "broker" };
   }
-  if (["artisan", "diagnostiqueur", "prestataire"].includes(role)) {
-    const accountCollection = role === "prestataire" ? "serviceprovideraccounts" : "serviceprovideraccounts-1";
+  if (role === "artisan" || role === "diagnostiqueur") {
+    const account = (await query("prosaccounts", emailFilter(email), ["email", "isActive"], token))[0];
+    if (!account || account.isActive === false) return null;
+    const accountId = String(account._id ?? "");
+    const profiles = await query("prosprofiles", { accountId: { $eq: accountId } }, [
+      "accountId", "professionalType", "category", "categories",
+    ], token);
+    const profile = profiles.find((item) => {
+      const identity = `${String(item.professionalType ?? "")} ${String(item.category ?? "")} ${String(item.categories ?? "")}`;
+      return role === "artisan"
+        ? /artisan/i.test(identity) && !/diagnostiqueur/i.test(identity)
+        : /diagnostiqueur|diagnostic/i.test(identity);
+    });
+    if (!profile) return null;
+    return {
+      ownerId: String(profile._id ?? ""),
+      accountType: role === "artisan" ? "artisan" : "diagnostician",
+    };
+  }
+  if (role === "prestataire") {
+    // Service-provider signup still uses its independent legacy Wix collections.
+    const accountCollection = "serviceprovideraccounts";
     const account = (await query(accountCollection, emailFilter(email), ["email", "isActive"], token))[0];
     if (!account || account.isActive === false) return null;
     const providers = await query("serviceproviders-1", { accountId: { $eq: String(account._id ?? "") } }, ["accountId", "category", "subcategory"], token);
-    const activity = (item: Record<string, unknown>) => `${String(item.category ?? "")} ${String(item.subcategory ?? "")}`;
-    const profile = providers.find((item) => role === "artisan"
-      ? /artisan/i.test(activity(item)) && !/diagnostiqueur/i.test(activity(item))
-      : role === "diagnostiqueur"
-        ? /diagnostiqueur/i.test(activity(item))
-        : !/artisan|diagnostiqueur/i.test(activity(item)));
+    const profile = providers.find((item) => !/artisan|diagnostiqueur/i.test(`${String(item.category ?? "")} ${String(item.subcategory ?? "")}`));
     if (!profile) return null;
-    const accountType = role === "artisan" ? "artisan" : role === "diagnostiqueur" ? "diagnostician" : "service_provider";
-    return { ownerId: String(profile._id ?? ""), accountType };
+    return { ownerId: String(profile._id ?? ""), accountType: "service_provider" };
   }
   return null;
 }

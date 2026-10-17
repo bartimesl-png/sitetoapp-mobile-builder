@@ -24,6 +24,7 @@ struct Listing: Decodable, Identifiable, Hashable {
     let postalCode: String?
     let price: Double?
     let surface: Double?
+    let landSurface: Double?
     let rooms: Int?
     let bedrooms: Int?
     let bathrooms: Int?
@@ -33,6 +34,23 @@ struct Listing: Decodable, Identifiable, Hashable {
     let propertyType: String?
     let sourceUrl: String?
     let ownerType: String?
+    let importedProId: String?
+    let professionalID: String?
+    let createdAt: String?
+    let firstSeenAt: String?
+    let updatedAt: String?
+    let lastSeenAt: String?
+
+    var canContactImportedProfessional: Bool {
+        ownerType == "professional_imported" && importedProId?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+    }
+
+    /// ISO-8601 timestamps sort lexically when returned in the API's UTC form.
+    /// Use each source's best available publication/creation timestamp, with
+    /// deterministic ID ordering for records that have no timestamp.
+    var sortDateKey: String {
+        createdAt ?? firstSeenAt ?? updatedAt ?? lastSeenAt ?? ""
+    }
 
     var gallery: [URL] {
         var candidates = images ?? []
@@ -72,6 +90,30 @@ struct WixPublicProfessionalsResponse: Decodable {
     let dataItems: [WixPublicProfessionalItem]
 }
 
+struct WixRawDirectoryResponse: Decodable {
+    let dataItems: [WixRawDirectoryItem]
+}
+
+struct WixRawDirectoryItem: Decodable {
+    let id: String
+    let data: [String: AnyCodableValue]
+}
+
+struct AnyCodableValue: Decodable {
+    let value: Any
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let value = try? container.decode(String.self) { self.value = value }
+        else if let value = try? container.decode(Bool.self) { self.value = value }
+        else if let value = try? container.decode(Double.self) { self.value = value }
+        else if let value = try? container.decode(Int.self) { self.value = value }
+        else if let value = try? container.decode([AnyCodableValue].self) { self.value = value.map(\.value) }
+        else if let value = try? container.decode([String: AnyCodableValue].self) { self.value = value.mapValues(\.value) }
+        else if try container.decodeNil() { self.value = NSNull() }
+        else { self.value = NSNull() }
+    }
+}
+
 struct WixPublicProfessionalItem: Decodable {
     let id: String
     let data: WixPublicProfessionalData
@@ -91,10 +133,16 @@ struct WixPublicProfessionalData: Decodable {
     let memberId: String?
     let isVisibleInDirectory: Bool?
     let isActive: Bool?
+    let mainPostalCode: String?
+    let coveredPostalCodes: String?
+    let secondaryPostalCodes: String?
+    let email: String?
+    let phone: String?
 
     func professional(id: String) -> WixPublicProfessional {
         WixPublicProfessional(
             id: id,
+            cmsProfileID: id,
             companyName: companyName,
             firstName: firstName,
             lastName: lastName,
@@ -104,13 +152,16 @@ struct WixPublicProfessionalData: Decodable {
             businessSector: businessSector,
             description: description,
             logo: photo,
-            website: website
+            website: website,
+            professionalEmail: email,
+            publicPhone: phone
         )
     }
 }
 
 struct WixPublicProfessional: Identifiable {
     let id: String
+    var cmsProfileID: String? = nil
     let companyName: String?
     let firstName: String?
     let lastName: String?
@@ -121,6 +172,13 @@ struct WixPublicProfessional: Identifiable {
     let description: String?
     let logo: String?
     let website: String?
+    var importedID: String? = nil
+    var importedCategory: String? = nil
+    var professionalEmail: String? = nil
+    var publicPhone: String? = nil
+    var dedupeEmail: String? = nil
+    var dedupePhone: String? = nil
+    var isLocalProsProfile: Bool = false
 
     var resolvedName: String {
         let company = companyName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -140,6 +198,11 @@ struct WixPublicProfessional: Identifiable {
     }
 }
 
+struct ProfessionalDirectoryResult {
+    let professionals: [WixPublicProfessional]
+    let warning: String?
+}
+
 struct WixPublicPropertyItem: Decodable {
     let id: String
     let data: WixPublicProperty
@@ -154,8 +217,10 @@ struct WixPublicProperty: Decodable {
     let estimatedPrice: Double?
     let status: String?
     let surface: Double?
+    let landSurface: Double?
     let rooms: Double?
     let bedrooms: Double?
+    let bathrooms: Double?
     let propertyType: String?
     let transactionType: String?
     let mainImage: String?
@@ -181,6 +246,7 @@ struct WixPublicProperty: Decodable {
     let photo19: String?
     let photo20: String?
     let galleryImages: String?
+    let createdAt: String?
 
     var photos: [String] {
         var result = [mainImage, photo1, photo2, photo3, photo4, photo5,
@@ -211,15 +277,22 @@ struct WixPublicProperty: Decodable {
             postalCode: postalCode,
             price: sellingPrice ?? estimatedPrice,
             surface: surface,
+            landSurface: landSurface,
             rooms: rooms.map(Int.init),
             bedrooms: bedrooms.map(Int.init),
-            bathrooms: nil,
+            bathrooms: bathrooms.map(Int.init),
             images: photos,
             imageUrl: photos.first,
             transactionType: transactionType,
             propertyType: propertyType,
             sourceUrl: nil,
-            ownerType: "particulier"
+            ownerType: "particulier",
+            importedProId: nil,
+            professionalID: nil,
+            createdAt: createdAt,
+            firstSeenAt: nil,
+            updatedAt: nil,
+            lastSeenAt: nil
         )
     }
 }
@@ -234,6 +307,7 @@ struct WixPublicProfessionalPropertyItem: Decodable {
 }
 
 struct WixPublicProfessionalProperty: Decodable {
+    let professionalId: String?
     let title: String?
     let description: String?
     let city: String?
@@ -250,12 +324,19 @@ struct WixPublicProfessionalProperty: Decodable {
     let transactionType: String?
     let mainImageUrl: String?
     let galleryImages: String?
+    let photo1: String?
+    let photo2: String?
+    let photo3: String?
+    let photo4: String?
+    let photo5: String?
+    let createdAt: String?
+    let updatedAt: String?
     let commercialStatus: String?
     let status: String?
     let slug: String?
 
     func listing(id: String) -> Listing {
-        var gallery: [String] = []
+        var gallery: [String] = [photo1, photo2, photo3, photo4, photo5].compactMap { $0 }
         if let galleryImages, let data = galleryImages.data(using: .utf8),
            let values = try? JSONSerialization.jsonObject(with: data) as? [Any] {
             for value in values {
@@ -278,6 +359,7 @@ struct WixPublicProfessionalProperty: Decodable {
             postalCode: postalCode,
             price: price,
             surface: surfaceHouse ?? surface,
+            landSurface: surfaceLand ?? landSurface,
             rooms: rooms.map(Int.init),
             bedrooms: bedrooms.map(Int.init),
             bathrooms: bathrooms.map(Int.init),
@@ -286,7 +368,13 @@ struct WixPublicProfessionalProperty: Decodable {
             transactionType: transactionType,
             propertyType: propertyType,
             sourceUrl: nil,
-            ownerType: "professionnel"
+            ownerType: "professionnel",
+            importedProId: nil,
+            professionalID: professionalId,
+            createdAt: createdAt,
+            firstSeenAt: nil,
+            updatedAt: updatedAt,
+            lastSeenAt: nil
         )
     }
 }
@@ -302,14 +390,66 @@ struct ClassifiedAd: Identifiable, Hashable {
     let city: String?
     let postalCode: String?
     let images: [URL]
+    var externalURL: URL? = nil
+    var isImported: Bool = false
+    var importedAttributesJSON: String? = nil
+    var importedProviderName: String? = nil
+    var listingType: String? = nil
+    var wixSlug: String? = nil
+
+    var wixDetailURL: URL? {
+        guard !isImported,
+              id.hasPrefix("wix-classified-") else { return nil }
+        let cmsID = String(id.dropFirst("wix-classified-".count))
+        let trimmedSlug = wixSlug?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let identifier = trimmedSlug.isEmpty ? cmsID : trimmedSlug
+        guard identifier.range(of: "^[A-Za-z0-9_-]{1,200}$", options: .regularExpression) != nil else { return nil }
+        return URL(string: "https://www.partenairefoyer.com/petites-annonces/\(identifier)")
+    }
 
     var locationLabel: String {
         [postalCode, city].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
     }
 
+    var listingTypeLabel: String? {
+        switch listingType {
+        case "sell": return "À vendre"
+        case "give": return "À donner"
+        case "exchange": return "À échanger"
+        case "rent": return "À louer"
+        default: return nil
+        }
+    }
+
     var formattedPrice: String {
+        switch listingType {
+        case "give": return "Gratuit"
+        case "exchange": return "Échange"
+        case "rent":
+            let unit = rentalUnit
+            return "\(currencyPrice) / \(unit)"
+        default:
+            return currencyPrice
+        }
+    }
+
+    private var currencyPrice: String {
         guard let price else { return "Prix sur demande" }
         return price.formatted(.currency(code: "EUR").locale(Locale(identifier: "fr_FR")))
+    }
+
+    private var rentalUnit: String {
+        guard let raw = importedAttributesJSON?.data(using: .utf8),
+              let values = (try? JSONSerialization.jsonObject(with: raw)) as? [String: Any],
+              let unit = values["rentalUnit"] as? String else { return "jour" }
+        switch unit {
+        case "hour": return "heure"
+        case "day": return "jour"
+        case "weekend": return "week-end"
+        case "week": return "semaine"
+        case "month": return "mois"
+        default: return unit
+        }
     }
 }
 
@@ -322,6 +462,47 @@ struct WixPublicClassifiedAdItem: Decodable {
     let data: WixPublicClassifiedAdData
 }
 
+enum WixFlexibleJSON: Decodable {
+    case string(String)
+    case number(Double)
+    case bool(Bool)
+    case object([String: WixFlexibleJSON])
+    case array([WixFlexibleJSON])
+    case null
+
+    init(from decoder: Decoder) throws {
+        let value = try decoder.singleValueContainer()
+        if value.decodeNil() { self = .null }
+        else if let bool = try? value.decode(Bool.self) { self = .bool(bool) }
+        else if let number = try? value.decode(Double.self) { self = .number(number) }
+        else if let string = try? value.decode(String.self) { self = .string(string) }
+        else if let object = try? value.decode([String: WixFlexibleJSON].self) { self = .object(object) }
+        else if let array = try? value.decode([WixFlexibleJSON].self) { self = .array(array) }
+        else { self = .null }
+    }
+
+    var jsonString: String? {
+        if case .string(let string) = self { return string }
+        func objectValue(_ item: WixFlexibleJSON) -> Any {
+            switch item {
+            case .string(let raw): return raw
+            case .number(let raw): return raw
+            case .bool(let raw): return raw
+            case .object(let raw): return raw.mapValues { objectValue($0) }
+            case .array(let raw): return raw.map(objectValue)
+            case .null: return NSNull()
+            }
+        }
+        let object = objectValue(self)
+        guard JSONSerialization.isValidJSONObject(object),
+              let data = try? JSONSerialization.data(withJSONObject: object, options: [.fragmentsAllowed, .sortedKeys]) else {
+            if case .string(let string) = self { return string }
+            return nil
+        }
+        return String(data: data, encoding: .utf8)
+    }
+}
+
 struct WixPublicClassifiedAdData: Decodable {
     let itemName: String?
     let itemDescription: String?
@@ -329,6 +510,9 @@ struct WixPublicClassifiedAdData: Decodable {
     let category: String?
     let subcategory: String?
     let itemCondition: String?
+    let adListingType: String?
+    let attributesJSON: WixFlexibleJSON?
+    let slug: String?
     let city: String?
     let postalCode: String?
     let status: String?
@@ -354,7 +538,7 @@ struct WixPublicClassifiedAdData: Decodable {
     let photo20: String?
 
     func classifiedAd(id: String) -> ClassifiedAd? {
-        guard status == "published",
+        guard status == "published" || status == "active",
               let title = itemName?.trimmingCharacters(in: .whitespacesAndNewlines),
               !title.isEmpty else { return nil }
         var seen = Set<String>()
@@ -374,7 +558,12 @@ struct WixPublicClassifiedAdData: Decodable {
             condition: itemCondition,
             city: city,
             postalCode: postalCode,
-            images: images
+            images: images,
+            externalURL: nil,
+            isImported: false,
+            importedAttributesJSON: attributesJSON?.jsonString,
+            listingType: adListingType,
+            wixSlug: slug
         )
     }
 }

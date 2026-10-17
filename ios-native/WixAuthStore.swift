@@ -1,5 +1,6 @@
 import AuthenticationServices
 import Combine
+import CoreLocation
 import CryptoKit
 import Foundation
 import Security
@@ -61,6 +62,14 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         let sessionToken: String?
         let stateToken: String?
         let message: String?
+    }
+
+    private struct PostalCommune: Decodable {
+        struct Center: Decodable {
+            let coordinates: [Double]?
+        }
+        let nom: String
+        let centre: Center?
     }
 
     private struct RedirectResponse: Decodable {
@@ -176,7 +185,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         }
     }
 
-    func signUp(email: String, password: String, firstName: String, lastName: String, role: String, profile: [String: String]) async -> Bool {
+    func signUp(email: String, password: String, firstName: String, lastName: String, role: String, profile: [String: String], acceptedCGU: Bool, acceptedCGV: Bool) async -> Bool {
         guard !isSigningIn else { return false }
         isSigningIn = true
         errorMessage = nil
@@ -186,9 +195,13 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let givenName = firstName.trimmingCharacters(in: .whitespacesAndNewlines)
         let familyName = lastName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard acceptedCGU && acceptedCGV else {
+            errorMessage = "Vous devez consulter et accepter les CGU et les CGV applicables à votre espace."
+            return false
+        }
         guard normalizedEmail.contains("@"), givenName.count >= 2, familyName.count >= 2,
-              member != nil || password.count >= 8 else {
-            errorMessage = "Indiquez un e-mail valide, vos prénom et nom, et un mot de passe d’au moins 8 caractères pour un nouveau compte."
+              password.count >= 8 || (member != nil && !["artisan", "diagnostiqueur"].contains(role)) else {
+            errorMessage = "Indiquez un e-mail valide, vos prénom et nom, et un mot de passe d’au moins 8 caractères pour créer votre compte métier."
             return false
         }
         if let member, member.loginEmail.caseInsensitiveCompare(normalizedEmail) != .orderedSame {
@@ -228,7 +241,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
                 }
                 try await establishMemberSession(sessionToken: sessionToken, visitorAccessToken: visitor.accessToken)
             }
-            try await createRoleProfile(role: role, profile: profile)
+            try await createRoleProfile(role: role, profile: profile, password: password, acceptedCGU: acceptedCGU, acceptedCGV: acceptedCGV)
             return true
         } catch is CancellationError {
             errorMessage = nil
@@ -238,9 +251,21 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         return false
     }
 
-    private func createRoleProfile(role: String, profile: [String: String]) async throws {
-        var body: [String: Any] = ["role": role, "acceptedTerms": true]
+    private func createRoleProfile(role: String, profile: [String: String], password: String, acceptedCGU: Bool, acceptedCGV: Bool) async throws {
+        var body: [String: Any] = [
+            "role": role,
+            "acceptedTerms": acceptedCGU && acceptedCGV,
+            "cguAccepted": acceptedCGU,
+            "cgvAccepted": acceptedCGV,
+            "legalAcceptanceSource": "ios-native"
+        ]
         body.merge(profile) { _, new in new }
+        // The Wix site still authenticates artisan/diagnostician accounts in
+        // its legacy prosaccounts collection. The edge function hashes this
+        // value before storing it; never persist or log the clear-text value.
+        if ["artisan", "diagnostiqueur"].contains(role) {
+            body["legacyPassword"] = password
+        }
         let token = try await validAccessToken()
         var request = URLRequest(url: URL(string: "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/ios-native-role-registration")!, timeoutInterval: 35)
         request.httpMethod = "POST"
@@ -252,7 +277,17 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         guard let http = response as? HTTPURLResponse else { throw AuthError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else {
             let payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-            throw AuthError.api(payload?["error"] as? String ?? "Impossible de créer votre espace métier Wix.")
+            let message = payload?["error"] as? String ?? "Impossible de créer votre espace métier Wix."
+            if message.localizedCaseInsensitiveContains("vérifié") {
+                infoMessage = "Wix doit confirmer votre adresse e-mail avant la création de l’espace. Vérifiez votre boîte de réception, puis reconnectez-vous."
+            }
+            throw AuthError.api(message)
+        }
+        if role == "professionnel",
+           let payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+           let notifications = payload["emailNotifications"] as? [String: Any],
+           notifications.values.contains(where: { $0 as? Bool == false }) {
+            infoMessage = "Votre compte est créé, mais au moins un e-mail de bienvenue n’a pas pu être déclenché. Vérifiez votre boîte e-mail et contactez PartenaireFoyer si vous n’avez rien reçu."
         }
     }
 
@@ -399,8 +434,10 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         transactionType: String,
         price: Double,
         surface: Double,
+        landSurface: Double?,
         rooms: Int,
         bedrooms: Int,
+        bathrooms: Int,
         address: String,
         city: String,
         postalCode: String,
@@ -414,7 +451,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.httpBody = try JSONSerialization.data(withJSONObject: [
+        var payload: [String: Any] = [
             "action": "create_professional_property",
             "role": "professionnel",
             "title": title,
@@ -425,12 +462,15 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
             "surface": surface,
             "rooms": rooms,
             "bedrooms": bedrooms,
+            "bathrooms": bathrooms,
             "address": address,
             "city": city,
             "postalCode": postalCode,
             "photos": photos,
             "publishImmediately": publishImmediately
-        ])
+        ]
+        if let landSurface { payload["landSurface"] = landSurface }
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw AuthError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else {
@@ -473,19 +513,149 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         itemPrice: Double,
         category: String,
         subcategory: String,
+        listingType: String,
+        rentalUnit: String,
         itemCondition: String,
         city: String,
         postalCode: String,
-        photos: [String]
+        photos: [String],
+        attributes: [String: String]
     ) async throws {
         var payload: [String: Any] = [
             "action": "create_classified_ad", "role": "particulier",
             "itemName": itemName, "itemDescription": itemDescription, "itemPrice": itemPrice,
-            "category": category, "subcategory": subcategory, "itemCondition": itemCondition,
+            "category": category, "subcategory": subcategory, "adListingType": listingType, "itemCondition": itemCondition,
+            "rentalUnit": rentalUnit,
             "city": city, "postalCode": postalCode,
             "photos": photos,
+            "attributes": attributes,
         ]
         try await sendDashboardAction(payload, fallback: "Impossible de publier la petite annonce dans Wix.")
+    }
+
+    func reportClassifiedAd(
+        adID: String,
+        reason: String,
+        details: String,
+        clientReportKey: String
+    ) async throws -> String {
+        guard let member, member.loginEmailVerified != false else {
+            throw AuthError.api("Connectez-vous à votre compte PartenaireFoyer pour signaler une annonce.")
+        }
+        let adIdentifier = adID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard adIdentifier.range(of: "^[A-Za-z0-9_-]{1,200}$", options: .regularExpression) != nil else {
+            throw AuthError.api("Identifiant d’annonce invalide.")
+        }
+        let role = UserDefaults.standard.string(forKey: "partenairefoyer.activeRole") ?? ""
+        guard ["particulier", "professionnel", "courtier", "artisan", "diagnostiqueur", "prestataire"].contains(role) else {
+            throw AuthError.api("Ouvrez votre espace PartenaireFoyer pour confirmer votre profil avant le signalement.")
+        }
+        if dashboardData?["role"] as? String != role {
+            await loadDashboard(role: role)
+        }
+        guard let dashboard = dashboardData, dashboard["role"] as? String == role else {
+            throw AuthError.api(dashboardError ?? "Impossible de vérifier votre profil. Ouvrez votre espace puis réessayez.")
+        }
+        let profile = dashboard["profile"] as? [String: Any] ?? [:]
+        let account = dashboard["account"] as? [String: Any] ?? [:]
+        let reporterOwnerID: String
+        let reporterOwnerType: String
+        switch role {
+        case "particulier":
+            reporterOwnerID = (account["id"] as? String) ?? ""
+            reporterOwnerType = "private"
+        case "professionnel":
+            reporterOwnerID = (profile["_id"] as? String) ?? ""
+            reporterOwnerType = "professional"
+        case "artisan", "diagnostiqueur":
+            reporterOwnerID = (profile["_id"] as? String) ?? ""
+            reporterOwnerType = "artisan"
+        case "courtier":
+            reporterOwnerID = (profile["_id"] as? String) ?? ""
+            reporterOwnerType = "broker"
+        case "prestataire":
+            reporterOwnerID = (profile["_id"] as? String) ?? ""
+            reporterOwnerType = "service_provider"
+        default:
+            reporterOwnerID = ""
+            reporterOwnerType = ""
+        }
+        guard !reporterOwnerID.isEmpty else {
+            throw AuthError.api("Votre profil ne permet pas de confirmer votre identité pour ce signalement.")
+        }
+        let displayName = [
+            profile["firstName"] as? String,
+            profile["lastName"] as? String
+        ].compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }.joined(separator: " ")
+        let resolvedName = displayName.isEmpty
+            ? (profile["companyName"] as? String ?? profile["businessName"] as? String ?? profile["fullName"] as? String ?? member.firstName ?? "Membre PartenaireFoyer")
+            : displayName
+        let email = (profile["email"] as? String ?? profile["contactEmail"] as? String ?? member.loginEmail)
+            .trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let endpoint = URL(string: "https://www.partenairefoyer.com/api/classified-report")!
+        var request = URLRequest(url: endpoint, timeoutInterval: 35)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "adId": adIdentifier,
+            "reason": reason,
+            "details": String(details.prefix(2000)),
+            "reporterOwnerId": reporterOwnerID,
+            "reporterOwnerType": reporterOwnerType,
+            "reporterDisplayName": String(resolvedName.prefix(160)),
+            "reporterEmail": String(email.prefix(320)),
+            "clientReportKey": String(clientReportKey.prefix(160)),
+        ])
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw AuthError.invalidResponse }
+        let payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+        guard (200..<300).contains(http.statusCode), payload["success"] as? Bool == true else {
+            throw AuthError.api(payload["error"] as? String ?? "Impossible d’envoyer le signalement.")
+        }
+        return payload["message"] as? String ?? "Merci. Votre signalement a été transmis à l’administration."
+    }
+
+    func archiveListing(role: String, list: String, itemID: String) async {
+        errorMessage = nil
+        guard ["particulier", "professionnel"].contains(role),
+              ["properties", "classifieds"].contains(list),
+              role == "particulier" || list == "properties" else { return }
+        do {
+            try await sendDashboardAction([
+                "action": "archive_listing", "role": role, "list": list, "itemId": itemID,
+            ], fallback: "Impossible d’archiver cette annonce.")
+            if var dashboard = dashboardData, let items = dashboard[list] as? [[String: Any]] {
+                dashboard[list] = items.filter { ($0["_id"] as? String ?? $0["id"] as? String) != itemID }
+                dashboardData = dashboard
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func updateListing(role: String, list: String, itemID: String, fields: [String: Any]) async throws {
+        try await sendDashboardAction([
+            "action": "update_listing", "role": role, "list": list,
+            "itemId": itemID, "fields": fields,
+        ], fallback: "Impossible de modifier cette annonce.")
+    }
+
+    func updateRoleProfile(role: String, profileID: String, fields: [String: Any]) async throws {
+        guard !isSigningIn else { throw AuthError.api("Une opération est déjà en cours.") }
+        isSigningIn = true
+        errorMessage = nil
+        defer { isSigningIn = false }
+        do {
+            try await sendDashboardAction([
+                "action": "update_profile", "role": role,
+                "profileId": profileID, "fields": fields,
+            ], fallback: "Impossible de modifier votre profil.")
+        } catch {
+            errorMessage = error.localizedDescription
+            throw error
+        }
     }
 
     func uploadListingPhotos(_ photos: [Data], role: String) async throws -> [String] {
@@ -609,11 +779,74 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         }
     }
 
+    func claimDemand(demandID: String) async {
+        errorMessage = nil
+        let cleanID = demandID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanID.isEmpty else { return }
+        do {
+            try await sendDashboardAction([
+                "action": "claim_demand", "role": "professionnel", "demandId": cleanID,
+            ], fallback: "Impossible d’accepter cette demande.")
+            await loadDashboard(role: "professionnel")
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func hideHostBookingRequest(requestID: String) async {
+        errorMessage = nil
+        let cleanID = requestID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanID.isEmpty else { return }
+        do {
+            try await sendDashboardAction([
+                "action": "hide_booking_request", "role": "hebergeur", "requestId": cleanID,
+            ], fallback: "Impossible de masquer cette demande de réservation.")
+            if var dashboard = dashboardData, let requests = dashboard["bookingRequests"] as? [[String: Any]] {
+                dashboard["bookingRequests"] = requests.filter { ($0["_id"] as? String ?? $0["id"] as? String) != cleanID }
+                dashboardData = dashboard
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func markMinisiteRequestProcessed(requestID: String) async {
+        errorMessage = nil
+        let cleanID = requestID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanID.isEmpty else { return }
+        do {
+            try await sendDashboardAction([
+                "action": "mark_minisite_request_processed", "role": "professionnel", "requestId": cleanID,
+            ], fallback: "Impossible de mettre à jour cette demande mini-site.")
+            await loadDashboard(role: "professionnel")
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func deleteMinisiteRequest(requestID: String) async {
+        errorMessage = nil
+        let cleanID = requestID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanID.isEmpty else { return }
+        do {
+            try await sendDashboardAction([
+                "action": "delete_minisite_request", "role": "professionnel", "requestId": cleanID,
+            ], fallback: "Impossible de supprimer cette demande mini-site.")
+            if var dashboard = dashboardData, let requests = dashboard["minisiteRequests"] as? [[String: Any]] {
+                dashboard["minisiteRequests"] = requests.filter { ($0["_id"] as? String ?? $0["id"] as? String) != cleanID }
+                dashboardData = dashboard
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func registerPushDevice(role: String) async {
         // The host dashboard has no push owner type in the current notification
         // service. Do not register a token against an unrelated Wix profile.
-        guard ["particulier", "professionnel", "courtier", "artisan", "diagnostiqueur", "prestataire"].contains(role),
-              let fcmToken = UserDefaults.standard.string(forKey: "partenairefoyer.fcmRegistrationToken"),
+        guard ["particulier", "professionnel", "courtier", "artisan", "diagnostiqueur", "prestataire"].contains(role) else { return }
+        guard await AppDelegate.requestPushAuthorization() else { return }
+        guard let fcmToken = UserDefaults.standard.string(forKey: "partenairefoyer.fcmRegistrationToken"),
               !fcmToken.isEmpty else { return }
 
         let defaults = UserDefaults.standard
@@ -846,7 +1079,19 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         if let rooms { data["numberOfRooms"] = rooms }
         if let bedrooms { data["numberOfBedrooms"] = bedrooms }
         if let budget { data["budget"] = budget }
+        if let coordinate = await coordinates(city: city, postalCode: postalCode) {
+            data["latitude"] = coordinate.latitude
+            data["longitude"] = coordinate.longitude
+        }
 
+        let demandLatitude = data["latitude"] as? Double
+        let demandLongitude = data["longitude"] as? Double
+        let hasDirectMatch = try await hasDemandMatch(
+            postalCode: postalCode,
+            latitude: demandLatitude,
+            longitude: demandLongitude,
+            accessToken: visitor.accessToken
+        )
         let result = try await post(
             "https://www.wixapis.com/wix-data/v2/items",
             bearer: visitor.accessToken,
@@ -859,42 +1104,667 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         guard let id = result.dataItem?.id, !id.isEmpty else {
             throw AuthError.invalidResponse
         }
+
+        var estimationDemand: [String: Any] = [
+            "demandType": "estimation_bien",
+            "senderName": "\(firstName.trimmingCharacters(in: .whitespacesAndNewlines)) \(lastName.trimmingCharacters(in: .whitespacesAndNewlines))",
+            "senderEmail": email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+            "senderPhone": phone.trimmingCharacters(in: .whitespacesAndNewlines),
+            "city": city.trimmingCharacters(in: .whitespacesAndNewlines),
+            "postalCode": postalCode,
+            "department": String(postalCode.prefix(2)),
+            "hasDirectMatch": hasDirectMatch,
+            "propertyType": propertyType,
+            "description": "\(propertyCondition) · Occupation : \(occupancyStatus) · Délai : \(projectTimeline)",
+            "projectDescription": "Demande d’estimation"
+        ]
+        if let livingArea { estimationDemand["livingArea"] = livingArea }
+        if let landArea { estimationDemand["landArea"] = landArea }
+        if let rooms { estimationDemand["rooms"] = rooms }
+        if let bedrooms { estimationDemand["bedrooms"] = bedrooms }
+        if let budget { estimationDemand["budget"] = budget }
+        if let latitude = data["latitude"] { estimationDemand["latitude"] = latitude }
+        if let longitude = data["longitude"] { estimationDemand["longitude"] = longitude }
+        estimationDemand["department"] = departmentFromPostalCode(postalCode)
+
+        let demand = try await post(
+            "https://www.wixapis.com/wix-data/v2/items",
+            bearer: visitor.accessToken,
+            body: [
+                "dataCollectionId": "particuliersprives",
+                "dataItem": ["data": estimationDemand]
+            ],
+            as: WixInsertDataItemResponse.self
+        )
+        guard let demandID = demand.dataItem?.id, !demandID.isEmpty else { throw AuthError.invalidResponse }
+        await notifyPublicDemand(
+            demandType: "estimation_bien", postalCode: postalCode, email: email,
+            firstName: firstName, lastName: lastName, propertyType: propertyType,
+            budgetMin: nil, budgetMax: nil, latitude: demandLatitude, longitude: demandLongitude,
+            accessToken: visitor.accessToken
+        )
     }
 
-    func fetchPublicClassifiedAds() async throws -> [ClassifiedAd] {
+    func submitPublicDemand(_ fields: [String: Any], demandType: String, postalCode: String) async throws {
+        guard ["recherche_achat", "recherche_location", "mise_en_location"].contains(demandType),
+              postalCode.count == 5, postalCode.allSatisfy(\.isNumber) else {
+            throw AuthError.api("Vérifiez le type de demande et le code postal (5 chiffres).")
+        }
+        let visitor = try await requestToken(["clientId": clientID, "grantType": "anonymous"])
+        var entry = fields
+        entry["demandType"] = demandType
+        entry["postalCode"] = postalCode
+        entry["department"] = departmentFromPostalCode(postalCode)
+        if let city = entry["city"] as? String,
+           let coordinate = await coordinates(city: city, postalCode: postalCode) {
+            entry["latitude"] = coordinate.latitude
+            entry["longitude"] = coordinate.longitude
+        }
+        let hasDirectMatch = try await hasDemandMatch(
+            postalCode: postalCode,
+            latitude: entry["latitude"] as? Double,
+            longitude: entry["longitude"] as? Double,
+            accessToken: visitor.accessToken
+        )
+        entry["hasDirectMatch"] = hasDirectMatch
+        let created = try await post(
+            "https://www.wixapis.com/wix-data/v2/items",
+            bearer: visitor.accessToken,
+            body: ["dataCollectionId": "particuliersprives", "dataItem": ["data": entry]],
+            as: WixInsertDataItemResponse.self
+        )
+        guard let id = created.dataItem?.id, !id.isEmpty else { throw AuthError.invalidResponse }
+        await notifyPublicDemand(
+            demandType: demandType,
+            postalCode: postalCode,
+            email: (entry["email"] as? String) ?? (entry["senderEmail"] as? String) ?? "",
+            firstName: (entry["firstName"] as? String) ?? (entry["senderName"] as? String) ?? "",
+            lastName: (entry["lastName"] as? String) ?? "",
+            propertyType: (entry["propertyType"] as? String) ?? "",
+            budgetMin: entry["budgetMin"] as? Double,
+            budgetMax: entry["budgetMax"] as? Double,
+            latitude: entry["latitude"] as? Double,
+            longitude: entry["longitude"] as? Double,
+            accessToken: visitor.accessToken
+        )
+    }
+
+    func postalCommunes(postalCode: String) async -> [String] {
+        let communes = await loadPostalCommunes(postalCode: postalCode)
+        return communes.map(\.nom)
+    }
+
+    private func notifyPublicDemand(
+        demandType: String,
+        postalCode: String,
+        email: String,
+        firstName: String,
+        lastName: String,
+        propertyType: String,
+        budgetMin: Double?,
+        budgetMax: Double?,
+        latitude: Double?,
+        longitude: Double?,
+        accessToken: String
+    ) async {
+        let recipients = await matchingProfessionalEmails(
+            postalCode: postalCode, latitude: latitude, longitude: longitude, accessToken: accessToken
+        )
+        let cleanEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let budget: String
+        if let budgetMin, let budgetMax {
+            budget = "€\(Int(budgetMin)) - €\(Int(budgetMax))"
+        } else {
+            budget = "Not specified"
+        }
+        let params: [String: Any] = [
+            "buyerName": "\(firstName.trimmingCharacters(in: .whitespacesAndNewlines)) \(lastName.trimmingCharacters(in: .whitespacesAndNewlines))".trimmingCharacters(in: .whitespacesAndNewlines),
+            "postalCode": postalCode,
+            "propertyType": propertyType.isEmpty ? "Not specified" : propertyType,
+            "budget": budget,
+        ]
+        let endpoint = URL(string: "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/pf-brevo-email")
+        if let endpoint {
+            await withTaskGroup(of: Void.self) { group in
+                for recipient in recipients {
+                    group.addTask {
+                        var request = URLRequest(url: endpoint, timeoutInterval: 20)
+                        request.httpMethod = "POST"
+                        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+                            "to": [["email": recipient]],
+                            "sender": ["name": "PartenaireFoyer", "email": "contact@partenairefoyer.com"],
+                            "templateId": 7,
+                            "params": params,
+                        ])
+                        _ = try? await URLSession.shared.data(for: request)
+                    }
+                }
+            }
+        }
+
+        // Keep the website's notification hook. Its failure must not undo a
+        // successfully saved public request.
+        if let notifyURL = URL(string: "https://www.partenairefoyer.com/api/notify") {
+            var request = URLRequest(url: notifyURL, timeoutInterval: 12)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try? JSONSerialization.data(withJSONObject: [
+                "type": demandType,
+                "postalCode": postalCode,
+                "email": cleanEmail,
+            ])
+            URLSession.shared.dataTask(with: request).resume()
+        }
+    }
+
+    private func matchingProfessionalEmails(
+        postalCode: String,
+        latitude: Double?,
+        longitude: Double?,
+        accessToken: String
+    ) async -> [String] {
+        let targetPostal = postalCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let fields = ["email", "mainPostalCode", "secondaryPostalCodes", "maxRadiusKm", "latitude", "longitude"]
+        var offset = 0
+        var recipients = Set<String>()
+        while true {
+            guard let response = try? await post(
+                "https://www.wixapis.com/wix-data/v2/items/query",
+                bearer: accessToken,
+                body: ["dataCollectionId": "professionnels", "query": [
+                    "paging": ["limit": 100, "offset": offset], "fields": fields
+                ]],
+                as: WixRawDirectoryResponse.self
+            ) else { break }
+            for item in response.dataItems {
+                let data = item.data.mapValues(\.value)
+                let main = (importedString(data, ["mainPostalCode"]) ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                var matches = !main.isEmpty && main == targetPostal
+                let secondaryValue = data["secondaryPostalCodes"]
+                let secondaryCodes: [String]
+                if let values = secondaryValue as? [String] {
+                    secondaryCodes = values
+                } else if let values = secondaryValue as? [Any] {
+                    secondaryCodes = values.compactMap { $0 as? String }
+                } else if let text = secondaryValue as? String {
+                    if let jsonData = text.data(using: .utf8),
+                       let values = try? JSONSerialization.jsonObject(with: jsonData) as? [String] {
+                        secondaryCodes = values
+                    } else {
+                        secondaryCodes = text.split(whereSeparator: { $0 == "," || $0 == ";" || $0 == "|" }).map(String.init)
+                    }
+                } else {
+                    secondaryCodes = []
+                }
+                if secondaryCodes.contains(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == targetPostal }) {
+                    matches = true
+                }
+                if !matches, let latitude, let longitude,
+                   let proLatitude = data["latitude"] as? Double,
+                   let proLongitude = data["longitude"] as? Double,
+                   let radius = data["maxRadiusKm"] as? Double, radius > 0 {
+                    let professional = CLLocation(latitude: proLatitude, longitude: proLongitude)
+                    let demand = CLLocation(latitude: latitude, longitude: longitude)
+                    matches = professional.distance(from: demand) / 1000 <= radius
+                }
+                if matches, let email = data["email"] as? String {
+                    let clean = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                    if clean.contains("@") { recipients.insert(clean) }
+                }
+            }
+            guard response.dataItems.count == 100 else { break }
+            offset += response.dataItems.count
+        }
+        return recipients.sorted()
+    }
+
+    @discardableResult
+    func contactImportedProfessional(id: String, category: String, senderName: String, senderEmail: String, senderPhone: String, message: String, listingID: String? = nil, pageUrl: String? = nil) async throws -> Bool {
+        guard ["artisan", "diagnostiqueur", "immobilier"].contains(category), !id.isEmpty else {
+            throw AuthError.api("Cette fiche professionnelle ne peut pas recevoir de demande.")
+        }
+        let endpoint = URL(string: "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/pf-imported-professional-contact")!
+        var request = URLRequest(url: endpoint, timeoutInterval: 30)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let isRealEstate = category == "immobilier"
+        var body: [String: Any] = [
+            "sourceKind": isRealEstate ? "real_estate" : "local", "proId": id,
+            "senderName": senderName, "senderEmail": senderEmail,
+            "message": message
+        ]
+        if let listingID, !listingID.isEmpty { body["listingId"] = listingID }
+        if let pageUrl, !pageUrl.isEmpty {
+            body["pageUrl"] = pageUrl
+        } else if listingID == nil {
+            body["pageUrl"] = "https://www.partenairefoyer.com/professionnels"
+        }
+        if !isRealEstate { body["category"] = category }
+        if !senderPhone.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { body["senderPhone"] = senderPhone }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw AuthError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else {
+            let payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            throw AuthError.api(payload?["error"] as? String ?? "Impossible d’envoyer votre demande.")
+        }
+        let payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        return payload?["notificationSent"] as? Bool ?? true
+    }
+
+    func submitProfessionalMinisiteRequest(
+        professionalID: String,
+        professionalName: String,
+        professionalEmail: String?,
+        requestType: String,
+        firstName: String,
+        lastName: String,
+        email: String,
+        phone: String,
+        message: String,
+        propertyFields: [String: Any]
+    ) async throws -> Bool {
+        guard ["contact", "estimation", "proposition"].contains(requestType), !professionalID.isEmpty else {
+            throw AuthError.api("Cette fiche ne permet pas de recevoir cette demande.")
+        }
+        var data: [String: Any] = [
+            "professionalId": professionalID,
+            "requestType": requestType,
+            "firstName": firstName.trimmingCharacters(in: .whitespacesAndNewlines),
+            "lastName": lastName.trimmingCharacters(in: .whitespacesAndNewlines),
+            "email": email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+            "phoneNumber": phone.trimmingCharacters(in: .whitespacesAndNewlines),
+            "message": message.trimmingCharacters(in: .whitespacesAndNewlines),
+            "requestDate": ISO8601DateFormatter().string(from: Date()),
+            "status": "new"
+        ]
+        data.merge(propertyFields) { _, new in new }
+        let visitor = try await requestToken(["clientId": clientID, "grantType": "anonymous"])
+        let created = try await post(
+            "https://www.wixapis.com/wix-data/v2/items",
+            bearer: visitor.accessToken,
+            body: ["dataCollectionId": "demandesminisite", "dataItem": ["data": data]],
+            as: WixInsertDataItemResponse.self
+        )
+        guard let id = created.dataItem?.id, !id.isEmpty else { throw AuthError.invalidResponse }
+
+        // Match the Wix site's sequence: CMS write first, then push and direct email.
+        if let notifyURL = URL(string: "https://www.partenairefoyer.com/api/minisite-push-notify") {
+            var notify = URLRequest(url: notifyURL, timeoutInterval: 13)
+            notify.httpMethod = "POST"
+            notify.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            notify.httpBody = try? JSONSerialization.data(withJSONObject: ["requestId": id])
+            URLSession.shared.dataTask(with: notify).resume()
+        }
+
+        guard let recipient = professionalEmail?.trimmingCharacters(in: .whitespacesAndNewlines),
+              recipient.contains("@"), !recipient.isEmpty,
+              let emailURL = URL(string: "https://www.partenairefoyer.com/api/sendMinisiteEmail") else { return false }
+        let typeLabel = requestType == "contact" ? "Contact" : requestType == "estimation" ? "Estimation" : "Proposition"
+        let safe = [professionalName, firstName, lastName, email, phone, message]
+            .map { $0.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: ">", with: "&gt;") }
+        let html = "<h2>Nouvelle demande de \(typeLabel)</h2><p>Bonjour \(safe[0]),</p><p>Demande de \(safe[1]) \(safe[2])</p><p>E-mail : \(safe[3])<br>Téléphone : \(safe[4])</p><p>\(safe[5].replacingOccurrences(of: "\n", with: "<br>"))</p>"
+        var emailRequest = URLRequest(url: emailURL, timeoutInterval: 20)
+        emailRequest.httpMethod = "POST"
+        emailRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        emailRequest.httpBody = try JSONSerialization.data(withJSONObject: [
+            "toEmail": recipient,
+            "subject": "Nouvelle demande de \(typeLabel) - \(safe[1]) \(safe[2])",
+            "htmlContent": html
+        ])
+        do {
+            let (_, emailResponse) = try await URLSession.shared.data(for: emailRequest)
+            guard let http = emailResponse as? HTTPURLResponse else { return false }
+            return (200..<300).contains(http.statusCode)
+        } catch {
+            return false
+        }
+    }
+
+    func submitProfessionalPropertyContactRequest(
+        listingID: String,
+        propertyTitle: String,
+        recipientEmail: String,
+        recipientName: String,
+        firstName: String,
+        lastName: String,
+        email: String,
+        phone: String,
+        message: String,
+        requestID: String
+    ) async throws -> Bool {
+        let cleanID = listingID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let cleanTitle = propertyTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard cleanID.range(of: "^[A-Za-z0-9_-]{1,160}$", options: .regularExpression) != nil,
+              recipientEmail.contains("@"), cleanEmail.contains("@"), cleanMessage.count >= 5 else {
+            throw AuthError.api("Vérifiez le bien, votre e-mail et votre message.")
+        }
+
+        func htmlEscaped(_ value: String) -> String {
+            value.replacingOccurrences(of: "&", with: "&amp;")
+                .replacingOccurrences(of: "<", with: "&lt;")
+                .replacingOccurrences(of: ">", with: "&gt;")
+                .replacingOccurrences(of: "\"", with: "&quot;")
+                .replacingOccurrences(of: "'", with: "&#39;")
+        }
+
+        let propertyURL = "https://www.partenairefoyer.com/annonce/\(cleanID)"
+        let emailURL = URL(string: "https://www.partenairefoyer.com/api/send-contact-email")!
+        var emailRequest = URLRequest(url: emailURL, timeoutInterval: 25)
+        emailRequest.httpMethod = "POST"
+        emailRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        emailRequest.setValue("application/json", forHTTPHeaderField: "Accept")
+        emailRequest.httpBody = try JSONSerialization.data(withJSONObject: [
+            "recipientEmail": recipientEmail.trimmingCharacters(in: .whitespacesAndNewlines),
+            "recipientName": htmlEscaped(recipientName),
+            "propertyTitle": htmlEscaped(cleanTitle),
+            "propertyUrl": propertyURL,
+            "senderName": htmlEscaped("\(firstName.trimmingCharacters(in: .whitespacesAndNewlines)) \(lastName.trimmingCharacters(in: .whitespacesAndNewlines))"),
+            "senderEmail": htmlEscaped(cleanEmail),
+            "senderPhone": htmlEscaped(phone.trimmingCharacters(in: .whitespacesAndNewlines)),
+            "message": htmlEscaped(cleanMessage),
+        ])
+        let (emailData, emailResponse) = try await URLSession.shared.data(for: emailRequest)
+        guard let emailHTTP = emailResponse as? HTTPURLResponse else { throw AuthError.invalidResponse }
+        guard (200..<300).contains(emailHTTP.statusCode) else {
+            let payload = (try? JSONSerialization.jsonObject(with: emailData)) as? [String: Any]
+            throw AuthError.api(payload?["error"] as? String ?? "Le message n’a pas pu être envoyé.")
+        }
+
+        return await archiveProfessionalPropertyContactRequest(
+            listingID: cleanID,
+            firstName: firstName,
+            lastName: lastName,
+            email: cleanEmail,
+            phone: phone,
+            message: cleanMessage,
+            requestID: requestID
+        )
+    }
+
+    func archiveProfessionalPropertyContactRequest(
+        listingID: String,
+        firstName: String,
+        lastName: String,
+        email: String,
+        phone: String,
+        message: String,
+        requestID: String
+    ) async -> Bool {
+        let cleanID = listingID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let cleanMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard cleanID.range(of: "^[A-Za-z0-9_-]{1,160}$", options: .regularExpression) != nil,
+              cleanEmail.contains("@"), cleanMessage.count >= 5,
+              !requestID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+
+        // Wix's existing public endpoint resolves the real professional owner,
+        // writes the private propertycontactrequests record, and sends its push.
+        let archiveURL = URL(string: "https://www.partenairefoyer.com/api/property-contact-requests")!
+        var archiveRequest = URLRequest(url: archiveURL, timeoutInterval: 25)
+        archiveRequest.httpMethod = "POST"
+        archiveRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        archiveRequest.setValue("application/json", forHTTPHeaderField: "Accept")
+        archiveRequest.httpBody = try JSONSerialization.data(withJSONObject: [
+            "action": "create",
+            "requestId": requestID,
+            "propertyId": cleanID,
+            "sourceCollection": "biensprofessionnels",
+            "senderName": "\(firstName.trimmingCharacters(in: .whitespacesAndNewlines)) \(lastName.trimmingCharacters(in: .whitespacesAndNewlines))",
+            "senderEmail": cleanEmail,
+            "senderPhone": phone.trimmingCharacters(in: .whitespacesAndNewlines),
+            "message": cleanMessage,
+        ])
+        do {
+            let (archiveData, archiveResponse) = try await URLSession.shared.data(for: archiveRequest)
+            guard let archiveHTTP = archiveResponse as? HTTPURLResponse else { return false }
+            if (200..<300).contains(archiveHTTP.statusCode) {
+                let payload = (try? JSONSerialization.jsonObject(with: archiveData)) as? [String: Any]
+                return payload?["success"] as? Bool == true
+            }
+            return false
+        } catch {
+            // The e-mail may already have been delivered; an archive failure
+            // must not prompt the user to send it again.
+            return false
+        }
+    }
+
+    private func hasDemandMatch(postalCode: String, latitude: Double?, longitude: Double?, accessToken: String) async throws -> Bool {
+        let targetPostal = postalCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let targetDepartment = departmentFromPostalCode(targetPostal)
+        let fields = ["mainPostalCode", "postalCode", "secondaryPostalCodes", "maxRadiusKm", "latitude", "longitude"]
+        for collection in ["professionnels"] {
+            var offset = 0
+            while true {
+                let response = try await post(
+                    "https://www.wixapis.com/wix-data/v2/items/query",
+                    bearer: accessToken,
+                    body: ["dataCollectionId": collection, "query": [
+                        "paging": ["limit": 100, "offset": offset], "fields": fields
+                    ]],
+                    as: WixRawDirectoryResponse.self
+                )
+                let page = response.dataItems
+                for item in page {
+                    let data = item.data.mapValues(\.value)
+                    let main = (importedString(data, ["mainPostalCode", "postalCode"]) ?? "").uppercased()
+                    if !main.isEmpty && main == targetPostal { return true }
+                    let secondaryValue = data["secondaryPostalCodes"]
+                    let secondaryCodes: [String]
+                    if let values = secondaryValue as? [String] {
+                        secondaryCodes = values
+                    } else if let values = secondaryValue as? [Any] {
+                        secondaryCodes = values.compactMap { $0 as? String }
+                    } else if let text = secondaryValue as? String {
+                        if let jsonData = text.data(using: .utf8),
+                           let values = try? JSONSerialization.jsonObject(with: jsonData) as? [String] {
+                            secondaryCodes = values
+                        } else {
+                            secondaryCodes = text.split(whereSeparator: { $0 == "," || $0 == ";" || $0 == "|" }).map(String.init)
+                        }
+                    } else {
+                        secondaryCodes = []
+                    }
+                    let normalizedSecondaryCodes = secondaryCodes
+                        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }
+                    if normalizedSecondaryCodes.contains(targetPostal) { return true }
+
+                    if let latitude, let longitude,
+                       let proLatitude = data["latitude"] as? Double,
+                       let proLongitude = data["longitude"] as? Double {
+                        let proLocation = CLLocation(latitude: proLatitude, longitude: proLongitude)
+                        let demandLocation = CLLocation(latitude: latitude, longitude: longitude)
+                        let radius = (data["maxRadiusKm"] as? Double) ?? 20
+                        if radius > 0 && proLocation.distance(from: demandLocation) / 1000 <= radius { return true }
+                    }
+
+                    let professionalDepartment = departmentFromPostalCode(main)
+                    if !professionalDepartment.isEmpty && professionalDepartment == targetDepartment { return true }
+                }
+                guard page.count == 100 else { break }
+                offset += page.count
+            }
+        }
+        return false
+    }
+
+    private func departmentFromPostalCode(_ postalCode: String) -> String {
+        let value = postalCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if value.hasPrefix("2A") || value.hasPrefix("2B") { return String(value.prefix(2)) }
+        return String(value.prefix(2))
+    }
+
+    func coordinates(city: String, postalCode: String) async -> CLLocationCoordinate2D? {
+        let communes = await loadPostalCommunes(postalCode: postalCode)
+        guard !communes.isEmpty else { return nil }
+
+        let normalizedCity = city.trimmingCharacters(in: .whitespacesAndNewlines)
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "fr_FR"))
+        let selected = communes.first { commune in
+            commune.nom.trimmingCharacters(in: .whitespacesAndNewlines)
+                .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "fr_FR")) == normalizedCity
+        } ?? (communes.count == 1 ? communes[0] : nil)
+        guard let coordinates = selected?.centre?.coordinates,
+              coordinates.count >= 2 else { return nil }
+        let coordinate = CLLocationCoordinate2D(latitude: coordinates[1], longitude: coordinates[0])
+        return CLLocationCoordinate2DIsValid(coordinate) ? coordinate : nil
+    }
+
+    private func loadPostalCommunes(postalCode: String) async -> [PostalCommune] {
+        guard postalCode.count == 5,
+              postalCode.allSatisfy(\.isNumber),
+              var components = URLComponents(string: "https://geo.api.gouv.fr/communes") else { return [] }
+        components.queryItems = [
+            URLQueryItem(name: "codePostal", value: postalCode),
+            URLQueryItem(name: "fields", value: "nom,centre"),
+            URLQueryItem(name: "format", value: "json"),
+        ]
+        guard let url = components.url,
+              let (data, response) = try? await URLSession.shared.data(from: url),
+              let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode),
+              let communes = try? JSONDecoder().decode([PostalCommune].self, from: data) else { return [] }
+        return communes.filter { !$0.nom.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
+
+    func fetchPublicClassifiedAds() async throws -> (ads: [ClassifiedAd], warningMessage: String?) {
         let visitor = try await requestToken([
             "clientId": clientID,
             "grantType": "anonymous"
         ])
         let fields = [
             "itemName", "itemDescription", "itemPrice", "category", "subcategory",
-            "itemCondition", "city", "postalCode", "status", "itemImage",
+            "itemCondition", "adListingType", "attributesJSON", "slug", "city", "postalCode", "status", "itemImage", "isImported",
             "photo2", "photo3", "photo4", "photo5", "photo6", "photo7", "photo8",
             "photo9", "photo10", "photo11", "photo12", "photo13", "photo14",
             "photo15", "photo16", "photo17", "photo18", "photo19", "photo20"
         ]
         var offset = 0
         var ads: [ClassifiedAd] = []
+        var warnings: [String] = []
         let pageSize = 100
-        for _ in 0..<20 {
-            let response = try await post(
-                "https://www.wixapis.com/wix-data/v2/items/query",
-                bearer: visitor.accessToken,
-                body: [
-                    "dataCollectionId": "classifiedads-1",
-                    "query": [
-                        "filter": ["status": ["$eq": "published"]],
-                        "paging": ["limit": pageSize, "offset": offset],
-                        "fields": fields
-                    ]
-                ],
-                as: WixPublicClassifiedAdsResponse.self
-            )
-            ads.append(contentsOf: response.dataItems.compactMap { $0.data.classifiedAd(id: $0.id) })
-            guard response.dataItems.count == pageSize else { break }
-            offset += pageSize
+        do {
+            while true {
+                let response = try await post(
+                    "https://www.wixapis.com/wix-data/v2/items/query",
+                    bearer: visitor.accessToken,
+                    body: [
+                        "dataCollectionId": "classifiedads-1",
+                        "query": [
+                            "filter": ["status": ["$in": ["published", "active"]]],
+                            "paging": ["limit": pageSize, "offset": offset],
+                            "fields": fields
+                        ]
+                    ],
+                    as: WixPublicClassifiedAdsResponse.self
+                )
+                ads.append(contentsOf: response.dataItems.compactMap { $0.data.classifiedAd(id: $0.id) })
+                guard response.dataItems.count == pageSize else { break }
+                let nextOffset = offset + response.dataItems.count
+                guard nextOffset > offset else { break }
+                offset = nextOffset
+            }
+        } catch {
+            warnings.append("Les petites annonces PartenaireFoyer n’ont pas pu être chargées.")
         }
-        return ads
+        do {
+            ads.append(contentsOf: try await fetchImportedVehicleClassifiedAds())
+        } catch {
+            warnings.append("Les annonces de véhicules importées ne sont pas disponibles pour le moment.")
+        }
+        var seen = Set<String>()
+        return (ads.filter { seen.insert($0.id).inserted }, warnings.isEmpty ? nil : warnings.joined(separator: " "))
+    }
+
+    private func fetchImportedVehicleClassifiedAds() async throws -> [ClassifiedAd] {
+        let endpoint = URL(string: "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/pf-imported-vehicle-listings-public")!
+        let pageSize = 500
+        var offset = 0
+        var results: [ClassifiedAd] = []
+        var seen = Set<String>()
+        while true {
+            var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)!
+            components.queryItems = [
+                URLQueryItem(name: "limit", value: String(pageSize)),
+                URLQueryItem(name: "offset", value: String(offset))
+            ]
+            var request = URLRequest(url: components.url!, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+                  let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  payload["success"] as? Bool == true,
+                  let items = payload["items"] as? [[String: Any]] else {
+                throw URLError(.badServerResponse)
+            }
+
+            for item in items {
+                guard let rawID = importedString(item, ["id"]),
+                      rawID.range(of: "^[a-zA-Z0-9-]{1,200}$", options: .regularExpression) != nil,
+                      let title = importedString(item, ["title"]),
+                      let sourceValue = importedString(item, ["sourceUrl"]),
+                      let source = URL(string: sourceValue),
+                      ["https", "http"].contains(source.scheme?.lowercased() ?? ""),
+                      source.user == nil, source.password == nil,
+                      seen.insert(rawID).inserted else { continue }
+                var attributes = item["attributes"] as? [String: Any] ?? [:]
+                for key in ["brand", "model", "year", "mileage", "energy", "gearbox", "bodyType", "engineCapacity", "fiscalPower", "powerHp", "doors", "seats", "color", "externalReference", "partType", "partReference", "oemReference", "compatibleMake", "compatibleModel", "compatibleYearFrom", "compatibleYearTo", "engineCode", "dimensions"] {
+                    if let value = item[key], !(value is NSNull), String(describing: value).isEmpty == false { attributes[key] = value }
+                }
+                let noDescriptionConsent = attributes["noRepublishingConsent"] as? Bool == true
+                let description = noDescriptionConsent
+                    ? "Annonce externe. Prix et disponibilité à confirmer sur le site du vendeur."
+                    : importedString(item, ["description"])
+                let sourceKind = importedString(item, ["sourceKind"]) ?? ""
+                let itemType = (importedString(item, ["itemType"]) ?? "").lowercased()
+                let subcategory = sourceKind == "part" ? (itemType.contains("moto") ? "Pièces moto" : "Pièces auto")
+                    : sourceKind == "accessory" ? "Autres accessoires auto / moto"
+                    : itemType.range(of: "moto|motorcycle", options: .regularExpression) != nil ? "Motos"
+                    : itemType.contains("scooter") ? "Scooters"
+                    : itemType.range(of: "utilitaire|van|lcv", options: .regularExpression) != nil ? "Utilitaires"
+                    : itemType.contains("quad") ? "Quads" : "Voitures"
+                attributes["pfImportedVehicleListing"] = true
+                attributes["importedProfessionalVehicle"] = true
+                attributes["importedVehicleId"] = rawID
+                attributes["sourceUrl"] = source.absoluteString
+                attributes["externalProfessionalName"] = importedString(item, ["providerName"]) ?? "Vendeur externe"
+                attributes["providerProfileId"] = importedString(item, ["providerProfileId"]) ?? ""
+                attributes["providerSlug"] = importedString(item, ["providerSlug"]) ?? ""
+                attributes["originalListingRequired"] = true
+                let attributesData = try? JSONSerialization.data(withJSONObject: attributes, options: [.sortedKeys])
+                let attributesJSON = attributesData.flatMap { String(data: $0, encoding: .utf8) }
+                let city = importedString(item, ["city"])
+                let postalCode = importedString(item, ["postalCode", "postal_code"])
+                let price = (item["price"] as? NSNumber)?.doubleValue
+                results.append(ClassifiedAd(
+                    id: "imported-vehicle-\(rawID)",
+                    title: title,
+                    description: description,
+                    price: price,
+                    category: "Auto / Moto — accessoires",
+                    subcategory: subcategory,
+                    condition: nil,
+                    city: city,
+                    postalCode: postalCode,
+                    images: [],
+                    externalURL: source,
+                    isImported: true,
+                    importedAttributesJSON: attributesJSON,
+                    importedProviderName: importedString(item, ["providerName"]) ?? "Vendeur externe",
+                    listingType: "sell"
+                ))
+            }
+
+            guard let total = payload["total"] as? Int else { break }
+            offset += items.count
+            if offset >= total || items.isEmpty || offset >= 10000 { break }
+        }
+        return results
     }
 
     func fetchPublicPrivateListings() async throws -> [Listing] {
@@ -908,15 +1778,14 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         var properties: [WixPublicPropertyItem] = []
         let fields = [
             "title", "description", "city", "postalCode", "sellingPrice", "estimatedPrice",
-            "surface", "rooms", "bedrooms", "propertyType", "transactionType", "mainImage", "isPublic", "status",
+            "surface", "landSurface", "rooms", "bedrooms", "bathrooms", "propertyType", "transactionType", "mainImage", "isPublic", "status",
+            "createdAt",
             "galleryImages", "photo1", "photo2", "photo3", "photo4", "photo5", "photo6",
             "photo7", "photo8", "photo9", "photo10", "photo11", "photo12", "photo13",
             "photo14", "photo15", "photo16", "photo17", "photo18", "photo19", "photo20"
         ]
 
-        // Offset paging is capped at 2,000 public records per refresh to bound
-        // network and memory use on the device.
-        for _ in 0..<20 {
+        while true {
             let response = try await post(
                 "https://www.wixapis.com/wix-data/v2/items/query",
                 bearer: visitor.accessToken,
@@ -935,7 +1804,9 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
             )
             properties.append(contentsOf: response.dataItems)
             guard response.dataItems.count == pageSize else { break }
-            offset += pageSize
+            let nextOffset = offset + response.dataItems.count
+            guard nextOffset > offset else { break }
+            offset = nextOffset
         }
 
         return properties
@@ -943,13 +1814,46 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
             .map(\.listing)
     }
 
-    func fetchPublicProfessionals() async throws -> [WixPublicProfessional] {
+    func fetchPublicProfessionals() async throws -> ProfessionalDirectoryResult {
         let visitor = try await requestToken([
             "clientId": clientID,
             "grantType": "anonymous"
         ])
         let records = try await fetchVisibleProfessionalRecords(accessToken: visitor.accessToken)
-        return records.map { $0.data.professional(id: $0.id) }
+        let registered = records.map { $0.data.professional(id: $0.id) }
+        var warnings: [String] = []
+        let registeredLocalPros: [WixPublicProfessional]
+        do {
+            registeredLocalPros = try await fetchRegisteredLocalProsProfiles(accessToken: visitor.accessToken)
+        } catch {
+            registeredLocalPros = []
+            warnings.append("les fiches locales inscrites")
+        }
+        let localImported: [WixPublicProfessional]
+        do {
+            localImported = try await fetchImportedLocalProfessionals()
+        } catch {
+            localImported = []
+            warnings.append("les artisans et diagnostiqueurs importés")
+        }
+        let realEstateImported: [WixPublicProfessional]
+        do {
+            realEstateImported = try await fetchImportedRealEstateProfessionals()
+        } catch {
+            realEstateImported = []
+            warnings.append("les professionnels immobiliers importés")
+        }
+        let allRegistered = registered + registeredLocalPros
+        var seen = Set(allRegistered.map { normalizedProfessionalKey($0.resolvedName, $0.postalCode) })
+        let registeredContacts = Set(allRegistered.flatMap { [$0.professionalEmail, $0.publicPhone] }.compactMap { $0 }.map(normalizedContactKey))
+        let imported = localImported + realEstateImported
+        let professionals = allRegistered + imported.filter {
+            let contacts = [$0.dedupeEmail, $0.dedupePhone].compactMap { $0 }.map(normalizedContactKey)
+            return contacts.allSatisfy { !registeredContacts.contains($0) } &&
+                seen.insert(normalizedProfessionalKey($0.resolvedName, $0.postalCode)).inserted
+        }
+        let warning = warnings.isEmpty ? nil : "Annuaire partiellement chargé : " + warnings.joined(separator: ", ") + ". Réessayez pour actualiser les fiches manquantes."
+        return ProfessionalDirectoryResult(professionals: professionals, warning: warning)
     }
 
     func fetchPublicProfessionalListings() async throws -> [Listing] {
@@ -964,9 +1868,10 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         let pageSize = 100
         var listings: [Listing] = []
         let fields = [
-            "title", "description", "city", "postalCode", "price", "surface", "surfaceHouse",
+            "professionalId", "title", "description", "city", "postalCode", "price", "surface", "surfaceHouse",
             "surfaceLand", "landSurface", "rooms", "bedrooms", "bathrooms", "propertyType",
-            "transactionType", "mainImageUrl", "galleryImages", "commercialStatus", "slug", "status"
+            "transactionType", "mainImageUrl", "galleryImages", "photo1", "photo2", "photo3",
+            "photo4", "photo5", "createdAt", "updatedAt", "commercialStatus", "slug", "status"
         ]
 
         // Listings are connected to Wix Members through `wixMemberId`, while
@@ -976,7 +1881,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
             let end = min(start + 100, professionalIDs.count)
             let batch = Array(professionalIDs[start..<end])
             var offset = 0
-            for _ in 0..<20 {
+            while true {
                 let response = try await post(
                     "https://www.wixapis.com/wix-data/v2/items/query",
                     bearer: visitor.accessToken,
@@ -996,10 +1901,193 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
                 let activeItems = response.dataItems.filter { $0.data.status == "active" }
                 listings.append(contentsOf: activeItems.map { $0.data.listing(id: $0.id) })
                 guard response.dataItems.count == pageSize else { break }
-                offset += pageSize
+                let nextOffset = offset + response.dataItems.count
+                guard nextOffset > offset else { break }
+                offset = nextOffset
             }
         }
         return listings
+    }
+
+    private func fetchImportedLocalProfessionals() async throws -> [WixPublicProfessional] {
+        let endpoint = URL(string: "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/pf-imported-local-pros-public")!
+        var results: [WixPublicProfessional] = []
+        let pageSize = 250
+
+        for category in ["artisan", "diagnostiqueur"] {
+            var offset = 0
+            while true {
+                var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)!
+                components.queryItems = [
+                    URLQueryItem(name: "category", value: category),
+                    URLQueryItem(name: "limit", value: String(pageSize)),
+                    URLQueryItem(name: "offset", value: String(offset))
+                ]
+                var request = URLRequest(url: components.url!, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
+                request.setValue("application/json", forHTTPHeaderField: "Accept")
+                let (data, response) = try await URLSession.shared.data(for: request)
+                guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+                      let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let items = payload["items"] as? [[String: Any]] else {
+                    throw URLError(.badServerResponse)
+                }
+
+                results.append(contentsOf: items.compactMap { item in
+                    guard (item["claimed"] as? Bool) != true,
+                          let rawID = importedString(item, ["id", "_id"]), !rawID.isEmpty else { return nil }
+                    let firstName = importedString(item, ["first_name", "firstName"])
+                    let lastName = importedString(item, ["last_name", "lastName"])
+                    let company = importedString(item, ["company_name", "companyName", "display_name", "displayName"])
+                    let name = company ?? [firstName, lastName].compactMap { $0 }.joined(separator: " ")
+                    guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+                    let activity = importedString(item, ["activity_label", "activityLabel", "subcategory", "category"])
+                    return WixPublicProfessional(
+                        id: "imported-local-\(rawID)",
+                        companyName: name,
+                        firstName: firstName,
+                        lastName: lastName,
+                        network: "Professionnel importé",
+                        city: importedString(item, ["city"]),
+                        postalCode: importedString(item, ["postal_code", "postalCode"]),
+                        businessSector: activity,
+                        description: activity,
+                        logo: importedString(item, ["photo_url", "photoUrl"]),
+                        website: importedString(item, ["website"]),
+                        importedID: rawID,
+                        importedCategory: category,
+                        dedupeEmail: importedString(item, ["email"]),
+                        dedupePhone: importedString(item, ["phone"])
+                    )
+                })
+
+                guard items.count == pageSize else { break }
+                let nextOffset = offset + items.count
+                guard nextOffset > offset else { break }
+                offset = nextOffset
+                if let total = payload["total"] as? Int, offset >= total { break }
+            }
+        }
+        return results
+    }
+
+    private func fetchImportedRealEstateProfessionals() async throws -> [WixPublicProfessional] {
+        let endpoint = URL(string: "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/pf-imported-real-estate-pros-public")!
+        var offset = 0
+        let pageSize = 250
+        var results: [WixPublicProfessional] = []
+        while true {
+            var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)!
+            components.queryItems = [
+                URLQueryItem(name: "limit", value: String(pageSize)),
+                URLQueryItem(name: "offset", value: String(offset))
+            ]
+            var request = URLRequest(url: components.url!, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+                  let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  payload["success"] as? Bool != false,
+                  let items = payload["items"] as? [[String: Any]],
+                  let total = payload["total"] as? Int else { throw URLError(.badServerResponse) }
+            results.append(contentsOf: items.compactMap { item in
+                guard (item["claimed"] as? Bool) != true,
+                      let id = importedString(item, ["id"]), !id.isEmpty else { return nil }
+                let first = importedString(item, ["firstName", "first_name"])
+                let last = importedString(item, ["lastName", "last_name"])
+                let name = importedString(item, ["displayName", "display_name", "companyName", "company_name"])
+                    ?? [first, last].compactMap { $0 }.joined(separator: " ")
+                guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+                let network = importedString(item, ["networkName", "network_name", "professionalType", "professional_type"])
+                return WixPublicProfessional(
+                    id: "imported-\(id)", companyName: importedString(item, ["companyName", "company_name"]) ?? name,
+                    firstName: first, lastName: last, network: network ?? "Professionnel immobilier importé",
+                    city: importedString(item, ["city"]),
+                    postalCode: importedString(item, ["postalCode", "postal_code"]),
+                    businessSector: network ?? "Immobilier", description: nil,
+                    logo: importedString(item, ["photoUrl", "photo_url"]),
+                    website: importedString(item, ["website"]), importedID: id, importedCategory: "immobilier",
+                    dedupeEmail: importedString(item, ["email"]), dedupePhone: importedString(item, ["phone"])
+                )
+            })
+            guard !items.isEmpty else { break }
+            let nextOffset = offset + items.count
+            guard nextOffset > offset else { break }
+            offset = nextOffset
+            if offset >= total || items.count < pageSize { break }
+        }
+        return results
+    }
+
+    private func importedString(_ item: [String: Any], _ keys: [String]) -> String? {
+        for key in keys {
+            if let value = item[key] as? String {
+                let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { return trimmed }
+            }
+        }
+        return nil
+    }
+
+    private func normalizedProfessionalKey(_ name: String, _ postalCode: String?) -> String {
+        let normalizedName = name.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .filter { $0.isLetter || $0.isNumber }
+        let normalizedPostalCode = (postalCode ?? "").filter { $0.isNumber }
+        return "\(normalizedName)|\(normalizedPostalCode)"
+    }
+
+    private func normalizedContactKey(_ value: String) -> String {
+        let email = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if email.contains("@") { return "email:\(email)" }
+        let phone = value.filter(\.isNumber)
+        return phone.count >= 10 ? "phone:\(phone.hasPrefix("33") ? "0" + String(phone.dropFirst(2)) : phone)" : ""
+    }
+
+    private func fetchRegisteredLocalProsProfiles(accessToken: String) async throws -> [WixPublicProfessional] {
+        let endpoint = "https://www.wixapis.com/wix-data/v2/items/query"
+        let fields = ["companyName", "contactName", "email", "phoneNumber", "city", "postalCode", "category", "categories", "description", "photo", "logo", "website", "professionalType", "isRGE", "isActive", "isVisiblePublicly", "isProfileComplete", "hasActiveSubscription", "subscriptionStatus"]
+        var offset = 0
+        var results: [WixPublicProfessional] = []
+        let pageSize = 100
+        while true {
+            let response = try await post(
+                endpoint,
+                bearer: accessToken,
+                body: ["dataCollectionId": "prosprofiles", "query": [
+                    "filter": ["isActive": ["$eq": true], "isVisiblePublicly": ["$eq": true]],
+                    "paging": ["limit": pageSize, "offset": offset], "fields": fields
+                ]],
+                as: WixRawDirectoryResponse.self
+            )
+            let now = Date()
+            let freeAccessEnd = ISO8601DateFormatter().date(from: "2026-12-31T23:59:59Z")!
+            results.append(contentsOf: response.dataItems.compactMap { item in
+                let data = item.data.mapValues(\.value)
+                guard data["isActive"] as? Bool == true,
+                      data["isVisiblePublicly"] as? Bool == true,
+                      let company = importedString(data, ["companyName"]), !company.isEmpty,
+                      let contactName = importedString(data, ["contactName"]), !contactName.isEmpty,
+                      let email = importedString(data, ["email"]), email.contains("@"),
+                      let phone = importedString(data, ["phoneNumber"]), phone.filter(\.isNumber).count >= 8 else { return nil }
+                if now >= freeAccessEnd {
+                    let status = importedString(data, ["subscriptionStatus"])?.lowercased()
+                    guard data["hasActiveSubscription"] as? Bool == true || status == "active" || status == "trialing" else { return nil }
+                }
+                let activity = importedString(data, ["category", "professionalType"]) ?? "Professionnel"
+                return WixPublicProfessional(
+                    id: "prosprofile-\(item.id)", cmsProfileID: item.id, companyName: company, firstName: contactName,
+                    lastName: nil, network: activity, city: importedString(data, ["city"]),
+                    postalCode: importedString(data, ["postalCode"]), businessSector: activity,
+                    description: importedString(data, ["description"]),
+                    logo: importedString(data, ["logo", "photo"]), website: importedString(data, ["website"]),
+                    professionalEmail: email, publicPhone: phone, isLocalProsProfile: true
+                )
+            })
+            guard response.dataItems.count == pageSize else { break }
+            let nextOffset = offset + response.dataItems.count
+            guard nextOffset > offset else { break }
+            offset = nextOffset
+        }
+        return results
     }
 
     private func fetchVisibleProfessionalRecords(accessToken: String) async throws -> [WixPublicProfessionalItem] {
@@ -1008,10 +2096,10 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         var records: [WixPublicProfessionalItem] = []
         let fields = [
             "companyName", "firstName", "lastName", "network", "city", "postalCode",
-            "businessSector", "description", "photo", "website", "memberId", "isActive", "isVisibleInDirectory"
+            "businessSector", "description", "photo", "website", "email", "phone", "memberId", "isActive", "isVisibleInDirectory"
         ]
 
-        for _ in 0..<20 {
+        while true {
             let response = try await post(
                 "https://www.wixapis.com/wix-data/v2/items/query",
                 bearer: accessToken,
@@ -1032,7 +2120,9 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
                 $0.data.isVisibleInDirectory == true && $0.data.isActive == true
             })
             guard response.dataItems.count == pageSize else { break }
-            offset += pageSize
+            let nextOffset = offset + response.dataItems.count
+            guard nextOffset > offset else { break }
+            offset = nextOffset
         }
         return records
     }

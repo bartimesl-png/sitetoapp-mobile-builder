@@ -4,6 +4,16 @@ const CORS = {
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 };
 const WIX = "https://www.wixapis.com";
+const ALLOWED_CLASSIFIED_ATTRIBUTES = new Set([
+  "brand", "model", "year", "mileage", "energy", "gearbox", "bodyType", "engineCapacity",
+  "fiscalPower", "powerHp", "doors", "seats", "color", "size", "material", "dimensions",
+  "capacity", "partType", "partReference", "oemReference", "compatibleMake", "compatibleModel",
+  "compatibleYearFrom", "compatibleYearTo", "engineCode",
+]);
+const isAllowedClassifiedAttribute = (key: string) => ALLOWED_CLASSIFIED_ATTRIBUTES.has(key) || (
+  /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(key) &&
+  !/^(?:_?id|ownerId|accountId|memberId|professionalId|hostId|rentalUnit|createdAt|updatedAt|status|isPublic|isActive|slug|attributesJSON|catalogVersion|classifiedOwner.*|pf.*|imported.*|source.*|stripe.*|payment.*|order.*|purchase.*)$/i.test(key)
+);
 
 type WixItem = { id?: string; data?: Record<string, unknown>; [key: string]: unknown };
 
@@ -49,9 +59,109 @@ async function query(
   return (result.dataItems ?? []).map(unwrap);
 }
 
+// Wix's v2 CMS query uses offset paging. Match the source site's getAllCmsItems
+// behavior here so the native demand board does not silently stop at page 1.
+async function queryAll(
+  collection: string,
+  filter: Record<string, unknown>,
+  fields: string[],
+  token: string,
+): Promise<Record<string, unknown>[]> {
+  const all: Record<string, unknown>[] = [];
+  const limit = 100;
+  let offset = 0;
+  while (true) {
+    const result = await wixRequest<{
+      dataItems?: WixItem[];
+      pagingMetadata?: { count?: number; offset?: number; total?: number };
+    }>("/wix-data/v2/items/query", token, {
+      method: "POST",
+      body: JSON.stringify({
+        dataCollectionId: collection,
+        query: { filter, paging: { limit, offset }, ...(fields.length ? { fields } : {}) },
+      }),
+    });
+    const page = (result.dataItems ?? []).map(unwrap);
+    all.push(...page);
+    if (page.length < limit) break;
+    const nextOffset = Number(result.pagingMetadata?.offset ?? offset) + page.length;
+    if (!Number.isFinite(nextOffset) || nextOffset <= offset) break;
+    offset = nextOffset;
+  }
+  return all;
+}
+
+const privateDemandFieldNames = new Set([
+  "name", "firstname", "lastname", "fullname", "displayname", "contactname", "requestername", "sendername",
+  "hiddenbyprofessionals", "claimid",
+]);
+const privateDemandFieldPattern = /(email|phone|telephone|mobile|contact|requester|sender|address|owner|accountid|memberid|profileid|professionalid|proid)/i;
+
+function withoutDemandContact(item: Record<string, unknown>): Record<string, unknown> {
+  const stripPrivateFields = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(stripPrivateFields);
+    if (!value || typeof value !== "object") return value;
+    const safe: Record<string, unknown> = {};
+    for (const [key, fieldValue] of Object.entries(value as Record<string, unknown>)) {
+      const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (privateDemandFieldNames.has(normalized) || privateDemandFieldPattern.test(normalized)) continue;
+      safe[key] = stripPrivateFields(fieldValue);
+    }
+    return safe;
+  };
+  return stripPrivateFields(item) as Record<string, unknown>;
+}
+
 const first = (items: Record<string, unknown>[]) => items[0] ?? null;
 const emailFilter = (email: string) => ({ email: { $eq: email } });
 const listingPhotoBucket = "pf-ios-listing-photos";
+
+function departmentFromPostal(value: unknown): string {
+  const postal = String(value ?? "").trim().toUpperCase();
+  if (postal.startsWith("2A") || postal.startsWith("2B")) return postal.slice(0, 2);
+  if (postal.startsWith("20")) return "2A";
+  return /^\d{2}/.exec(postal)?.[0] ?? "";
+}
+
+function distanceKm(aLat: unknown, aLon: unknown, bLat: unknown, bLon: unknown): number | null {
+  const values = [aLat, aLon, bLat, bLon].map(Number);
+  if (values.some((value) => !Number.isFinite(value))) return null;
+  const [lat1, lon1, lat2, lon2] = values.map((value) => value * Math.PI / 180);
+  const dLat = lat2 - lat1;
+  const dLon = lon2 - lon1;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+
+function classifyDemand(demand: Record<string, unknown>, profile: Record<string, unknown>): string {
+  const postal = String(demand.postalCode ?? "").trim();
+  const main = String(profile.mainPostalCode ?? profile.postalCode ?? "").trim();
+  const secondaryValue = profile.secondaryPostalCodes ?? profile.coveredPostalCodes;
+  const secondary = Array.isArray(secondaryValue)
+    ? secondaryValue.map((item) => String(item).trim()).filter(Boolean)
+    : String(secondaryValue ?? "").split(/[,;|]/).map((item) => item.trim()).filter(Boolean);
+  if (main && postal === main) return "direct";
+  const distance = distanceKm(profile.latitude, profile.longitude, demand.latitude, demand.longitude);
+  const radius = Number(profile.maxRadiusKm) || 20;
+  if (distance !== null && distance <= radius) return "nearby";
+  if (postal && secondary.includes(postal)) return "secondary";
+  const demandDepartment = departmentFromPostal(demand.department ?? postal);
+  const professionalDepartments = new Set(
+    [profile.department, profile.departmentCode, main, ...secondary]
+      .map(departmentFromPostal)
+      .filter(Boolean),
+  );
+  if (demandDepartment && professionalDepartments.has(demandDepartment)) return "department";
+  return "other";
+}
+
+function newestFirst(items: Record<string, unknown>[]): Record<string, unknown>[] {
+  return items.sort((a, b) => {
+    const dateA = new Date(String(a.requestDate ?? a.claimedAt ?? a._createdDate ?? a.createdAt ?? 0)).getTime() || 0;
+    const dateB = new Date(String(b.requestDate ?? b.claimedAt ?? b._createdDate ?? b.createdAt ?? 0)).getTime() || 0;
+    return dateB - dateA;
+  });
+}
 
 function getSupabaseSecretKey(): string {
   try {
@@ -69,6 +179,42 @@ function ownedListingPhotos(value: unknown, role: string, memberID: string, proj
   return photos.every((photo) => photo.startsWith(base) && photo.length <= 2048) ? photos : null;
 }
 
+function galleryPhotoURLs(value: unknown): string[] {
+  let parsed = value;
+  if (typeof parsed === "string") {
+    try { parsed = JSON.parse(parsed) as unknown; } catch { return []; }
+  }
+  if (!Array.isArray(parsed)) return [];
+  return parsed.map((entry) => {
+    if (typeof entry === "string") return entry;
+    if (entry && typeof entry === "object") {
+      const photo = entry as Record<string, unknown>;
+      return typeof photo.url === "string" ? photo.url : typeof photo.src === "string" ? photo.src : "";
+    }
+    return "";
+  }).filter(Boolean);
+}
+
+function listingPhotoURLs(item: Record<string, unknown>, list: string, role: string): string[] {
+  const directKeys = list === "classifieds"
+    ? ["itemImage", ...Array.from({ length: 19 }, (_, index) => `photo${index + 2}`)]
+    : role === "professionnel"
+      ? ["mainImageUrl", ...Array.from({ length: 5 }, (_, index) => `photo${index + 1}`)]
+      : ["mainImage", ...Array.from({ length: 20 }, (_, index) => `photo${index + 1}`)];
+  const values = directKeys.map((key) => item[key]).filter((value): value is string => typeof value === "string" && value.length > 0);
+  values.push(...galleryPhotoURLs(item.galleryImages));
+  return [...new Set(values)];
+}
+
+function profileCategoryEntries(value: unknown): Record<string, unknown>[] {
+  let parsed = value;
+  if (typeof parsed === "string") {
+    try { parsed = JSON.parse(parsed) as unknown; } catch { return []; }
+  }
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object" && !Array.isArray(entry));
+}
+
 async function loadDashboard(role: string, email: string, memberID: string, token: string) {
   if (role === "particulier") {
     const account = first(await query("privateaccounts", emailFilter(email), ["email", "accountType", "isActive"], token, 2));
@@ -76,42 +222,91 @@ async function loadDashboard(role: string, email: string, memberID: string, toke
     const accountId = String(account._id ?? "");
     const [profiles, properties, classifieds, favorites, savedSearches, buyerMatchings] = await Promise.all([
       query("privateprofiles", { ownerId: { $eq: accountId } }, ["ownerId", "firstName", "lastName", "email", "phone", "city", "postalCode", "isProfileComplete"], token, 2),
-      query("privateproperties", { ownerId: { $eq: accountId } }, ["ownerId", "title", "description", "propertyType", "transactionType", "sellingPrice", "estimatedPrice", "surface", "landSurface", "rooms", "bedrooms", "bathrooms", "city", "postalCode", "mainImage", "photo1", "photo2", "photo3", "photo4", "photo5", "photo6", "photo7", "photo8", "galleryImages", "isPublic", "status", "createdAt", "slug"], token),
+      query("privateproperties", { ownerId: { $eq: accountId } }, ["ownerId", "title", "description", "propertyType", "transactionType", "sellingPrice", "estimatedPrice", "surface", "landSurface", "rooms", "bedrooms", "bathrooms", "city", "postalCode", "mainImage", "photo1", "photo2", "photo3", "photo4", "photo5", "photo6", "photo7", "photo8", "photo9", "photo10", "photo11", "photo12", "photo13", "photo14", "photo15", "photo16", "photo17", "photo18", "photo19", "photo20", "galleryImages", "isPublic", "status", "createdAt", "slug"], token),
       query("classifiedads-1", { ownerId: { $eq: accountId } }, [
         "ownerId", "itemName", "itemPrice", "itemDescription", "itemImage",
         "photo2", "photo3", "photo4", "photo5", "photo6", "photo7", "photo8", "photo9", "photo10",
         "photo11", "photo12", "photo13", "photo14", "photo15", "photo16", "photo17", "photo18", "photo19", "photo20",
-        "category", "subcategory", "itemCondition", "city", "postalCode", "status", "createdAt",
+        "category", "subcategory", "adListingType", "itemCondition", "attributesJSON", "city", "postalCode", "status", "createdAt",
       ], token),
       query("favoritelistings", { accountId: { $eq: accountId } }, ["accountId", "listingId", "sourceCollection", "createdAt", "isArchived"], token),
-      query("particularbuyersearches", { accountId: { $eq: accountId }, isActive: { $eq: true } }, ["accountId", "searchName", "transactionType", "propertyTypes", "city", "postalCode", "radius", "minBudget", "maxBudget", "minSurface", "maxSurface", "minRooms", "minBedrooms", "emailAlertsEnabled", "createdAt", "updatedAt"], token),
-      query("particularsearchmatchings", { buyerAccountId: { $eq: accountId } }, ["buyerAccountId", "searchId", "propertyId", "propertyTitle", "propertyCity", "propertyPrice", "propertySurface", "propertyUrl", "professionalId", "professionalName", "professionalEmail", "professionalPhone", "matchingScore", "status", "emailSentToBuyer", "createdAt", "notifiedAt"], token),
+      query("particularbuyersearches", { accountId: { $eq: accountId } }, ["accountId", "searchName", "transactionType", "propertyTypes", "city", "postalCode", "latitude", "longitude", "radius", "minBudget", "maxBudget", "minSurface", "maxSurface", "minLandSurface", "maxLandSurface", "minRooms", "minBedrooms", "minBathrooms", "singleStory", "garage", "garden", "terrace", "pool", "parking", "emailAlertsEnabled", "isActive", "createdAt", "updatedAt"], token),
+      query("particularsearchmatchings", { buyerAccountId: { $eq: accountId } }, ["buyerAccountId", "searchId", "propertyId", "propertyTitle", "propertyCity", "propertyPostalCode", "propertyPrice", "propertySurface", "propertyType", "transactionType", "propertyUrl", "propertyImage", "professionalId", "professionalMemberId", "professionalName", "professionalFirstName", "professionalEmail", "professionalPhone", "professionalCity", "professionalNetwork", "professionalPhoto", "professionalSlug", "matchingScore", "status", "dismissedByParticulier", "emailSentToBuyer", "emailSentToProfessional", "createdAt", "notifiedAt"], token),
     ]);
-    return { role, account: { id: accountId }, profile: first(profiles), properties, classifieds, favorites, savedSearches, buyerMatchings };
+    return {
+      role, account: { id: accountId }, profile: first(profiles),
+      properties: properties.filter((item) => item.status !== "archived"),
+      classifieds: classifieds.filter((item) => item.status !== "archived"),
+      favorites, savedSearches, buyerMatchings: buyerMatchings.filter((item) => item.dismissedByParticulier !== true),
+    };
   }
 
   if (role === "professionnel") {
     const account = first(await query("prosaccounts", emailFilter(email), ["email", "isActive", "cguAccepted", "cgvAccepted"], token, 2));
     if (!account || account.isActive === false) return null;
     const accountId = String(account._id ?? "");
-    const profile = first(await query("prosprofiles", { accountId: { $eq: accountId } }, ["accountId", "companyName", "contactName", "phoneNumber", "email", "city", "postalCode", "professionalType", "category", "categories", "description", "logo", "photo", "website", "slug", "isActive", "isVisiblePublicly", "hasActiveSubscription", "subscriptionStatus", "subscriptionStartDate", "subscriptionEndDate"], token, 2));
+    const profile = first(await query("prosprofiles", { accountId: { $eq: accountId } }, ["accountId", "companyName", "contactName", "phoneNumber", "email", "city", "postalCode", "mainPostalCode", "secondaryPostalCodes", "maxRadiusKm", "latitude", "longitude", "professionalType", "category", "categories", "description", "logo", "photo", "website", "slug", "isActive", "isVisiblePublicly", "hasActiveSubscription", "subscriptionStatus", "subscriptionStartDate", "subscriptionEndDate"], token, 2));
     const accountSummary = {
       id: accountId,
       cguAccepted: account.cguAccepted === true,
       cgvAccepted: account.cgvAccepted === true,
     };
     if (!profile) return { role, account: accountSummary, profile: null, properties: [], matchings: [], messages: [] };
-    const professionalId = String(profile._id ?? "");
-    const [properties, matchings, demands, messages] = await Promise.all([
+    // The Wix demand system still keys matching rows to the legacy
+    // `professionnels` profile. Native sign-in also creates `prosprofiles`, so
+    // prefer the legacy identity whenever it exists and fall back otherwise.
+    const legacyProfessional = first(await query("professionnels", { memberId: { $eq: memberID } }, [
+      "memberId", "mainPostalCode", "postalCode", "secondaryPostalCodes", "maxRadiusKm", "latitude", "longitude",
+    ], token, 2));
+    const matchingProfile = legacyProfessional ?? profile;
+    const professionalId = String(matchingProfile._id ?? profile._id ?? "");
+    const [properties, matchings, allClaims, allDemands, hiddenDemands, minisiteRequests, estimationRequests, propertyRequests, messages] = await Promise.all([
       // Public Wix listings are linked to the Wix member identity, not the
       // separate prosprofiles item ID. Using professionalId here returned an
       // empty property list for otherwise active professional accounts.
-      query("biensprofessionnels", { wixMemberId: { $eq: memberID } }, ["wixMemberId", "professionalId", "title", "description", "propertyType", "transactionType", "price", "surface", "surfaceLand", "landSurface", "rooms", "bedrooms", "bathrooms", "city", "postalCode", "mainImageUrl", "galleryImages", "status", "commercialStatus", "updatedAt"], token),
+      query("biensprofessionnels", { wixMemberId: { $eq: memberID } }, ["wixMemberId", "professionalId", "title", "description", "propertyType", "transactionType", "price", "surface", "surfaceLand", "landSurface", "rooms", "bedrooms", "bathrooms", "address", "city", "postalCode", "mainImageUrl", "photo1", "photo2", "photo3", "photo4", "photo5", "galleryImages", "status", "commercialStatus", "updatedAt"], token),
       query("matchings", { professionalId: { $eq: professionalId } }, ["professionalId", "propertyId", "acquereurId", "matchingScore", "matchingType", "status", "seen", "createdAt"], token),
-      query("demandespromatchings", { proId: { $eq: professionalId } }, ["proId", "demandId", "demandType", "postalCode", "status", "seen", "isViewed", "createdAt"], token),
+      queryAll("demandespromatchings", {}, [], token),
+      queryAll("particuliersprives", {}, [], token),
+      queryAll("prohiddendemands", { proId: { $eq: professionalId } }, ["proId", "demandId"], token),
+      queryAll("demandesminisite", { professionalId: { $eq: professionalId } }, [], token),
+      queryAll("demandesestimation", { professionalId: { $eq: professionalId } }, [], token),
+      queryAll("propertycontactrequests", { professionalId: { $eq: professionalId } }, [], token),
       query("messages", { receiverId: { $eq: professionalId } }, ["conversationId", "senderId", "receiverId", "content", "createdAt", "isRead", "readAt"], token),
     ]);
-    return { role, account: accountSummary, profile, properties, matchings, demands, messages };
+    const ownClaims = allClaims.filter((item) => String(item.proId ?? "") === professionalId);
+    const ownClaimIds = new Set(ownClaims.map((item) => String(item.demandId ?? "")));
+    const claimsByDemand = new Map<string, Record<string, unknown>[]>();
+    for (const claim of allClaims) {
+      const demandId = String(claim.demandId ?? "");
+      if (!demandId) continue;
+      claimsByDemand.set(demandId, [...(claimsByDemand.get(demandId) ?? []), claim]);
+    }
+    const demandById = new Map(allDemands.map((item) => [String(item._id ?? ""), item]));
+    const acceptedDemands = ownClaims.flatMap((claim) => {
+      const demand = demandById.get(String(claim.demandId ?? ""));
+      return demand ? [{ ...demand, ...claim, matchingId: claim._id, claimCount: claimsByDemand.get(String(claim.demandId))?.length ?? 1 }] : [];
+    });
+    const hiddenIDs = new Set(hiddenDemands.map((item) => String(item.demandId ?? "")));
+    const availableDemands = allDemands.flatMap((demand) => {
+      const demandId = String(demand._id ?? "");
+      const claims = claimsByDemand.get(demandId) ?? [];
+      const hiddenBy = String(demand.hiddenByProfessionals ?? "").split(",").map((id) => id.trim());
+      if (!demandId || ownClaimIds.has(demandId) || hiddenIDs.has(demandId) || hiddenBy.includes(professionalId) || claims.length >= 3) return [];
+      const matchType = classifyDemand(demand, matchingProfile);
+      // Wix's ProDemandesPage loads and classifies every visible demand. Keep
+      // the same pool in native; postal-code, radius, secondary-code and
+      // department matches describe priority rather than restricting access.
+      const safeDemand = withoutDemandContact(demand);
+      return [{ ...safeDemand, claimCount: claims.length, matchType }];
+    });
+    return {
+      role, account: accountSummary, profile, matchingProfile,
+      properties: properties.filter((item) => item.status !== "archived"), matchings,
+      demands: newestFirst(acceptedDemands), availableDemands: newestFirst(availableDemands),
+      minisiteRequests: newestFirst(minisiteRequests), estimationRequests: newestFirst(estimationRequests),
+      propertyRequests: newestFirst(propertyRequests), messages,
+    };
   }
 
   if (role === "courtier") {
@@ -123,10 +318,54 @@ async function loadDashboard(role: string, email: string, memberID: string, toke
     return { role, account: { id: accountId, cguAccepted: account.cguAccepted === true, cgvAccepted: account.cgvAccepted === true }, profile, messages };
   }
 
-  if (role === "prestataire" || role === "artisan" || role === "diagnostiqueur") {
-    // Native registration uses the current suffixed collections for all service
-    // provider roles. Keep the legacy collection as a read-only fallback for
-    // existing Wix prestataire accounts.
+  if (role === "artisan" || role === "diagnostiqueur") {
+    const account = first(await query("prosaccounts", emailFilter(email), ["email", "isActive", "cguAccepted", "cgvAccepted"], token, 2));
+    if (!account || account.isActive === false) return null;
+    const accountId = String(account._id ?? "");
+    const profiles = await query("prosprofiles", { accountId: { $eq: accountId } }, [
+      "accountId", "professionalType", "companyName", "contactName", "phoneNumber", "email", "city",
+      "postalCode", "mainPostalCode", "secondaryPostalCodes", "maxRadiusKm", "latitude", "longitude",
+      "category", "categories", "description", "logo", "photo", "website", "slug", "isActive",
+      "isVisiblePublicly", "isProfileComplete", "hasActiveSubscription", "subscriptionStatus",
+      "subscriptionStartDate", "subscriptionEndDate", "profileViews", "contactRequestsCount",
+    ], token, 10);
+    const profile = profiles.find((item) => {
+      const type = String(item.professionalType ?? "").toLowerCase();
+      const category = String(item.category ?? "").toLowerCase();
+      const categories = String(item.categories ?? "").toLowerCase();
+      return role === "artisan"
+        ? (type.includes("artisan") || category.includes("artisan") || categories.includes("artisan")) && !categories.includes("diagnostiqueur")
+        : type.includes("diagnostiqueur") || category.includes("diagnostiqueur") || categories.includes("diagnostiqueur");
+    }) ?? null;
+    if (!profile || profile.isActive === false) return null;
+    const profileId = String(profile._id ?? "");
+    const [messages, subscriptions] = await Promise.all([
+      query("artisanmessages", { artisanId: { $eq: profileId } }, [
+        "artisanId", "senderName", "senderEmail", "senderPhone", "messageContent", "createdAt", "isRead",
+      ], token),
+      query("subscriptions", emailFilter(email), [
+        "email", "professionalType", "professionalId", "subscriptionStatus", "accessEnabled", "trialActive",
+        "subscriptionStartDate", "subscriptionEndDate", "freeAccessUntil", "billingPlan", "cancel_at_period_end",
+      ], token, 100),
+    ]);
+    const subscription = subscriptions.find((item) => {
+      const type = String(item.professionalType ?? "").toLowerCase();
+      const ownerId = String(item.professionalId ?? "");
+      return ownerId === profileId || (role === "artisan"
+        ? type.includes("artisan") && !type.includes("diagnost")
+        : type.includes("diagnost"));
+    }) ?? null;
+    return {
+      role,
+      account: { id: accountId, cguAccepted: account.cguAccepted === true, cgvAccepted: account.cgvAccepted === true },
+      profile,
+      messages,
+      subscription,
+    };
+  }
+
+  if (role === "prestataire") {
+    // Prestataires keep their separate Wix service-provider account collections.
     const accountFields = ["email", "isActive", "firstName", "lastName"];
     let account = first(await query("serviceprovideraccounts-1", emailFilter(email), accountFields, token, 2));
     if (!account) {
@@ -136,11 +375,7 @@ async function loadDashboard(role: string, email: string, memberID: string, toke
     const accountId = String(account._id ?? "");
     const providers = await query("serviceproviders-1", { accountId: { $eq: accountId } }, ["accountId", "businessName", "category", "subcategory", "description", "services", "city", "postalCode", "phone", "email", "website", "photoUrls", "status", "verified"], token, 3);
     const activity = (entry: Record<string, unknown>) => `${String(entry.category ?? "")} ${String(entry.subcategory ?? "")}`;
-    const profile = providers.find((entry) => role === "artisan"
-      ? /artisan/i.test(activity(entry)) && !/diagnostiqueur/i.test(activity(entry))
-      : role === "diagnostiqueur"
-        ? /diagnostiqueur/i.test(activity(entry))
-        : !/artisan|diagnostiqueur/i.test(activity(entry))) ?? null;
+    const profile = providers.find((entry) => !/artisan|diagnostiqueur/i.test(activity(entry))) ?? null;
     const messages = profile ? await query("artisanmessages", { artisanId: { $eq: String(profile._id ?? "") } }, ["artisanId", "senderName", "senderEmail", "messageContent", "createdAt", "isRead"], token) : [];
     return { role, account: { id: accountId }, profile, messages };
   }
@@ -272,6 +507,238 @@ Deno.serve(async (req: Request) => {
       return response({ error: "Le compte Wix n’est pas vérifié." }, 403);
     }
     if (req.method === "POST") {
+      if (body.action === "update_profile") {
+        const profileId = String(body.profileId ?? "").trim();
+        const fields = body.fields;
+        if (!/^[A-Za-z0-9_-]{1,160}$/.test(profileId) || !fields || typeof fields !== "object" || Array.isArray(fields)) {
+          return response({ error: "Profil invalide." }, 400);
+        }
+        const dashboard = await loadDashboard(role, email, result.member.id, token);
+        const profile = dashboard?.profile as Record<string, unknown> | null | undefined;
+        if (!profile || String(profile._id ?? profile.id ?? "") !== profileId) {
+          return response({ error: "Ce profil n’est pas associé à votre espace." }, 404);
+        }
+        const source = fields as Record<string, unknown>;
+        const readText = (key: string, max = 500): string | null => {
+          const value = source[key];
+          if (typeof value !== "string") return null;
+          return value.trim().slice(0, max);
+        };
+        const textValue = (key: string, max = 500, target = key): [string, unknown] | null => {
+          const value = readText(key, max);
+          return value === null ? null : [target, value];
+        };
+        const data: Record<string, unknown> = {};
+        let collection = "";
+        if (role === "particulier") {
+          collection = "privateprofiles";
+          for (const [key, max] of [["firstName", 80], ["lastName", 80], ["phone", 40], ["city", 100], ["postalCode", 10]] as const) {
+            const entry = textValue(key, max);
+            if (entry) data[entry[0]] = entry[1];
+          }
+          if (data.firstName !== undefined && String(data.firstName).length < 2) return response({ error: "Le prénom doit contenir au moins 2 caractères." }, 400);
+          if (data.lastName !== undefined && String(data.lastName).length < 2) return response({ error: "Le nom doit contenir au moins 2 caractères." }, 400);
+        } else if (role === "professionnel") {
+          collection = "prosprofiles";
+          for (const [key, max, target] of [["companyName", 140, "companyName"], ["contactName", 140, "contactName"], ["phone", 40, "phoneNumber"], ["city", 100, "city"], ["postalCode", 10, "postalCode"], ["category", 100, "category"], ["description", 8000, "description"], ["website", 500, "website"]] as const) {
+            const entry = textValue(key, max, target);
+            if (entry) data[entry[0]] = entry[1];
+          }
+          const type = readText("professionalType", 40);
+          if (type !== null) data.professionalType = type;
+          const visible = source.isVisiblePublicly;
+          if (typeof visible === "boolean") data.isVisiblePublicly = visible;
+          if (data.companyName !== undefined && String(data.companyName).length < 2) return response({ error: "Le nom de la société doit contenir au moins 2 caractères." }, 400);
+          if (data.category !== undefined && String(data.category).length < 2) return response({ error: "Le métier doit contenir au moins 2 caractères." }, 400);
+          if (data.category !== undefined) {
+            const existingCategories = profileCategoryEntries(profile.categories);
+            const requestedSubcategory = readText("subcategory", 100);
+            if (existingCategories.length > 0) {
+              const currentSubcategories = existingCategories[0].subCategories ?? existingCategories[0].subcategories;
+              const subcategories = requestedSubcategory
+                ? [requestedSubcategory]
+                : Array.isArray(currentSubcategories) ? currentSubcategories : [];
+              existingCategories[0] = { ...existingCategories[0], mainCategory: data.category, subCategories: subcategories };
+              data.categories = JSON.stringify(existingCategories);
+            } else {
+              data.categories = JSON.stringify([{ mainCategory: data.category, subCategories: [requestedSubcategory].filter(Boolean) }]);
+            }
+          }
+          if (data.city !== undefined && String(data.city).length < 2) return response({ error: "La ville doit contenir au moins 2 caractères." }, 400);
+          if (data.postalCode !== undefined && !/^\d{4,10}$/.test(String(data.postalCode))) return response({ error: "Le code postal doit contenir entre 4 et 10 chiffres." }, 400);
+        } else if (role === "courtier") {
+          collection = "brokerprofiles";
+          for (const [key, max, target] of [["contactName", 140, "fullName"], ["professionalTitle", 100, "professionalTitle"], ["phone", 40, "phoneNumber"], ["city", 100, "city"], ["website", 500, "websiteUrl"], ["description", 8000, "bio"]] as const) {
+            const entry = textValue(key, max, target);
+            if (entry) data[entry[0]] = entry[1];
+          }
+          const years = readText("yearsOfExperience", 3);
+          if (years !== null && years !== "") {
+            const number = Number(years);
+            if (!Number.isInteger(number) || number < 0 || number > 80) return response({ error: "Le nombre d’années d’expérience est invalide." }, 400);
+            data.yearsOfExperience = number;
+          }
+        } else if (role === "artisan" || role === "diagnostiqueur") {
+          collection = "prosprofiles";
+          for (const [key, max, target] of [["companyName", 140, "companyName"], ["contactName", 140, "contactName"], ["phone", 40, "phoneNumber"], ["city", 100, "city"], ["postalCode", 10, "postalCode"], ["description", 8000, "description"], ["website", 500, "website"]] as const) {
+            const entry = textValue(key, max, target);
+            if (entry) data[entry[0]] = entry[1];
+          }
+          const subcategory = readText("subcategory", 100);
+          const expectedCategory = role === "artisan" ? "Artisan" : "Diagnostiqueur";
+          data.category = expectedCategory;
+          data.mainPostalCode = data.postalCode ?? profile.mainPostalCode ?? "";
+          if (subcategory !== null) data.categories = JSON.stringify([{ mainCategory: expectedCategory, subCategories: subcategory ? [subcategory] : [] }]);
+          if (data.companyName !== undefined && String(data.companyName).length < 2) return response({ error: "Le nom de l’entreprise doit contenir au moins 2 caractères." }, 400);
+          if (subcategory !== null && subcategory.length < 2) return response({ error: "La spécialité doit contenir au moins 2 caractères." }, 400);
+          if (data.city !== undefined && String(data.city).length < 2) return response({ error: "La ville doit contenir au moins 2 caractères." }, 400);
+          if (data.postalCode !== undefined && !/^\d{4,10}$/.test(String(data.postalCode))) return response({ error: "Le code postal doit contenir entre 4 et 10 chiffres." }, 400);
+        } else if (role === "prestataire") {
+          collection = "serviceproviders-1";
+          for (const [key, max, target] of [["companyName", 140, "businessName"], ["category", 100, "category"], ["subcategory", 100, "subcategory"], ["description", 8000, "description"], ["city", 100, "city"], ["postalCode", 10, "postalCode"], ["phone", 40, "phone"], ["website", 500, "website"]] as const) {
+            const entry = textValue(key, max, target);
+            if (entry) data[entry[0]] = entry[1];
+          }
+          if (data.businessName !== undefined && String(data.businessName).length < 2) return response({ error: "Le nom de l’entreprise doit contenir au moins 2 caractères." }, 400);
+          if (data.category !== undefined && String(data.category).length < 2) return response({ error: "L’activité doit contenir au moins 2 caractères." }, 400);
+          if (data.city !== undefined && String(data.city).length < 2) return response({ error: "La ville doit contenir au moins 2 caractères." }, 400);
+          if (data.postalCode !== undefined && !/^\d{4,10}$/.test(String(data.postalCode))) return response({ error: "Le code postal doit contenir entre 4 et 10 chiffres." }, 400);
+        } else if (role === "hebergeur") {
+          collection = "seasonalhostprofiles";
+          for (const [key, max, target] of [["companyName", 140, "fullName"], ["phone", 40, "phoneNumber"], ["description", 8000, "biography"]] as const) {
+            const entry = textValue(key, max, target);
+            if (entry) data[entry[0]] = entry[1];
+          }
+          if (data.fullName !== undefined && String(data.fullName).length < 2) return response({ error: "Le nom de l’hébergement doit contenir au moins 2 caractères." }, 400);
+        }
+        if (!collection || Object.keys(data).length === 0) return response({ error: "Aucune modification autorisée à enregistrer." }, 400);
+        const fieldModifications = Object.entries(data).map(([fieldPath, value]) => ({
+          fieldPath, action: "SET_FIELD", setFieldOptions: { value },
+        }));
+        await wixRequest(`/wix-data/v2/items/${encodeURIComponent(profileId)}`, token, {
+          method: "PATCH",
+          body: JSON.stringify({ dataCollectionId: collection, patch: { dataItemId: profileId, fieldModifications } }),
+        });
+        return response({ success: true, role, profileId });
+      }
+      if (body.action === "claim_demand") {
+        if (role !== "professionnel") return response({ error: "Cette action est réservée à l’espace professionnel." }, 403);
+        const demandId = String(body.demandId ?? "").trim();
+        if (!/^[A-Za-z0-9_-]{1,160}$/.test(demandId)) return response({ error: "Demande invalide." }, 400);
+        const account = first(await query("prosaccounts", emailFilter(email), ["email", "isActive"], token, 2));
+        if (!account || account.isActive === false) return response({ error: "Aucun compte professionnel actif n’est associé à cette adresse." }, 403);
+        const accountId = String(account._id ?? "");
+        const nativeProfile = first(await query("prosprofiles", { accountId: { $eq: accountId } }, [
+          "accountId", "isActive", "mainPostalCode", "postalCode", "secondaryPostalCodes", "maxRadiusKm", "latitude", "longitude",
+        ], token, 2));
+        if (!nativeProfile || nativeProfile.isActive === false) return response({ error: "Aucune fiche professionnelle active n’a été trouvée." }, 403);
+        const legacyProfile = first(await query("professionnels", { memberId: { $eq: result.member.id } }, [
+          "memberId", "mainPostalCode", "postalCode", "secondaryPostalCodes", "maxRadiusKm", "latitude", "longitude",
+        ], token, 2));
+        const professionalId = String(legacyProfile?._id ?? nativeProfile._id ?? "");
+        if (!professionalId) return response({ error: "Votre profil professionnel est incomplet." }, 403);
+
+        const demand = first(await query("particuliersprives", { _id: { $eq: demandId } }, [], token, 2));
+        if (!demand) return response({ error: "Cette demande n’est plus disponible." }, 404);
+        const hidden = first(await query("prohiddendemands", {
+          proId: { $eq: professionalId }, demandId: { $eq: demandId },
+        }, ["proId", "demandId"], token, 2));
+        const hiddenBy = String(demand.hiddenByProfessionals ?? "").split(",").map((id) => id.trim());
+        if (hidden || hiddenBy.includes(professionalId)) return response({ error: "Cette demande n’est pas disponible dans votre espace." }, 403);
+
+        const claims = await queryAll("demandespromatchings", { demandId: { $eq: demandId } }, ["demandId", "proId"], token);
+        if (claims.some((claim) => String(claim.proId ?? "") === professionalId)) {
+          return response({ error: "Vous avez déjà accepté cette demande." }, 409);
+        }
+        if (claims.length >= 3) return response({ error: "Cette demande a déjà été attribuée à 3 professionnels." }, 409);
+        const now = new Date().toISOString();
+        const inserted = await wixRequest<{ dataItem?: { id?: string } }>("/wix-data/v2/items", token, {
+          method: "POST",
+          body: JSON.stringify({
+            dataCollectionId: "demandespromatchings",
+            dataItem: { data: {
+              demandId, proId: professionalId, status: "claimed", claimedAt: now,
+              demandType: String(demand.demandType ?? ""), postalCode: String(demand.postalCode ?? ""), isViewed: true,
+            } },
+          }),
+        });
+        const claimId = String(inserted.dataItem?.id ?? "");
+        if (!claimId) return response({ error: "Wix n’a pas confirmé l’acceptation de la demande." }, 502);
+        // The push uses the same Wix server-side event resolver as the website.
+        // Push delivery is secondary and never rolls back a successful claim.
+        void fetch("https://www.partenairefoyer.com/api/push-notify-event", {
+          method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ eventType: "demand_claim", entityId: claimId }),
+          signal: AbortSignal.timeout(12_000),
+        }).catch((error) => console.warn("[ios-native-dashboard] Claim push unavailable", error));
+        return response({ success: true, claimId, demandId, claimCount: claims.length + 1 });
+      }
+
+      if (body.action === "hide_booking_request") {
+        if (role !== "hebergeur") return response({ error: "Cette action est réservée à l’espace hébergeur." }, 403);
+        const requestId = String(body.requestId ?? "").trim();
+        if (!/^[A-Za-z0-9_-]{1,160}$/.test(requestId)) return response({ error: "Demande de réservation invalide." }, 400);
+        const dashboard = await loadDashboard(role, email, result.member.id, token);
+        const requests = (dashboard?.bookingRequests as Record<string, unknown>[] | undefined) ?? [];
+        const bookingRequest = requests.find((item) => String(item._id ?? item.id ?? "") === requestId);
+        if (!bookingRequest) return response({ error: "Cette demande n’est plus disponible dans votre espace." }, 404);
+        const accommodationId = String(bookingRequest.accommodationId ?? "");
+        const accommodations = (dashboard?.accommodations as Record<string, unknown>[] | undefined) ?? [];
+        if (!accommodationId || !accommodations.some((item) => String(item._id ?? item.id ?? "") === accommodationId)) {
+          return response({ error: "Cette demande n’est liée à aucun de vos hébergements." }, 403);
+        }
+        await wixRequest(`/wix-data/v2/items/${encodeURIComponent(requestId)}`, token, {
+          method: "PATCH",
+          body: JSON.stringify({ dataCollectionId: "seasonalbookingrequests", patch: {
+            dataItemId: requestId,
+            fieldModifications: [{ fieldPath: "hiddenByHost", action: "SET_FIELD", setFieldOptions: { value: true } }],
+          } }),
+        });
+        return response({ success: true, requestId, hiddenByHost: true });
+      }
+
+      if (body.action === "mark_minisite_request_processed") {
+        if (role !== "professionnel") return response({ error: "Cette action est réservée à l’espace professionnel." }, 403);
+        const requestId = String(body.requestId ?? "").trim();
+        if (!/^[A-Za-z0-9_-]{1,160}$/.test(requestId)) return response({ error: "Demande mini-site invalide." }, 400);
+        const account = first(await query("prosaccounts", emailFilter(email), ["email", "isActive"], token, 2));
+        if (!account || account.isActive === false) return response({ error: "Aucun compte professionnel actif n’est associé à cette adresse." }, 403);
+        const nativeProfile = first(await query("prosprofiles", { accountId: { $eq: String(account._id ?? "") } }, ["accountId", "isActive"], token, 2));
+        const legacyProfile = first(await query("professionnels", { memberId: { $eq: result.member.id } }, ["memberId"], token, 2));
+        const professionalId = String(legacyProfile?._id ?? nativeProfile?._id ?? "");
+        const owned = first(await query("demandesminisite", {
+          _id: { $eq: requestId }, professionalId: { $eq: professionalId },
+        }, ["professionalId", "status"], token, 2));
+        if (!owned) return response({ error: "Cette demande mini-site n’appartient pas à votre espace." }, 404);
+        await wixRequest(`/wix-data/v2/items/${encodeURIComponent(requestId)}`, token, {
+          method: "PATCH",
+          body: JSON.stringify({ dataCollectionId: "demandesminisite", patch: { dataItemId: requestId, fieldModifications: [
+            { fieldPath: "status", action: "SET_FIELD", setFieldOptions: { value: "processed" } },
+          ] } }),
+        });
+        return response({ success: true, requestId, status: "processed" });
+      }
+
+      if (body.action === "delete_minisite_request") {
+        if (role !== "professionnel") return response({ error: "Cette action est réservée à l’espace professionnel." }, 403);
+        const requestId = String(body.requestId ?? "").trim();
+        if (!/^[A-Za-z0-9_-]{1,160}$/.test(requestId)) return response({ error: "Demande mini-site invalide." }, 400);
+        const account = first(await query("prosaccounts", emailFilter(email), ["email", "isActive"], token, 2));
+        if (!account || account.isActive === false) return response({ error: "Aucun compte professionnel actif n’est associé à cette adresse." }, 403);
+        const nativeProfile = first(await query("prosprofiles", { accountId: { $eq: String(account._id ?? "") } }, ["accountId", "isActive"], token, 2));
+        const legacyProfile = first(await query("professionnels", { memberId: { $eq: result.member.id } }, ["memberId"], token, 2));
+        const professionalId = String(legacyProfile?._id ?? nativeProfile?._id ?? "");
+        if (!professionalId) return response({ error: "Aucune fiche professionnelle liée à cette session." }, 403);
+        const owned = first(await query("demandesminisite", {
+          _id: { $eq: requestId }, professionalId: { $eq: professionalId },
+        }, ["professionalId"], token, 2));
+        if (!owned) return response({ error: "Cette demande mini-site n’appartient pas à votre espace." }, 404);
+        await wixRequest(`/wix-data/v2/items/${encodeURIComponent(requestId)}?dataCollectionId=demandesminisite`, token, {
+          method: "DELETE",
+        });
+        return response({ success: true, requestId, deleted: true });
+      }
+
       if (body.action === "upload_listing_photo") {
         if (!["particulier", "professionnel"].includes(role)) {
           return response({ error: "L’ajout de photos d’annonce est réservé aux espaces de vente immobilière." }, 403);
@@ -385,7 +852,10 @@ Deno.serve(async (req: Request) => {
         const itemDescription = String(body.itemDescription ?? "").trim().slice(0, 5000);
         const category = String(body.category ?? "").trim().slice(0, 100);
         const subcategory = String(body.subcategory ?? "").trim().slice(0, 100);
+        const adListingType = String(body.adListingType ?? "sell");
         const itemCondition = String(body.itemCondition ?? "");
+        const rentalUnit = String(body.rentalUnit ?? "day");
+        const rawAttributes = body.attributes;
         const city = String(body.city ?? "").trim().slice(0, 100);
         const postalCode = String(body.postalCode ?? "").trim().slice(0, 10);
         const itemPrice = Number(body.itemPrice);
@@ -393,14 +863,33 @@ Deno.serve(async (req: Request) => {
         if (!photos) return response({ error: "Une photo ne provient pas de votre sélection d’images sécurisée." }, 400);
         const allowedConditions = new Set(["Neuf", "Comme neuf", "Très bon état", "Bon état", "État correct"]);
         if (itemName.length < 3 || itemDescription.length < 10 || category.length < 2 ||
+            !["sell", "give", "exchange", "rent"].includes(adListingType) ||
+            (adListingType === "rent" && !["hour", "day", "weekend", "week", "month"].includes(rentalUnit)) ||
             !allowedConditions.has(itemCondition) || city.length < 2 || !/^\d{4,10}$/.test(postalCode) ||
             !Number.isFinite(itemPrice) || itemPrice < 0) {
           return response({ error: "Vérifiez le titre, la description, la catégorie, l’état et la localisation de l’objet." }, 400);
         }
         const data: Record<string, unknown> = {
           ownerId: accountID, itemName, itemPrice, itemDescription, category, subcategory,
-          itemCondition, city, postalCode, status: "published", createdAt: now,
+          adListingType, itemCondition, city, postalCode, status: "published", createdAt: now,
         };
+        const attributes: Record<string, string> = {};
+        if (rawAttributes !== undefined) {
+          if (!rawAttributes || typeof rawAttributes !== "object" || Array.isArray(rawAttributes)) {
+            return response({ error: "Les caractéristiques de l’annonce sont invalides." }, 400);
+          }
+          const entries = Object.entries(rawAttributes as Record<string, unknown>);
+          if (entries.length > 80) return response({ error: "L’annonce contient trop de caractéristiques." }, 400);
+          for (const [key, value] of entries) {
+            if (!isAllowedClassifiedAttribute(key) || typeof value !== "string" || value.length > 300) {
+              return response({ error: "Une caractéristique de l’annonce n’est pas autorisée." }, 400);
+            }
+            const clean = value.trim();
+            if (clean) attributes[key] = clean;
+          }
+        }
+        if (adListingType === "rent") attributes.rentalUnit = rentalUnit;
+        if (Object.keys(attributes).length > 0) data.attributesJSON = JSON.stringify(attributes);
         if (photos.length > 0) {
           data.itemImage = photos[0];
           photos.slice(1).forEach((photo, index) => { data[`photo${index + 2}`] = photo; });
@@ -424,8 +913,11 @@ Deno.serve(async (req: Request) => {
         const postalCode = String(body.postalCode ?? "").trim().slice(0, 10);
         const price = Number(body.price);
         const surface = Number(body.surface);
+        const landSurface = body.landSurface === undefined || body.landSurface === null || body.landSurface === ""
+          ? undefined : Number(body.landSurface);
         const rooms = Number(body.rooms);
         const bedrooms = Number(body.bedrooms ?? 0);
+        const bathrooms = Number(body.bathrooms ?? 0);
         const photos = ownedListingPhotos(body.photos, role, result.member.id, String(Deno.env.get("SUPABASE_URL") ?? ""));
         if (!photos) return response({ error: "Une photo ne provient pas de votre sélection d’images sécurisée." }, 400);
         const allowedPropertyTypes = new Set([
@@ -434,8 +926,9 @@ Deno.serve(async (req: Request) => {
         if (title.length < 5 || description.length < 20 || !allowedPropertyTypes.has(propertyType) ||
             !["sale", "rent"].includes(transactionType) || address.length < 5 || city.length < 2 ||
             !/^\d{4,10}$/.test(postalCode) || !Number.isFinite(price) || price < 0 ||
+            (landSurface !== undefined && (!Number.isFinite(landSurface) || landSurface < 0)) ||
             !Number.isFinite(surface) || surface <= 0 || !Number.isInteger(rooms) || rooms < 1 ||
-            !Number.isInteger(bedrooms) || bedrooms < 0) {
+            !Number.isInteger(bedrooms) || bedrooms < 0 || !Number.isInteger(bathrooms) || bathrooms < 0) {
           return response({ error: "Vérifiez le titre, la description, la localisation et les caractéristiques du bien." }, 400);
         }
 
@@ -459,6 +952,7 @@ Deno.serve(async (req: Request) => {
           surface,
           rooms,
           bedrooms,
+          bathrooms,
           address,
           city,
           postalCode,
@@ -466,6 +960,10 @@ Deno.serve(async (req: Request) => {
           createdAt: now,
           updatedAt: now,
         };
+        if (landSurface !== undefined) {
+          data.landSurface = landSurface;
+          data.surfaceLand = landSurface;
+        }
         if (photos.length > 0) {
           data.mainImageUrl = photos[0];
           data.galleryImages = JSON.stringify(photos);
@@ -477,6 +975,183 @@ Deno.serve(async (req: Request) => {
         });
         if (!inserted.dataItem?.id) return response({ error: "Wix n’a pas confirmé l’enregistrement du bien." }, 502);
         return response({ success: true, propertyId: inserted.dataItem.id, status: data.status });
+      }
+      if (body.action === "archive_listing") {
+        const itemId = String(body.itemId ?? "").trim();
+        const list = String(body.list ?? "");
+        const allowed = role === "particulier"
+          ? new Set(["properties", "classifieds"])
+          : role === "professionnel"
+            ? new Set(["properties"])
+            : new Set<string>();
+        if (!/^[A-Za-z0-9_-]{1,160}$/.test(itemId) || !allowed.has(list)) {
+          return response({ error: "Annonce invalide ou espace non autorisé." }, 400);
+        }
+        const dashboard = await loadDashboard(role, email, result.member.id, token);
+        const rows = (dashboard?.[list] as Record<string, unknown>[] | undefined) ?? [];
+        const item = rows.find((entry) => String(entry._id ?? entry.id ?? "") === itemId);
+        if (!item) return response({ error: "Cette annonce n’est pas associée à votre espace." }, 404);
+        const collection = role === "professionnel"
+          ? "biensprofessionnels"
+          : list === "classifieds" ? "classifiedads-1" : "privateproperties";
+        const modifications = list === "properties" && role === "particulier"
+          ? [
+            { fieldPath: "status", action: "SET_FIELD", setFieldOptions: { value: "archived" } },
+            { fieldPath: "isPublic", action: "SET_FIELD", setFieldOptions: { value: false } },
+            { fieldPath: "updatedAt", action: "SET_FIELD", setFieldOptions: { value: new Date().toISOString() } },
+          ]
+          : [
+            { fieldPath: "status", action: "SET_FIELD", setFieldOptions: { value: "archived" } },
+          ];
+        await wixRequest(`/wix-data/v2/items/${encodeURIComponent(itemId)}`, token, {
+          method: "PATCH",
+          body: JSON.stringify({
+            dataCollectionId: collection,
+            patch: { dataItemId: itemId, fieldModifications: modifications },
+          }),
+        });
+        return response({ success: true, itemId, list, status: "archived" });
+      }
+      if (body.action === "update_listing") {
+        const itemId = String(body.itemId ?? "").trim();
+        const list = String(body.list ?? "");
+        const allowed = role === "particulier"
+          ? new Set(["properties", "classifieds"])
+          : role === "professionnel"
+            ? new Set(["properties"])
+            : new Set<string>();
+        const fields = body.fields;
+        if (!/^[A-Za-z0-9_-]{1,160}$/.test(itemId) || !allowed.has(list) || !fields || typeof fields !== "object" || Array.isArray(fields)) {
+          return response({ error: "Annonce invalide ou espace non autorisé." }, 400);
+        }
+        const dashboard = await loadDashboard(role, email, result.member.id, token);
+        const rows = (dashboard?.[list] as Record<string, unknown>[] | undefined) ?? [];
+        const ownedItem = rows.find((entry) => String(entry._id ?? entry.id ?? "") === itemId);
+        if (!ownedItem) {
+          return response({ error: "Cette annonce n’est pas associée à votre espace." }, 404);
+        }
+        const source = fields as Record<string, unknown>;
+        const fieldRules: Record<string, "text" | "number" | "boolean"> = list === "classifieds"
+          ? { itemName: "text", itemDescription: "text", category: "text", subcategory: "text", adListingType: "text", itemCondition: "text", city: "text", postalCode: "text", itemPrice: "number" }
+          : role === "professionnel"
+            ? { title: "text", description: "text", propertyType: "text", transactionType: "text", address: "text", city: "text", postalCode: "text", price: "number", surface: "number", landSurface: "number", surfaceLand: "number", rooms: "number", bedrooms: "number", bathrooms: "number", status: "text" }
+            : { title: "text", description: "text", propertyType: "text", transactionType: "text", city: "text", postalCode: "text", sellingPrice: "number", surface: "number", landSurface: "number", rooms: "number", bedrooms: "number", bathrooms: "number", isPublic: "boolean" };
+        const data: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(source)) {
+          if (key === "photos" || key === "rentalUnit" || key === "attributes") continue;
+          const type = fieldRules[key];
+          if (!type) return response({ error: "Un des champs à modifier n’est pas autorisé." }, 400);
+          if (type === "text") {
+            if (typeof value !== "string") return response({ error: "Vérifiez les champs texte de l’annonce." }, 400);
+            data[key] = value.trim().slice(0, key.toLowerCase().includes("description") ? 8000 : 500);
+          } else if (type === "number") {
+            const number = Number(value);
+            if (!Number.isFinite(number) || number < 0 || (["rooms"].includes(key) && (!Number.isInteger(number) || number < 1)) ||
+                (["bedrooms", "bathrooms"].includes(key) && !Number.isInteger(number)) || (key === "surface" && number <= 0)) {
+              return response({ error: "Vérifiez les chiffres de l’annonce." }, 400);
+            }
+            data[key] = number;
+          } else {
+            if (typeof value !== "boolean") return response({ error: "Vérifiez le choix de publication." }, 400);
+            data[key] = value;
+          }
+        }
+        if (list === "properties" && role === "professionnel" && data.landSurface !== undefined) {
+          data.surfaceLand = data.landSurface;
+        }
+        if (source.photos !== undefined) {
+          const maxPhotos = role === "professionnel" ? 5 : 20;
+          if (!Array.isArray(source.photos) || source.photos.length > maxPhotos || source.photos.some((photo) => typeof photo !== "string" || !photo || photo.length > 2048)) {
+            return response({ error: "La galerie de photos est invalide." }, 400);
+          }
+          const requestedPhotos = [...new Set(source.photos as string[])];
+          const existingPhotos = new Set(listingPhotoURLs(ownedItem, list, role));
+          for (const photo of requestedPhotos) {
+            if (existingPhotos.has(photo)) continue;
+            if (!ownedListingPhotos([photo], role, result.member.id, String(Deno.env.get("SUPABASE_URL") ?? ""))) {
+              return response({ error: "Une photo ne provient pas de votre espace sécurisé." }, 400);
+            }
+          }
+          if (list === "classifieds") {
+            data.itemImage = requestedPhotos[0] ?? "";
+            for (let index = 2; index <= 20; index++) data[`photo${index}`] = requestedPhotos[index - 1] ?? "";
+          } else if (role === "professionnel") {
+            data.mainImageUrl = requestedPhotos[0] ?? "";
+            data.galleryImages = JSON.stringify(requestedPhotos);
+            for (let index = 1; index <= 5; index++) data[`photo${index}`] = requestedPhotos[index - 1] ?? "";
+          } else {
+            data.mainImage = requestedPhotos[0] ?? "";
+            data.galleryImages = JSON.stringify(requestedPhotos);
+            for (let index = 1; index <= 20; index++) data[`photo${index}`] = requestedPhotos[index - 1] ?? "";
+          }
+        }
+        if (list === "classifieds" && (source.rentalUnit !== undefined || source.attributes !== undefined)) {
+          const listingType = String(data.adListingType ?? ownedItem.adListingType ?? "");
+          const rentalUnit = typeof source.rentalUnit === "string" ? source.rentalUnit : "";
+          const allowedRentalUnits = ["hour", "day", "weekend", "week", "month"];
+          if (source.rentalUnit !== undefined && listingType === "rent" && !allowedRentalUnits.includes(rentalUnit)) {
+            return response({ error: "Choisissez une périodicité valide pour le prix de location." }, 400);
+          }
+          let attributes: Record<string, unknown> = {};
+          const originalAttributes = ownedItem.attributesJSON;
+          if (typeof originalAttributes === "string") {
+            try {
+              const parsed = JSON.parse(originalAttributes) as unknown;
+              if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) attributes = parsed as Record<string, unknown>;
+            } catch { /* Start with an empty supported-attributes object when legacy JSON is malformed. */ }
+          } else if (originalAttributes && typeof originalAttributes === "object" && !Array.isArray(originalAttributes)) {
+            attributes = { ...(originalAttributes as Record<string, unknown>) };
+          }
+          if (source.attributes !== undefined) {
+            if (!source.attributes || typeof source.attributes !== "object" || Array.isArray(source.attributes)) {
+              return response({ error: "Les caractéristiques de l’annonce sont invalides." }, 400);
+            }
+            const entries = Object.entries(source.attributes as Record<string, unknown>);
+            if (entries.length > 80) return response({ error: "L’annonce contient trop de caractéristiques." }, 400);
+            for (const [key, value] of entries) {
+              if (!isAllowedClassifiedAttribute(key) || typeof value !== "string" || value.length > 300) {
+                return response({ error: "Une caractéristique de l’annonce n’est pas autorisée." }, 400);
+              }
+              const clean = value.trim();
+              if (clean) attributes[key] = clean;
+              else delete attributes[key];
+            }
+          }
+          if (listingType === "rent" && source.rentalUnit !== undefined) attributes.rentalUnit = rentalUnit;
+          else if (listingType !== "rent") delete attributes.rentalUnit;
+          data.attributesJSON = JSON.stringify(attributes);
+        }
+        if (Object.keys(data).length === 0) return response({ error: "Aucune modification à enregistrer." }, 400);
+        if (list === "properties" && role === "particulier") {
+          if (data.transactionType !== undefined && !["vente", "location"].includes(String(data.transactionType))) return response({ error: "Type de transaction invalide." }, 400);
+          if (data.title !== undefined && String(data.title).length < 5) return response({ error: "Le titre doit contenir au moins 5 caractères." }, 400);
+          if (data.description !== undefined && String(data.description).length < 20) return response({ error: "La description doit contenir au moins 20 caractères." }, 400);
+        } else if (list === "properties") {
+          if (data.transactionType !== undefined && !["sale", "rent"].includes(String(data.transactionType))) return response({ error: "Type de transaction invalide." }, 400);
+          if (data.status !== undefined && !["active", "inactive"].includes(String(data.status))) return response({ error: "Statut de publication invalide." }, 400);
+          if (data.title !== undefined && String(data.title).length < 5) return response({ error: "Le titre doit contenir au moins 5 caractères." }, 400);
+          if (data.description !== undefined && String(data.description).length < 20) return response({ error: "La description doit contenir au moins 20 caractères." }, 400);
+          if (data.address !== undefined && String(data.address).length < 5) return response({ error: "L’adresse doit contenir au moins 5 caractères." }, 400);
+        } else {
+          if (data.adListingType !== undefined && !["sell", "give", "exchange", "rent"].includes(String(data.adListingType))) return response({ error: "Type de petite annonce invalide." }, 400);
+          if (data.itemCondition !== undefined && !new Set(["Neuf", "Comme neuf", "Très bon état", "Bon état", "État correct"]).has(String(data.itemCondition))) return response({ error: "État de l’objet invalide." }, 400);
+          if (data.itemName !== undefined && String(data.itemName).length < 3) return response({ error: "Le titre doit contenir au moins 3 caractères." }, 400);
+          if (data.itemDescription !== undefined && String(data.itemDescription).length < 10) return response({ error: "La description doit contenir au moins 10 caractères." }, 400);
+          if (data.category !== undefined && String(data.category).length < 2) return response({ error: "La catégorie doit contenir au moins 2 caractères." }, 400);
+        }
+        if (data.propertyType !== undefined && String(data.propertyType).length < 2) return response({ error: "Le type de bien doit contenir au moins 2 caractères." }, 400);
+        if (data.city !== undefined && String(data.city).length < 2) return response({ error: "La ville doit contenir au moins 2 caractères." }, 400);
+        if (data.postalCode !== undefined && !/^\d{4,10}$/.test(String(data.postalCode))) return response({ error: "Le code postal doit contenir entre 4 et 10 chiffres." }, 400);
+        if (data.updatedAt === undefined && list === "properties" && role === "particulier") data.updatedAt = new Date().toISOString();
+        const collection = list === "classifieds" ? "classifiedads-1" : role === "professionnel" ? "biensprofessionnels" : "privateproperties";
+        const fieldModifications = Object.entries(data).map(([fieldPath, value]) => ({
+          fieldPath, action: "SET_FIELD", setFieldOptions: { value },
+        }));
+        await wixRequest(`/wix-data/v2/items/${encodeURIComponent(itemId)}`, token, {
+          method: "PATCH",
+          body: JSON.stringify({ dataCollectionId: collection, patch: { dataItemId: itemId, fieldModifications } }),
+        });
+        return response({ success: true, itemId, list });
       }
       if (body.action === "mark_matching_seen") {
         if (role !== "professionnel") return response({ error: "Cette action est réservée à l’espace professionnel." }, 403);

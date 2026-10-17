@@ -6,6 +6,7 @@ final class ListingsService: ObservableObject {
     @Published private(set) var listings: [Listing] = []
     @Published private(set) var isLoading = false
     @Published private(set) var errorMessage: String?
+    @Published private(set) var warningMessage: String?
     @Published private(set) var hasLoaded = false
 
     private let endpoint = URL(string: "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/pf-imported-real-estate-listings-public")!
@@ -19,42 +20,59 @@ final class ListingsService: ObservableObject {
         guard !isLoading else { return }
         isLoading = true
         errorMessage = nil
+        warningMessage = nil
         defer { isLoading = false }
 
+        var successfulSources = 0
+        var failures: [String] = []
+
+        let imported: [Listing]
         do {
-            var successfulSources = 0
-            let imported: [Listing]
-            do {
-                imported = try await loadImportedListings()
-                successfulSources += 1
-            } catch {
-                imported = []
-            }
-
-            let privateListings: [Listing]
-            do {
-                privateListings = try await WixAuthStore.shared.fetchPublicPrivateListings()
-                successfulSources += 1
-            } catch {
-                privateListings = []
-            }
-
-            let professionalListings: [Listing]
-            do {
-                professionalListings = try await WixAuthStore.shared.fetchPublicProfessionalListings()
-                successfulSources += 1
-            } catch {
-                professionalListings = []
-            }
-
-            guard successfulSources > 0 else { throw URLError(.badServerResponse) }
-            var seen = Set<String>()
-            listings = (imported + privateListings + professionalListings).filter { seen.insert($0.id).inserted }
-            errorMessage = nil
-            hasLoaded = true
+            imported = try await loadImportedListings()
+            successfulSources += 1
         } catch {
-            errorMessage = "Les annonces ne sont pas disponibles pour le moment. Réessayez dans quelques instants."
+            imported = []
+            failures.append("les annonces importées")
         }
+
+        let privateListings: [Listing]
+        do {
+            privateListings = try await WixAuthStore.shared.fetchPublicPrivateListings()
+            successfulSources += 1
+        } catch {
+            privateListings = []
+            failures.append("les biens de particuliers")
+        }
+
+        let professionalListings: [Listing]
+        do {
+            professionalListings = try await WixAuthStore.shared.fetchPublicProfessionalListings()
+            successfulSources += 1
+        } catch {
+            professionalListings = []
+            failures.append("les biens de professionnels")
+        }
+
+        guard successfulSources > 0 else {
+            if listings.isEmpty {
+                errorMessage = "Les annonces ne sont pas disponibles pour le moment. Réessayez dans quelques instants."
+            } else {
+                warningMessage = "Actualisation impossible. Les biens déjà chargés restent affichés."
+            }
+            return
+        }
+
+        var seen = Set<String>()
+        listings = (imported + privateListings + professionalListings)
+            .filter { seen.insert($0.id).inserted }
+            .sorted {
+                if $0.sortDateKey == $1.sortDateKey { return $0.id < $1.id }
+                return $0.sortDateKey > $1.sortDateKey
+            }
+        if !failures.isEmpty {
+            warningMessage = "Certaines sources sont indisponibles : \(failures.joined(separator: ", "))."
+        }
+        hasLoaded = true
     }
 
     private func loadImportedListings() async throws -> [Listing] {
@@ -62,9 +80,7 @@ final class ListingsService: ObservableObject {
         var offset = 0
         var allItems: [Listing] = []
 
-        // The public feed caps each request at 250; this keeps the native list
-        // complete for normal catalogue sizes without an unbounded fetch loop.
-        for _ in 0..<20 {
+        while true {
             var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)!
             components.queryItems = [
                 URLQueryItem(name: "limit", value: String(limit)),
@@ -78,7 +94,10 @@ final class ListingsService: ObservableObject {
             }
             let page = try JSONDecoder().decode(ListingFeedResponse.self, from: data)
             allItems.append(contentsOf: page.items)
-            offset += page.items.count
+            guard !page.items.isEmpty else { break }
+            let nextOffset = offset + page.items.count
+            guard nextOffset > offset else { break }
+            offset = nextOffset
             if page.items.count < limit || (page.total.map { offset >= $0 } ?? false) { break }
         }
         return allItems
@@ -90,6 +109,7 @@ final class ClassifiedAdsService: ObservableObject {
     @Published private(set) var ads: [ClassifiedAd] = []
     @Published private(set) var isLoading = false
     @Published private(set) var errorMessage: String?
+    @Published private(set) var warningMessage: String?
     @Published private(set) var hasLoaded = false
 
     func loadIfNeeded() async {
@@ -101,12 +121,19 @@ final class ClassifiedAdsService: ObservableObject {
         guard !isLoading else { return }
         isLoading = true
         errorMessage = nil
+        warningMessage = nil
         defer { isLoading = false }
         do {
-            ads = try await WixAuthStore.shared.fetchPublicClassifiedAds()
+            let result = try await WixAuthStore.shared.fetchPublicClassifiedAds()
+            ads = result.ads
+            warningMessage = result.warningMessage
             hasLoaded = true
         } catch {
-            errorMessage = "Les petites annonces ne sont pas disponibles pour le moment. Réessayez."
+            if ads.isEmpty {
+                errorMessage = "Les petites annonces ne sont pas disponibles pour le moment. Réessayez."
+            } else {
+                warningMessage = "Impossible d’actualiser les annonces. Les résultats déjà chargés restent affichés."
+            }
         }
     }
 }
@@ -130,12 +157,24 @@ final class BuyerSearchService: ObservableObject {
         maxBudget: Double,
         minSurface: Double,
         maxSurface: Double?,
+        minLandSurface: Double,
+        maxLandSurface: Double?,
         minRooms: Double,
         minBedrooms: Double,
-        emailAlertsEnabled: Bool
+        minBathrooms: Double,
+        singleStory: Bool,
+        garage: Bool,
+        garden: Bool,
+        terrace: Bool,
+        pool: Bool,
+        parking: Bool,
+        latitude: Double?,
+        longitude: Double?,
+        emailAlertsEnabled: Bool,
+        searchID: String? = nil
     ) async -> Bool {
         var body: [String: Any] = [
-            "action": "create",
+            "action": searchID == nil ? "create" : "update",
             "searchName": searchName,
             "transactionType": transactionType,
             "propertyTypes": propertyTypes,
@@ -145,17 +184,51 @@ final class BuyerSearchService: ObservableObject {
             "minBudget": minBudget,
             "maxBudget": maxBudget,
             "minSurface": minSurface,
+            "minLandSurface": minLandSurface,
             "minRooms": minRooms,
             "minBedrooms": minBedrooms,
+            "minBathrooms": minBathrooms,
+            "singleStory": singleStory,
+            "garage": garage,
+            "garden": garden,
+            "terrace": terrace,
+            "pool": pool,
+            "parking": parking,
             "emailAlertsEnabled": emailAlertsEnabled
         ]
+        if let searchID { body["searchId"] = searchID }
         if let maxSurface { body["maxSurface"] = maxSurface }
-        return await perform(body, successMessage: "Votre recherche a été enregistrée dans votre espace Wix.")
+        if let maxLandSurface { body["maxLandSurface"] = maxLandSurface }
+        if let latitude { body["latitude"] = latitude }
+        if let longitude { body["longitude"] = longitude }
+        return await perform(body, successMessage: searchID == nil
+            ? "Votre recherche a été enregistrée dans votre espace Wix."
+            : "Votre recherche a été mise à jour dans votre espace Wix.")
     }
 
     func deactivate(searchID: String) async {
         _ = await perform(["action": "deactivate", "searchId": searchID],
                           successMessage: "La recherche a été désactivée.")
+    }
+
+    func activate(searchID: String) async -> Bool {
+        await perform(["action": "activate", "searchId": searchID],
+                      successMessage: "La recherche a été réactivée.")
+    }
+
+    func setEmailAlerts(searchID: String, enabled: Bool) async -> Bool {
+        await perform(["action": "alerts", "searchId": searchID, "enabled": enabled],
+                      successMessage: enabled ? "Les alertes e-mail sont activées." : "Les alertes e-mail sont désactivées.")
+    }
+
+    func delete(searchID: String) async -> Bool {
+        await perform(["action": "delete", "searchId": searchID],
+                      successMessage: "La recherche a été supprimée de votre espace Wix.")
+    }
+
+    func dismissMatching(matchingID: String) async -> Bool {
+        await perform(["action": "dismiss_matching", "matchingId": matchingID],
+                      successMessage: "Le matching a été masqué de votre espace.")
     }
 
     private func perform(_ body: [String: Any], successMessage: String) async -> Bool {
@@ -204,6 +277,7 @@ final class ProfessionalsService: ObservableObject {
     @Published private(set) var professionals: [WixPublicProfessional] = []
     @Published private(set) var isLoading = false
     @Published private(set) var errorMessage: String?
+    @Published private(set) var warningMessage: String?
     @Published private(set) var hasLoaded = false
 
     func loadIfNeeded() async {
@@ -215,12 +289,14 @@ final class ProfessionalsService: ObservableObject {
         guard !isLoading else { return }
         isLoading = true
         errorMessage = nil
+        warningMessage = nil
         defer { isLoading = false }
         do {
-            let results = try await WixAuthStore.shared.fetchPublicProfessionals()
-            professionals = results.sorted {
+            let result = try await WixAuthStore.shared.fetchPublicProfessionals()
+            professionals = result.professionals.sorted {
                 $0.resolvedName.localizedStandardCompare($1.resolvedName) == .orderedAscending
             }
+            warningMessage = result.warning
             hasLoaded = true
         } catch {
             errorMessage = "L’annuaire des professionnels n’est pas disponible pour le moment."

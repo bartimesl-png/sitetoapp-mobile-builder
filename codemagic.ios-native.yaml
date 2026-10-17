@@ -4,8 +4,13 @@ workflows:
     max_build_duration: 120
     instance_type: mac_mini_m2
 
+    integrations:
+      app_store_connect: partenairefoyer_app_store_connect
+
     environment:
       xcode: latest
+      groups:
+        - firebase_ios
       ios_signing:
         distribution_type: app_store
         bundle_identifier: com.partenairefoyer.app
@@ -15,10 +20,19 @@ workflows:
 
     scripts:
       - name: Configurer la signature Apple
-        script: xcode-project use-profiles
+        script: |
+          xcode-project use-profiles \
+            --project "$CM_BUILD_DIR/$XCODE_PROJECT"
+
+      - name: Préparer la configuration Firebase iOS
+        script: |
+          chmod +x ./scripts/prepare-ios-firebase.sh
+          ./scripts/prepare-ios-firebase.sh
 
       - name: Préparer le logo et l’icône iOS
-        script: bash scripts/prepare-ios-assets.sh
+        script: |
+          chmod +x ./scripts/prepare-ios-assets.sh
+          ./scripts/prepare-ios-assets.sh
 
       - name: Compiler l’IPA iOS
         script: |
@@ -29,3 +43,9 @@ workflows:
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
+
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: false
+        submit_to_app_store: false
