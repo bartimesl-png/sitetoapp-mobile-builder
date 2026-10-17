@@ -658,6 +658,7 @@ private struct RoleEntryView: View {
 
 private struct NativeRoleDashboardView: View {
     @StateObject private var auth = WixAuthStore.shared
+    @State private var selectedItem: DashboardItemSelection?
     let role: AccountRole
     let member: WixMember
     let onSignOut: () -> Void
@@ -724,7 +725,9 @@ private struct NativeRoleDashboardView: View {
                                 .foregroundStyle(.secondary)
                         } else {
                             ForEach(Array(section.2.enumerated()), id: \.offset) { index, item in
-                                WixDashboardItem(item: item, fallbackTitle: "Élément \(index + 1)")
+                                WixDashboardItem(item: item, fallbackTitle: "Élément \(index + 1)") {
+                                    selectedItem = DashboardItemSelection(item: item)
+                                }
                             }
                         }
                     } header: {
@@ -757,6 +760,18 @@ private struct NativeRoleDashboardView: View {
         .listStyle(.insetGrouped)
         .navigationTitle("Tableau de bord")
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $selectedItem) { selection in
+            NavigationStack {
+                DashboardItemDetailView(item: selection.item)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Fermer") { selectedItem = nil }
+                        }
+                    }
+            }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
         .refreshable { await auth.loadDashboard(role: role.rawValue) }
         .task(id: role.rawValue) { await auth.loadDashboard(role: role.rawValue) }
     }
@@ -783,6 +798,7 @@ private struct NativeRoleDashboardView: View {
 private struct WixDashboardItem: View {
     let item: [String: Any]
     let fallbackTitle: String
+    let onOpen: () -> Void
 
     private var title: String {
         ["title", "itemName", "businessName", "senderName", "fullName"].compactMap { item[$0] as? String }.first ?? fallbackTitle
@@ -798,6 +814,7 @@ private struct WixDashboardItem: View {
     }
 
     var body: some View {
+        Button(action: onOpen) {
         HStack(alignment: .top, spacing: 12) {
             if let imageURL {
                 AsyncImage(url: imageURL) { phase in
@@ -818,5 +835,107 @@ private struct WixDashboardItem: View {
             Spacer(minLength: 0)
         }
         .padding(.vertical, 3)
+        .contentShape(Rectangle())
+        .foregroundStyle(.primary)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Afficher le détail")
+    }
+}
+
+private struct DashboardItemSelection: Identifiable {
+    let id = UUID()
+    let item: [String: Any]
+}
+
+private struct DashboardItemDetailView: View {
+    let item: [String: Any]
+
+    private let displayFields: [(String, String)] = [
+        ("description", "Description"), ("itemDescription", "Description"),
+        ("message", "Message"), ("messageContent", "Message"), ("content", "Message"),
+        ("city", "Ville"), ("postalCode", "Code postal"),
+        ("propertyType", "Type de bien"), ("transactionType", "Transaction"),
+        ("category", "Catégorie"), ("condition", "État"), ("status", "Statut"),
+        ("matchingType", "Type de matching"), ("matchingScore", "Compatibilité"),
+        ("demandType", "Type de demande"), ("seen", "Consulté")
+    ]
+
+    private var title: String {
+        ["title", "itemName", "businessName", "senderName", "fullName"]
+            .compactMap { item[$0] as? String }
+            .first ?? "Détail"
+    }
+
+    private var imageURLs: [URL] {
+        ["mainImageUrl", "mainImage", "itemImage", "photo", "photo2", "photo3", "photo4", "photo5"]
+            .compactMap { item[$0] as? String }
+            .compactMap(URL.init(string:))
+    }
+
+    private var rows: [(String, String)] {
+        var seen = Set<String>()
+        return displayFields.compactMap { key, label in
+            guard let value = item[key], !(value is NSNull), !seen.contains(label) else { return nil }
+            let text: String
+            if let flag = value as? Bool {
+                text = flag ? "Oui" : "Non"
+            } else if let values = value as? [String] {
+                text = values.joined(separator: ", ")
+            } else {
+                text = String(describing: value)
+            }
+            guard !text.isEmpty else { return nil }
+            seen.insert(label)
+            return (label, text)
+        }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                if !imageURLs.isEmpty {
+                    TabView {
+                        ForEach(Array(imageURLs.enumerated()), id: \.offset) { _, url in
+                            AsyncImage(url: url) { phase in
+                                if let image = phase.image {
+                                    image.resizable().scaledToFill()
+                                } else {
+                                    Image(systemName: "photo")
+                                        .font(.largeTitle)
+                                        .foregroundStyle(.secondary)
+                                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                        .background(Color.teal.opacity(0.08))
+                                }
+                            }
+                        }
+                    }
+                    .tabViewStyle(.page)
+                    .frame(height: 230)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .accessibilityLabel("Galerie de photos")
+                }
+
+                Text(title).font(.title2.bold())
+
+                if let price = item["price"] ?? item["itemPrice"] {
+                    Text("\(String(describing: price)) €")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.teal)
+                }
+
+                ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(row.0).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        Text(row.1).font(.body).textSelection(.enabled)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .padding(20)
+        }
+        .background(Color(uiColor: .systemGroupedBackground))
+        .navigationTitle("Détail")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
