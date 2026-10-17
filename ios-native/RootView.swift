@@ -1,5 +1,5 @@
-Warning: truncated output (original token count: 31593)
-Total output lines: 2634
+Warning: truncated output (original token count: 31891)
+Total output lines: 2654
 
 import SwiftUI
 import CoreFoundation
@@ -691,7 +691,182 @@ private struct HomeDashboardView: View {
                                 .frame(width: 46, height: 46)
                                 .background(Color.teal.opacity(0.11), in: RoundedRectangle(cornerRadius: 14))
                             VStack(alignment: .leading, spacing: 3) {
-                …15593 tokens truncated…servations", "reservations", "bed.double.fill")]
+                                Text("Faire estimer mon bien").font(.headline).foregroundStyle(.primary)
+                                Text("Envoyez votre demande depuis l’app").font(.subheadline).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "arrow.right").foregroundStyle(.secondary)
+                        }
+                        .padding(16)
+                        .background(.background, in: RoundedRectangle(cornerRadius: 20))
+                        .overlay(RoundedRectangle(cornerRadius: 20).stroke(.quaternary, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Votre projet immobilier, au même endroit")
+                            .font(.title3.bold())
+                        Text("Consultez les biens, enregistrez vos favoris et choisissez votre espace depuis le menu.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(18)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.background, in: RoundedRectangle(cornerRadius: 20))
+                    .overlay(RoundedRectangle(cornerRadius: 20).stroke(.quaternary, lineWidth: 1))
+
+                    Button { selectedTab = 4 } label: {
+                        Label("Vous êtes… ? Choisir mon espace", systemImage: "person.crop.circle.badge.questionmark")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 15)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color(red: 0.02, green: 0.38, blue: 0.34))
+                }
+                .padding(.horizontal, 17)
+                .padding(.top, 14)
+                .padding(.bottom, 28)
+            }
+            .background(Color(uiColor: .systemGroupedBackground))
+            .toolbar(.hidden, for: .navigationBar)
+        }
+        .sheet(isPresented: $showNativeEstimation) {
+            NavigationStack { NativeEstimationRequestView() }
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
+    }
+
+    private var hero: some View {
+        ZStack(alignment: .bottomLeading) {
+            LinearGradient(
+                colors: [Color(red: 0.035, green: 0.12, blue: 0.19), Color(red: 0.02, green: 0.39, blue: 0.32)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            Circle()
+                .fill(.white.opacity(0.07))
+                .frame(width: 230, height: 230)
+                .offset(x: 245, y: -85)
+            Circle()
+                .stroke(.white.opacity(0.10), lineWidth: 1)
+                .frame(width: 180, height: 180)
+                .offset(x: 260, y: -72)
+
+            VStack(alignment: .leading, spacing: 19) {
+                HStack(spacing: 11) {
+                    Image("BrandLogo")
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 58, height: 58)
+                        .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).stroke(.white.opacity(0.28), lineWidth: 1))
+                    .accessibilityHidden(true)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 0) {
+                            Text("Partenaire")
+                                .foregroundStyle(.white)
+                            Text("Foyer")
+                                .foregroundStyle(Color(red: 0.35, green: 0.91, blue: 0.62))
+                        }
+                        .font(.system(size: 17, weight: .bold, desi…13891 tokens truncated…    .padding(.horizontal, 13).padding(.vertical, 10)
+                        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20))
+                        .accessibilityLabel("Votre message")
+                    Button {
+                        Task { await sendMessage() }
+                    } label: {
+                        if isSending { ProgressView() }
+                        else { Image(systemName: "arrow.up.circle.fill").font(.system(size: 34)) }
+                    }
+                    .disabled(isSending || composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityLabel("Envoyer le message")
+                }
+                .padding(.horizontal).padding(.top, 8)
+                if let email = preview["senderEmail"] as? String,
+                   let url = URL(string: "mailto:\(email)") {
+                    Link("Contacter aussi par e-mail", destination: url)
+                        .font(.caption).padding(.bottom, 5)
+                }
+            }
+            .background(.bar)
+        }
+        .navigationTitle(contactName)
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await reload() }
+        .alert("Envoi impossible", isPresented: Binding(
+            get: { sendError != nil },
+            set: { if !$0 { sendError = nil } }
+        )) {
+            Button("OK", role: .cancel) { sendError = nil }
+        } message: {
+            Text(sendError ?? "Réessayez dans un instant.")
+        }
+    }
+
+    @MainActor
+    private func reload() async {
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            let loaded = try await auth.loadProfessionalConversation(id: conversationID)
+            messages = loaded
+            error = nil
+            do {
+                try await auth.markProfessionalConversationRead(conversationID: conversationID)
+                messages = messages.map { message in
+                    var updated = message
+                    if (updated["receiverId"] as? String) == professionalID {
+                        updated["isRead"] = true
+                        updated["seen"] = true
+                    }
+                    return updated
+                }
+            } catch {
+                // Keep the thread readable even if Wix declines the optional read receipt.
+            }
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func sendMessage() async {
+        let content = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !content.isEmpty, !isSending else { return }
+        isSending = true
+        defer { isSending = false }
+        do {
+            let sent = try await auth.sendProfessionalMessage(conversationID: conversationID, content: content)
+            messages.append(sent)
+            composerText = ""
+        } catch {
+            sendError = error.localizedDescription
+        }
+    }
+}
+
+private struct DashboardOverview: View {
+    let data: [String: Any]
+    let role: AccountRole
+
+    private var metrics: [(String, String, String)] {
+        switch role {
+        case .particulier:
+            [("Biens", "properties", "house.fill"), ("Petites annonces", "classifieds", "tag.fill"), ("Favoris", "favorites", "heart.fill")]
+        case .professionnel:
+            [("Biens", "properties", "house.fill"), ("Matchings", "matchings", "sparkles"), ("Demandes", "demands", "person.2.fill"), ("Messages", "messages", "bubble.left.and.bubble.right.fill")]
+        case .courtier:
+            [("Messages", "messages", "bubble.left.and.bubble.right.fill")]
+        case .artisan:
+            [("Demandes", "messages", "wrench.and.screwdriver.fill")]
+        case .diagnostiqueur:
+            [("Demandes", "messages", "doc.text.magnifyingglass")]
+        case .prestataire:
+            [("Contacts", "messages", "person.2.fill")]
+        case .hebergeur:
+            [("Réservations", "reservations", "bed.double.fill")]
         }
     }
 

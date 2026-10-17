@@ -1,7 +1,7 @@
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, content-type",
-  "Access-Control-Allow-Methods": "GET, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 };
 const WIX = "https://www.wixapis.com";
 
@@ -133,10 +133,20 @@ async function loadDashboard(role: string, email: string, memberID: string, toke
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
-  if (req.method !== "GET") return response({ error: "Méthode non autorisée." }, 405);
+  if (req.method !== "GET" && req.method !== "POST") return response({ error: "Méthode non autorisée." }, 405);
   const token = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "").trim();
   if (!token) return response({ error: "Connexion requise." }, 401);
-  const role = new URL(req.url).searchParams.get("role") ?? "";
+  let body: Record<string, unknown> = {};
+  if (req.method === "POST") {
+    try {
+      body = await req.json();
+    } catch {
+      return response({ error: "Demande invalide." }, 400);
+    }
+  }
+  const role = req.method === "POST"
+    ? String(body.role ?? "")
+    : new URL(req.url).searchParams.get("role") ?? "";
   if (!["particulier", "professionnel", "courtier", "artisan", "diagnostiqueur", "prestataire", "hebergeur"].includes(role)) {
     return response({ error: "Espace inconnu." }, 400);
   }
@@ -148,6 +158,30 @@ Deno.serve(async (req: Request) => {
     const email = String(result.member?.loginEmail ?? "").trim().toLowerCase();
     if (!result.member?.id || !email || result.member.loginEmailVerified === false) {
       return response({ error: "Le compte Wix n’est pas vérifié." }, 403);
+    }
+    if (req.method === "POST") {
+      if (body.action !== "mark_inquiry_read" || !["courtier", "artisan", "diagnostiqueur", "prestataire"].includes(role)) {
+        return response({ error: "Action de messagerie inconnue." }, 400);
+      }
+      const messageID = String(body.messageId ?? "").trim();
+      if (!/^[A-Za-z0-9_-]{1,160}$/.test(messageID)) return response({ error: "Identifiant de message invalide." }, 400);
+      const dashboard = await loadDashboard(role, email, result.member.id, token);
+      const messages = (dashboard?.messages as Record<string, unknown>[] | undefined) ?? [];
+      const message = messages.find((entry) => String(entry._id ?? entry.id ?? "") === messageID);
+      if (!message) return response({ error: "Ce message n’est pas associé à votre espace." }, 404);
+      if (message.isRead === true) return response({ success: true, alreadyRead: true });
+      const collection = role === "courtier" ? "brokermessages" : "artisanmessages";
+      await wixRequest(`/wix-data/v2/items/${encodeURIComponent(messageID)}`, token, {
+        method: "PATCH",
+        body: JSON.stringify({
+          dataCollectionId: collection,
+          patch: {
+            dataItemId: messageID,
+            fieldModifications: [{ fieldPath: "isRead", action: "SET_FIELD", setFieldOptions: { value: true } }],
+          },
+        }),
+      });
+      return response({ success: true, messageId: messageID });
     }
     const dashboard = await loadDashboard(role, email, result.member.id, token);
     if (!dashboard) return response({ error: "Aucun compte actif de ce type n’est associé à cette adresse e-mail." }, 403);

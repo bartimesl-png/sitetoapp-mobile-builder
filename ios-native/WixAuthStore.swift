@@ -392,6 +392,39 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         }
     }
 
+    func markInquiryRead(role: String, messageID: String) async {
+        errorMessage = nil
+        do {
+            let token = try await validAccessToken()
+            let endpoint = URL(string: "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/ios-native-dashboard-v2")!
+            var request = URLRequest(url: endpoint, timeoutInterval: 35)
+            request.httpMethod = "POST"
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            request.httpBody = try JSONSerialization.data(withJSONObject: [
+                "action": "mark_inquiry_read", "role": role, "messageId": messageID
+            ])
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else { throw AuthError.invalidResponse }
+            guard (200..<300).contains(http.statusCode) else {
+                let payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+                throw AuthError.api(payload?["error"] as? String ?? "Impossible de marquer ce message comme lu.")
+            }
+            if var dashboard = dashboardData, let currentMessages = dashboard["messages"] as? [[String: Any]] {
+                dashboard["messages"] = currentMessages.map { item in
+                    guard (item["_id"] as? String ?? item["id"] as? String) == messageID else { return item }
+                    var updated = item
+                    updated["isRead"] = true
+                    return updated
+                }
+                dashboardData = dashboard
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func registerPushDevice(role: String) async {
         // The host dashboard has no push owner type in the current notification
         // service. Do not register a token against an unrelated Wix profile.
