@@ -1599,7 +1599,11 @@ private struct NativeRoleDashboardView: View {
                 ("Mes hébergements", "house", "accommodations"),
                 ("Demandes de réservation", "calendar.badge.clock", "bookingRequests"),
                 ("Réservations", "calendar", "reservations"),
-                ("Conversations", "bubble.left.and.bubble.right", "conversations")
+                ("Conversations", "bubble.left.and.bubble.right", "conversations"),
+                ("Calendrier des disponibilités", "calendar.badge.checkmark", "calendar"),
+                ("Réservations externes", "calendar.badge.exclamationmark", "externalBookings"),
+                ("Tarifs saisonniers", "eurosign.circle", "seasonalRates"),
+                ("Calendriers connectés", "arrow.triangle.2.circlepath.icloud", "calendarConnections")
             ]
         }
         return keys.compactMap { title, icon, key in
@@ -2042,7 +2046,11 @@ private struct DashboardOverview: View {
                 ("Hébergements", "accommodations", "house.fill"),
                 ("Demandes", "bookingRequests", "calendar.badge.clock"),
                 ("Réservations", "reservations", "calendar"),
-                ("Conversations", "conversations", "bubble.left.and.bubble.right.fill")
+                ("Conversations", "conversations", "bubble.left.and.bubble.right.fill"),
+                ("Disponibilités", "calendar", "calendar.badge.checkmark"),
+                ("Imports externes", "externalBookings", "calendar.badge.exclamationmark"),
+                ("Tarifs", "seasonalRates", "eurosign.circle"),
+                ("iCal", "calendarConnections", "arrow.triangle.2.circlepath.icloud")
             ]
         }
     }
@@ -2606,7 +2614,13 @@ private struct DashboardItemDetailView: View {
         ("bookingDateTime", "Date de la réservation"), ("lastMessageTimestamp", "Dernier message le"),
         ("status", "Statut"), ("maxGuests", "Capacité maximale"),
         ("numberOfBedrooms", "Chambres"), ("amenities", "Équipements"),
-        ("locationAddress", "Adresse")
+        ("locationAddress", "Adresse"), ("calendarDate", "Date du calendrier"),
+        ("availabilityStatus", "Disponibilité"), ("pricePerNight", "Prix par nuit"),
+        ("minimumStay", "Séjour minimum"), ("minimumStayNights", "Séjour minimum (nuits)"),
+        ("startDate", "Début"), ("endDate", "Fin"), ("sourcePlatform", "Plateforme source"),
+        ("externalBookingReference", "Référence externe"), ("seasonName", "Saison"),
+        ("platformName", "Plateforme"), ("lastSyncDate", "Dernière synchronisation"),
+        ("syncStatus", "État de synchronisation")
     ]
 
     private var title: String {

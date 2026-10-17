@@ -132,7 +132,10 @@ async function loadDashboard(role: string, email: string, memberID: string, toke
     const profile = first(await query("seasonalhostprofiles", emailFilter(email), ["email", "fullName", "phoneNumber", "profilePicture", "biography", "isVerified"], token, 2));
     if (!profile) return null;
     const hostId = String(profile._id ?? "");
-    if (!hostId) return { role, profile, accommodations: [], bookingRequests: [], reservations: [], conversations: [] };
+    if (!hostId) return {
+      role, profile, accommodations: [], bookingRequests: [], reservations: [], conversations: [],
+      calendar: [], externalBookings: [], seasonalRates: [], calendarConnections: [],
+    };
 
     // These are existing Wix CMS collections. Scope every list through the
     // authenticated host profile or an accommodation owned by that profile.
@@ -158,23 +161,56 @@ async function loadDashboard(role: string, email: string, memberID: string, toke
 
     const accommodationIDs = [...new Set(accommodations.map((item) => String(item._id ?? "")).filter(Boolean))];
     const bookingRequestPages: Record<string, unknown>[][] = [];
-    for (let start = 0; start < accommodationIDs.length; start += 10) {
-      const accommodationBatch = accommodationIDs.slice(start, start + 10);
-      bookingRequestPages.push(...await Promise.all(accommodationBatch.map((accommodationId) =>
+    const calendarPages: Record<string, unknown>[][] = [];
+    const externalBookingPages: Record<string, unknown>[][] = [];
+    const seasonalRatePages: Record<string, unknown>[][] = [];
+    const calendarConnectionPages: Record<string, unknown>[][] = [];
+    for (let start = 0; start < accommodationIDs.length; start += 3) {
+      const accommodationBatch = accommodationIDs.slice(start, start + 3);
+      const relatedPages = await Promise.all(accommodationBatch.map(async (accommodationId) => Promise.all([
         query("seasonalbookingrequests", { accommodationId: { $eq: accommodationId } }, [
           "accommodationId", "vacationerId", "vacationerName", "vacationerEmail", "vacationerPhone",
           "checkInDate", "checkOutDate", "proposedCheckInDate", "proposedCheckOutDate", "numberOfNights",
           "numberOfAdults", "numberOfChildren", "numberOfBabies", "petsIncluded", "guestMessage", "status",
           "totalPrice", "hiddenByHost",
         ], token, 100),
-      )));
+        query("seasonalcalendars", { linkedEntityId: { $eq: accommodationId } }, [
+          "linkedEntityId", "linkedEntityType", "calendarDate", "availabilityStatus", "pricePerNight",
+          "minimumStay", "bookingRequestId", "checkInFrom", "checkInUntil", "checkOutUntil",
+        ], token, 100),
+        query("seasonalexternalbookings", { accommodationId: { $eq: accommodationId } }, [
+          "accommodationId", "sourcePlatform", "startDate", "endDate", "externalBookingReference",
+        ], token, 100),
+        query("seasonalrates", { accommodationId: { $eq: accommodationId } }, [
+          "accommodationId", "seasonName", "startDate", "endDate", "pricePerNight", "minimumStayNights",
+        ], token, 100),
+        query("seasonalicalconnections", { accommodationId: { $eq: accommodationId } }, [
+          "accommodationId", "iCalUrl", "platformName", "lastSyncDate", "syncStatus",
+        ], token, 20),
+      ])));
+      for (const [requests, calendar, externalBookings, seasonalRates, calendarConnections] of relatedPages) {
+        bookingRequestPages.push(requests);
+        calendarPages.push(calendar);
+        externalBookingPages.push(externalBookings);
+        seasonalRatePages.push(seasonalRates);
+        calendarConnectionPages.push(calendarConnections);
+      }
     }
     const bookingRequests = [...new Map(bookingRequestPages.flat()
       .filter((item) => item.hiddenByHost !== true)
       .map((item) => [String(item._id ?? ""), item] as const)
       .filter(([id]) => Boolean(id))).values()];
+    const uniqueItems = (pages: Record<string, unknown>[][]) => [...new Map(pages.flat()
+      .map((item) => [String(item._id ?? ""), item] as const)
+      .filter(([id]) => Boolean(id))).values()];
 
-    return { role, profile, accommodations, bookingRequests, reservations, conversations };
+    return {
+      role, profile, accommodations, bookingRequests, reservations, conversations,
+      calendar: uniqueItems(calendarPages),
+      externalBookings: uniqueItems(externalBookingPages),
+      seasonalRates: uniqueItems(seasonalRatePages),
+      calendarConnections: uniqueItems(calendarConnectionPages),
+    };
   }
   return null;
 }
