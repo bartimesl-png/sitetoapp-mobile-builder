@@ -57,13 +57,15 @@ async function loadDashboard(role: string, email: string, memberID: string, toke
     const account = first(await query("privateaccounts", emailFilter(email), ["email", "accountType", "isActive"], token, 2));
     if (!account || account.isActive === false) return null;
     const accountId = String(account._id ?? "");
-    const [profiles, properties, classifieds, favorites] = await Promise.all([
+    const [profiles, properties, classifieds, favorites, savedSearches, buyerMatchings] = await Promise.all([
       query("privateprofiles", { ownerId: { $eq: accountId } }, ["ownerId", "firstName", "lastName", "email", "phone", "city", "postalCode", "isProfileComplete"], token, 2),
       query("privateproperties", { ownerId: { $eq: accountId } }, ["ownerId", "title", "description", "propertyType", "transactionType", "price", "surface", "landSurface", "rooms", "bedrooms", "bathrooms", "city", "postalCode", "mainImage", "galleryImages", "isPublic", "status", "createdAt", "slug"], token),
       query("classifiedads", { ownerId: { $eq: accountId } }, ["ownerId", "itemName", "itemPrice", "itemDescription", "itemImage", "photo2", "photo3", "photo4", "photo5", "category", "condition", "city", "postalCode", "status", "createdAt"], token),
       query("favoritelistings", { accountId: { $eq: accountId } }, ["accountId", "listingId", "sourceCollection", "createdAt", "isArchived"], token),
+      query("particularbuyersearches", { accountId: { $eq: accountId }, isActive: { $eq: true } }, ["accountId", "searchName", "transactionType", "propertyTypes", "city", "postalCode", "radius", "minBudget", "maxBudget", "minSurface", "maxSurface", "minRooms", "minBedrooms", "emailAlertsEnabled", "createdAt", "updatedAt"], token),
+      query("particularsearchmatchings", { buyerAccountId: { $eq: accountId } }, ["buyerAccountId", "searchId", "propertyId", "propertyTitle", "propertyCity", "propertyPrice", "propertySurface", "propertyUrl", "professionalId", "professionalName", "professionalEmail", "professionalPhone", "matchingScore", "status", "emailSentToBuyer", "createdAt", "notifiedAt"], token),
     ]);
-    return { role, account: { id: accountId }, profile: first(profiles), properties, classifieds, favorites };
+    return { role, account: { id: accountId }, profile: first(profiles), properties, classifieds, favorites, savedSearches, buyerMatchings };
   }
 
   if (role === "professionnel") {
