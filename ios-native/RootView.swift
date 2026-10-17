@@ -22,7 +22,7 @@ struct RootView: View {
                 .tabItem { Label("Professionnels", systemImage: "person.2") }
                 .tag(2)
 
-            NativeFavoritesView(service: listingsService)
+            NativeFavoritesView(service: listingsService, classifiedAds: classifiedAdsService)
                 .tabItem { Label("Favoris", systemImage: "heart.fill") }
                 .tag(3)
 
@@ -302,9 +302,9 @@ private struct NativeListingsView: View {
             .navigationTitle("Annonces")
             .navigationBarTitleDisplayMode(.large)
             .searchable(text: $searchText, prompt: catalogSection == .realEstate ? "Ville, code postal, bien…" : "Article, catégorie, ville…")
-            .task {
-                await service.loadIfNeeded()
-                await classifiedAds.loadIfNeeded()
+            .task(id: catalogSection) {
+                if catalogSection == .realEstate { await service.loadIfNeeded() }
+                else { await classifiedAds.loadIfNeeded() }
             }
         }
     }
@@ -312,6 +312,8 @@ private struct NativeListingsView: View {
 
 private struct ClassifiedAdRow: View {
     let ad: ClassifiedAd
+    var isFavorite = false
+    var onFavorite: () -> Void = {}
 
     var body: some View {
         HStack(spacing: 13) {
@@ -331,6 +333,15 @@ private struct ClassifiedAdRow: View {
                 }
             }
             Spacer(minLength: 0)
+            Button(action: onFavorite) {
+                Image(systemName: isFavorite ? "heart.fill" : "heart")
+                    .font(.title3)
+                    .foregroundStyle(isFavorite ? .pink : .secondary)
+                    .frame(width: 40, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isFavorite ? "Retirer des favoris" : "Ajouter aux favoris")
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())
@@ -339,6 +350,7 @@ private struct ClassifiedAdRow: View {
 
 private struct NativeClassifiedAdDetailView: View {
     let ad: ClassifiedAd
+    @ObservedObject private var favorites = FavoritesStore.shared
 
     var body: some View {
         ScrollView {
@@ -356,7 +368,18 @@ private struct NativeClassifiedAdDetailView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                     .accessibilityLabel("Galerie de photos de la petite annonce")
                 }
-                Text(ad.formattedPrice).font(.title2.bold())
+                HStack(alignment: .top) {
+                    Text(ad.formattedPrice).font(.title2.bold())
+                    Spacer()
+                    Button { favorites.toggle(ad) } label: {
+                        Image(systemName: favorites.contains(ad) ? "heart.fill" : "heart")
+                            .font(.title2)
+                            .foregroundStyle(favorites.contains(ad) ? .pink : .teal)
+                            .frame(width: 48, height: 48)
+                            .background(Color.teal.opacity(0.09), in: Circle())
+                    }
+                    .accessibilityLabel(favorites.contains(ad) ? "Retirer des favoris" : "Ajouter aux favoris")
+                }
                 Text(ad.title).font(.title3.weight(.semibold))
                 if let category = ad.category {
                     Label([category, ad.subcategory].compactMap { $0 }.joined(separator: " · "), systemImage: "tag")
@@ -387,37 +410,47 @@ private struct NativeClassifiedAdDetailView: View {
 
 private struct NativeFavoritesView: View {
     @ObservedObject var service: ListingsService
+    @ObservedObject var classifiedAds: ClassifiedAdsService
     @ObservedObject private var favorites = FavoritesStore.shared
-    private var saved: [Listing] { service.listings.filter { favorites.contains($0) } }
+    private var savedListings: [Listing] { service.listings.filter { favorites.contains($0) } }
+    private var savedClassifiedAds: [ClassifiedAd] { classifiedAds.ads.filter { favorites.contains($0) } }
 
     var body: some View {
         NavigationStack {
-            Group {
-                if saved.isEmpty {
-                    ContentUnavailableView {
-                        Label("Aucun favori enregistré", systemImage: "heart")
-                    } description: {
-                        Text("Touchez le cœur d’une annonce pour la retrouver ici sur cet iPhone.")
-                    }
-                } else {
-                    List {
-                        ForEach(saved) { listing in
+            List {
+                Section("Biens immobiliers") {
+                    if savedListings.isEmpty {
+                        Text("Aucun bien immobilier enregistré.").foregroundStyle(.secondary)
+                    } else {
+                        ForEach(savedListings) { listing in
                             NavigationLink(value: listing) {
-                                ListingRow(listing: listing, isFavorite: true) {
-                                    favorites.toggle(listing)
-                                }
+                                ListingRow(listing: listing, isFavorite: true) { favorites.toggle(listing) }
                             }
                             .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                         }
                     }
-                    .listStyle(.plain)
-                    .navigationDestination(for: Listing.self) { listing in
-                        ListingDetailView(listing: listing)
+                }
+                Section("Petites annonces") {
+                    if savedClassifiedAds.isEmpty {
+                        Text("Aucune petite annonce enregistrée.").foregroundStyle(.secondary)
+                    } else {
+                        ForEach(savedClassifiedAds) { ad in
+                            NavigationLink(value: ad) {
+                                ClassifiedAdRow(ad: ad, isFavorite: true) { favorites.toggle(ad) }
+                            }
+                            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                        }
                     }
                 }
             }
+            .listStyle(.insetGrouped)
+            .navigationDestination(for: Listing.self) { ListingDetailView(listing: $0) }
+            .navigationDestination(for: ClassifiedAd.self) { NativeClassifiedAdDetailView(ad: $0) }
             .navigationTitle("Favoris")
-            .task { await service.loadIfNeeded() }
+            .task {
+                await service.loadIfNeeded()
+                await classifiedAds.loadIfNeeded()
+            }
         }
     }
 }
