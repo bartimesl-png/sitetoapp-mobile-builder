@@ -65,14 +65,11 @@ struct WixPublicProfessionalItem: Decodable {
 
 struct WixPublicProfessionalData: Decodable {
     let companyName: String?
-    let contactName: String?
     let city: String?
     let postalCode: String?
     let professionalType: String?
     let category: String?
     let description: String?
-    let website: String?
-    let slug: String?
     let isVisiblePublicly: Bool?
     let isActive: Bool?
 
@@ -80,14 +77,11 @@ struct WixPublicProfessionalData: Decodable {
         WixPublicProfessional(
             id: id,
             companyName: companyName,
-            contactName: contactName,
             city: city,
             postalCode: postalCode,
             professionalType: professionalType,
             category: category,
-            description: description,
-            website: website,
-            slug: slug
+            description: description
         )
     }
 }
@@ -95,14 +89,11 @@ struct WixPublicProfessionalData: Decodable {
 struct WixPublicProfessional: Identifiable {
     let id: String
     let companyName: String?
-    let contactName: String?
     let city: String?
     let postalCode: String?
     let professionalType: String?
     let category: String?
     let description: String?
-    let website: String?
-    let slug: String?
 
     var resolvedName: String {
         guard let companyName, !companyName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {

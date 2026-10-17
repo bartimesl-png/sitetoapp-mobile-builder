@@ -272,8 +272,8 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         var offset = 0
         var profiles: [WixPublicProfessional] = []
         let fields = [
-            "companyName", "contactName", "city", "postalCode", "professionalType",
-            "category", "description", "website", "slug", "isVisiblePublicly", "isActive"
+            "companyName", "city", "postalCode", "professionalType",
+            "category", "description", "isVisiblePublicly", "isActive"
         ]
 
         // Only profiles that Wix explicitly marks public and active are eligible.
