@@ -1839,6 +1839,10 @@ private struct NativeRoleDashboardView: View {
                                            let conversationID = item["conversationId"] as? String,
                                            !conversationID.isEmpty {
                                             selectedConversation = DashboardConversationSelection(id: conversationID, preview: item)
+                                        } else if role == .hebergeur, section.0 == "Conversations",
+                                                  let conversationID = (item["_id"] as? String) ?? (item["id"] as? String),
+                                                  !conversationID.isEmpty {
+                                            selectedConversation = DashboardConversationSelection(id: conversationID, preview: item)
                                         } else {
                                             selectedItem = DashboardItemSelection(item: item)
                                         }
@@ -1947,11 +1951,17 @@ private struct NativeRoleDashboardView: View {
         }
         .sheet(item: $selectedConversation) { selection in
             NavigationStack {
-                NativeProfessionalConversationView(
-                    conversationID: selection.id,
-                    preview: selection.preview,
-                    professionalID: (auth.dashboardData?["profile"] as? [String: Any])?["_id"] as? String ?? ""
-                )
+                Group {
+                    if role == .hebergeur {
+                        NativeHostConversationView(conversationID: selection.id, preview: selection.preview)
+                    } else {
+                        NativeProfessionalConversationView(
+                            conversationID: selection.id,
+                            preview: selection.preview,
+                            professionalID: (auth.dashboardData?["profile"] as? [String: Any])?["_id"] as? String ?? ""
+                        )
+                    }
+                }
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Fermer") { selectedConversation = nil }
@@ -2165,6 +2175,136 @@ private struct NativeProfessionalConversationView: View {
         defer { isSending = false }
         do {
             let sent = try await auth.sendProfessionalMessage(conversationID: conversationID, content: content)
+            messages.append(sent)
+            composerText = ""
+        } catch {
+            sendError = error.localizedDescription
+        }
+    }
+}
+
+private struct NativeHostConversationView: View {
+    @StateObject private var auth = WixAuthStore.shared
+    @State private var messages: [[String: Any]] = []
+    @State private var hostID = ""
+    @State private var error: String?
+    @State private var sendError: String?
+    @State private var composerText = ""
+    @State private var isLoading = false
+    @State private var isSending = false
+    let conversationID: String
+    let preview: [String: Any]
+
+    private var title: String {
+        if let name = preview["vacationerName"] as? String, !name.isEmpty { return name }
+        return "Conversation hébergement"
+    }
+
+    var body: some View {
+        Group {
+            if isLoading && messages.isEmpty {
+                ProgressView("Chargement de la conversation…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let error, messages.isEmpty {
+                ContentUnavailableView {
+                    Label("Conversation indisponible", systemImage: "bubble.left.and.exclamationmark.bubble.right")
+                } description: {
+                    Text(error)
+                } actions: {
+                    Button("Réessayer") { Task { await reload() } }
+                        .buttonStyle(.borderedProminent)
+                }
+            } else if messages.isEmpty {
+                ContentUnavailableView("Aucun message", systemImage: "bubble.left.and.bubble.right")
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(spacing: 12) {
+                            ForEach(Array(messages.enumerated()), id: \.offset) { index, message in
+                                let outgoing = (message["senderId"] as? String) == hostID
+                                HStack {
+                                    if outgoing { Spacer(minLength: 42) }
+                                    VStack(alignment: .leading, spacing: 5) {
+                                        Text((message["messageContent"] as? String) ?? "")
+                                            .font(.body).textSelection(.enabled)
+                                        if let date = message["sentAt"] as? String, !date.isEmpty {
+                                            Text(date).font(.caption2).foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    .padding(12)
+                                    .background(outgoing ? Color.teal.opacity(0.14) : Color(uiColor: .secondarySystemGroupedBackground),
+                                                in: RoundedRectangle(cornerRadius: 16))
+                                    if !outgoing { Spacer(minLength: 42) }
+                                }
+                                .id(index)
+                            }
+                        }
+                        .padding(16)
+                    }
+                    .refreshable { await reload() }
+                    .onChange(of: messages.count) { _, count in
+                        if count > 0 { proxy.scrollTo(count - 1, anchor: .bottom) }
+                    }
+                }
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            HStack(alignment: .bottom, spacing: 10) {
+                TextField("Écrire un message…", text: $composerText, axis: .vertical)
+                    .lineLimit(1...4)
+                    .padding(.horizontal, 13).padding(.vertical, 10)
+                    .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20))
+                    .accessibilityLabel("Votre message")
+                Button { Task { await sendMessage() } } label: {
+                    if isSending { ProgressView() }
+                    else { Image(systemName: "arrow.up.circle.fill").font(.system(size: 34)) }
+                }
+                .disabled(isSending || composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .accessibilityLabel("Envoyer le message")
+            }
+            .padding(.horizontal).padding(.vertical, 8).background(.bar)
+        }
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await reload() }
+        .alert("Envoi impossible", isPresented: Binding(
+            get: { sendError != nil },
+            set: { if !$0 { sendError = nil } }
+        )) {
+            Button("OK", role: .cancel) { sendError = nil }
+        } message: {
+            Text(sendError ?? "Réessayez dans un instant.")
+        }
+    }
+
+    @MainActor
+    private func reload() async {
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            let loaded = try await auth.loadHostConversation(id: conversationID)
+            hostID = loaded.hostID
+            messages = loaded.messages
+            error = nil
+            try await auth.markHostConversationRead(conversationID: conversationID)
+            messages = messages.map { message in
+                var updated = message
+                if (updated["receiverId"] as? String) == hostID { updated["isRead"] = true }
+                return updated
+            }
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func sendMessage() async {
+        let content = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !content.isEmpty, !isSending else { return }
+        isSending = true
+        defer { isSending = false }
+        do {
+            let sent = try await auth.sendHostMessage(conversationID: conversationID, content: content)
             messages.append(sent)
             composerText = ""
         } catch {

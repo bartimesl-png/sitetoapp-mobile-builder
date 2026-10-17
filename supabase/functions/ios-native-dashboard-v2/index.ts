@@ -159,6 +159,17 @@ async function loadDashboard(role: string, email: string, memberID: string, toke
       ], token, 50),
     ]);
 
+    const accommodationNameByID = new Map(accommodations.map((item) => [
+      String(item._id ?? ""), String(item.itemName ?? "").trim(),
+    ]));
+    const conversationCards = conversations.map((conversation) => {
+      const accommodationName = accommodationNameByID.get(String(conversation.accommodationId ?? "")) ?? "";
+      return {
+        ...conversation,
+        title: accommodationName ? `Échange · ${accommodationName}` : "Conversation voyageur",
+      };
+    });
+
     const accommodationIDs = [...new Set(accommodations.map((item) => String(item._id ?? "")).filter(Boolean))];
     const bookingRequestPages: Record<string, unknown>[][] = [];
     const calendarPages: Record<string, unknown>[][] = [];
@@ -205,7 +216,7 @@ async function loadDashboard(role: string, email: string, memberID: string, toke
       .filter(([id]) => Boolean(id))).values()];
 
     return {
-      role, profile, accommodations, bookingRequests, reservations, conversations,
+      role, profile, accommodations, bookingRequests, reservations, conversations: conversationCards,
       calendar: uniqueItems(calendarPages),
       externalBookings: uniqueItems(externalBookingPages),
       seasonalRates: uniqueItems(seasonalRatePages),

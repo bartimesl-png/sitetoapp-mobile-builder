@@ -628,6 +628,79 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         }
     }
 
+    func loadHostConversation(id: String) async throws -> (hostID: String, messages: [[String: Any]]) {
+        let conversationID = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !conversationID.isEmpty, conversationID.count <= 160 else {
+            throw AuthError.api("Identifiant de conversation invalide.")
+        }
+        let token = try await validAccessToken()
+        var components = URLComponents(string: "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/ios-native-host-conversation")!
+        components.queryItems = [URLQueryItem(name: "conversationId", value: conversationID)]
+        var request = URLRequest(url: components.url!, timeoutInterval: 35)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw AuthError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else {
+            let payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            throw AuthError.api(payload?["error"] as? String ?? "Impossible de charger cette conversation.")
+        }
+        guard let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let hostID = payload["hostId"] as? String,
+              let messages = payload["messages"] as? [[String: Any]] else {
+            throw AuthError.invalidResponse
+        }
+        return (hostID, messages)
+    }
+
+    func sendHostMessage(conversationID: String, content: String) async throws -> [String: Any] {
+        let text = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, text.count <= 4000 else {
+            throw AuthError.api("Le message doit contenir entre 1 et 4 000 caractères.")
+        }
+        let token = try await validAccessToken()
+        let endpoint = URL(string: "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/ios-native-host-conversation")!
+        var request = URLRequest(url: endpoint, timeoutInterval: 35)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "action": "send", "conversationId": conversationID, "content": text,
+        ])
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw AuthError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else {
+            let payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            throw AuthError.api(payload?["error"] as? String ?? "Le message n’a pas pu être envoyé.")
+        }
+        guard let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let message = payload["message"] as? [String: Any] else {
+            throw AuthError.invalidResponse
+        }
+        return message
+    }
+
+    func markHostConversationRead(conversationID: String) async throws {
+        let token = try await validAccessToken()
+        let endpoint = URL(string: "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/ios-native-host-conversation")!
+        var request = URLRequest(url: endpoint, timeoutInterval: 35)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "action": "mark_read", "conversationId": conversationID,
+        ])
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw AuthError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else {
+            let payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            throw AuthError.api(payload?["error"] as? String ?? "Impossible de marquer cette conversation comme lue.")
+        }
+    }
+
     func submitEstimationRequest(
         firstName: String,
         lastName: String,
