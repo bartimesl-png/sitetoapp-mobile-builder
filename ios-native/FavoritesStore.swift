@@ -16,11 +16,23 @@ final class FavoritesStore: ObservableObject {
         listingIDs.contains(listing.id)
     }
 
+    func contains(_ ad: ClassifiedAd) -> Bool {
+        listingIDs.contains(ad.id)
+    }
+
+    func toggle(_ ad: ClassifiedAd) {
+        toggle(id: ad.id)
+    }
+
     func toggle(_ listing: Listing) {
-        if listingIDs.contains(listing.id) {
-            listingIDs.remove(listing.id)
+        toggle(id: listing.id)
+    }
+
+    private func toggle(id: String) {
+        if listingIDs.contains(id) {
+            listingIDs.remove(id)
         } else {
-            listingIDs.insert(listing.id)
+            listingIDs.insert(id)
         }
         UserDefaults.standard.set(Array(listingIDs).sorted(), forKey: storageKey)
     }
