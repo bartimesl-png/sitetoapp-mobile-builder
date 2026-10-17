@@ -29,6 +29,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
     private let redirectURI = "https://www.partenairefoyer.com/api/auth/callback"
     private let keychainService = "com.partenairefoyer.app.wix-session"
     private var authSession: ASWebAuthenticationSession?
+    private var dashboardRequestID = UUID()
 
     private struct StoredSession: Codable {
         let accessToken: String
@@ -167,18 +168,30 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
     }
 
     func signOut() {
+        resetDashboard()
         deleteStoredSession()
         member = nil
-        dashboardData = nil
-        dashboardError = nil
         errorMessage = nil
     }
 
-    func loadDashboard(role: String) async {
-        guard !isLoadingDashboard else { return }
-        isLoadingDashboard = true
+    func resetDashboard() {
+        dashboardRequestID = UUID()
+        dashboardData = nil
         dashboardError = nil
-        defer { isLoadingDashboard = false }
+        isLoadingDashboard = false
+    }
+
+    func loadDashboard(role: String) async {
+        let requestID = UUID()
+        dashboardRequestID = requestID
+        isLoadingDashboard = true
+        dashboardData = nil
+        dashboardError = nil
+        defer {
+            if dashboardRequestID == requestID {
+                isLoadingDashboard = false
+            }
+        }
         do {
             let token = try await validAccessToken()
             var components = URLComponents(string: "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/ios-native-dashboard")!
@@ -197,8 +210,10 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
                   let dashboard = payload["dashboard"] as? [String: Any] else {
                 throw AuthError.invalidResponse
             }
+            guard dashboardRequestID == requestID else { return }
             dashboardData = dashboard
         } catch {
+            guard dashboardRequestID == requestID else { return }
             dashboardData = nil
             dashboardError = error.localizedDescription
         }
