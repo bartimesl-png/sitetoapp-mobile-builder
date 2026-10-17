@@ -250,6 +250,12 @@ struct WixSeasonalCalendarEntry: Identifiable {
     let availabilityStatus: String
 }
 
+struct WixProfessionalFavorite: Identifiable, Hashable {
+    let id: String
+    let professionalID: String
+    let professionalType: String
+}
+
 struct WixPublicPropertyItem: Decodable {
     let id: String
     let data: WixPublicProperty

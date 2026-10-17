@@ -79,6 +79,13 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         let redirectSession: Session
     }
 
+    private struct WixDataItemWriteResponse: Decodable {
+        struct DataItem: Decodable {
+            let id: String?
+        }
+        let dataItem: DataItem?
+    }
+
     private struct MemberResponse: Decodable {
         struct MemberPayload: Decodable {
             let id: String
@@ -2035,6 +2042,129 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
             }
         }
         return brokers
+    }
+
+    func fetchProfessionalFavorites() async throws -> [WixProfessionalFavorite] {
+        guard let member, member.loginEmailVerified == true else {
+            throw AuthError.api("Connectez-vous avec une adresse e-mail vérifiée pour voir vos professionnels favoris.")
+        }
+        let token = try await validAccessToken()
+        let accountEmail = member.loginEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+        var offset = 0
+        var favorites: [WixProfessionalFavorite] = []
+        while true {
+            let result = try await post(
+                "https://www.wixapis.com/wix-data/v2/items/query",
+                bearer: token,
+                body: [
+                    "dataCollectionId": "professionalfavorites",
+                    "query": [
+                        "filter": ["accountId": ["$eq": accountEmail]],
+                        "paging": ["limit": 100, "offset": offset],
+                        "fields": ["accountId", "professionalId", "professionalType", "createdAt", "notes"]
+                    ]
+                ],
+                as: WixRawDirectoryResponse.self
+            )
+            favorites.append(contentsOf: result.dataItems.compactMap { item in
+                let data = item.data.mapValues(\.value)
+                guard importedString(data, ["accountId"]) == accountEmail,
+                      let professionalID = importedString(data, ["professionalId"]),
+                      let type = importedString(data, ["professionalType"]) else { return nil }
+                return WixProfessionalFavorite(id: item.id, professionalID: professionalID, professionalType: type)
+            })
+            guard result.dataItems.count == 100 else { break }
+            let nextOffset = offset + result.dataItems.count
+            guard nextOffset > offset else { break }
+            offset = nextOffset
+        }
+        return favorites
+    }
+
+    func isProfessionalFavorite(_ professionalID: String) async throws -> Bool {
+        guard let member, member.loginEmailVerified == true else { return false }
+        let cleanID = professionalID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanID.isEmpty else { return false }
+        let token = try await validAccessToken()
+        let email = member.loginEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+        let result = try await post(
+            "https://www.wixapis.com/wix-data/v2/items/query",
+            bearer: token,
+            body: [
+                "dataCollectionId": "professionalfavorites",
+                "query": [
+                    "filter": ["accountId": ["$eq": email], "professionalId": ["$eq": cleanID]],
+                    "paging": ["limit": 2],
+                    "fields": ["accountId", "professionalId"]
+                ]
+            ],
+            as: WixRawDirectoryResponse.self
+        )
+        return result.dataItems.contains { item in
+            let data = item.data.mapValues(\.value)
+            return importedString(data, ["accountId"]) == email &&
+                importedString(data, ["professionalId"]) == cleanID
+        }
+    }
+
+    func toggleProfessionalFavorite(_ professionalID: String, professionalType: String) async throws -> Bool {
+        guard let member, member.loginEmailVerified == true else {
+            throw AuthError.api("Connectez-vous avec une adresse e-mail vérifiée pour gérer vos favoris.")
+        }
+        let cleanID = professionalID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard cleanID.range(of: #"^[A-Za-z0-9_-]{1,200}$"#, options: .regularExpression) != nil,
+              ["artisan", "diagnostiqueur", "courtier", "agent", "serviceprovider"].contains(professionalType) else {
+            throw AuthError.api("Cette fiche professionnelle ne peut pas être enregistrée en favori.")
+        }
+        let token = try await validAccessToken()
+        let email = member.loginEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+        let queryResult = try await post(
+            "https://www.wixapis.com/wix-data/v2/items/query",
+            bearer: token,
+            body: [
+                "dataCollectionId": "professionalfavorites",
+                "query": [
+                    "filter": ["accountId": ["$eq": email], "professionalId": ["$eq": cleanID]],
+                    "paging": ["limit": 2],
+                    "fields": ["accountId", "professionalId"]
+                ]
+            ],
+            as: WixRawDirectoryResponse.self
+        )
+        if let existing = queryResult.dataItems.first(where: { item in
+            let data = item.data.mapValues(\.value)
+            return importedString(data, ["accountId"]) == email &&
+                importedString(data, ["professionalId"]) == cleanID
+        }) {
+            var components = URLComponents(string: "https://www.wixapis.com/wix-data/v2/items/\(existing.id)")!
+            components.queryItems = [URLQueryItem(name: "dataCollectionId", value: "professionalfavorites")]
+            var request = URLRequest(url: components.url!, timeoutInterval: 30)
+            request.httpMethod = "DELETE"
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            let _: WixDataItemWriteResponse = try await decode(request)
+            return false
+        }
+        let response = try await post(
+            "https://www.wixapis.com/wix-data/v2/items",
+            bearer: token,
+            body: [
+                "dataCollectionId": "professionalfavorites",
+                "dataItem": [
+                    "id": UUID().uuidString,
+                    "data": [
+                        "accountId": email,
+                        "professionalId": cleanID,
+                        "professionalType": professionalType,
+                        "createdAt": ISO8601DateFormatter().string(from: Date()),
+                        "notes": ""
+                    ]
+                ]
+            ],
+            as: WixDataItemWriteResponse.self
+        )
+        guard response.dataItem?.id != nil else { throw AuthError.api("Wix n’a pas confirmé l’enregistrement du favori.") }
+        return true
     }
 
     func fetchPublicSeasonalAccommodations() async throws -> [WixSeasonalAccommodation] {
