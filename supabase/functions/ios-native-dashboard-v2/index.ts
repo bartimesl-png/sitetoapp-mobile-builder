@@ -376,7 +376,7 @@ async function loadDashboard(role: string, email: string, memberID: string, toke
     const providers = await query("serviceproviders-1", { accountId: { $eq: accountId } }, ["accountId", "businessName", "category", "subcategory", "description", "services", "city", "postalCode", "phone", "email", "website", "photoUrls", "status", "verified"], token, 3);
     const activity = (entry: Record<string, unknown>) => `${String(entry.category ?? "")} ${String(entry.subcategory ?? "")}`;
     const profile = providers.find((entry) => !/artisan|diagnostiqueur/i.test(activity(entry))) ?? null;
-    const messages = profile ? await query("artisanmessages", { artisanId: { $eq: String(profile._id ?? "") } }, ["artisanId", "senderName", "senderEmail", "messageContent", "createdAt", "isRead"], token) : [];
+    const messages = profile ? await query("artisanmessages", { artisanId: { $eq: String(profile._id ?? "") } }, ["artisanId", "senderName", "senderEmail", "senderPhone", "messageContent", "createdAt", "isRead"], token) : [];
     return { role, account: { id: accountId }, profile, messages };
   }
 
@@ -1008,6 +1008,8 @@ Deno.serve(async (req: Request) => {
         const maxGuests = Number(body.maxGuests);
         const numberOfBedrooms = Number(body.numberOfBedrooms);
         const itemPrice = Number(body.itemPrice);
+        const latitude = body.latitude === undefined || body.latitude === null || body.latitude === "" ? undefined : Number(body.latitude);
+        const longitude = body.longitude === undefined || body.longitude === null || body.longitude === "" ? undefined : Number(body.longitude);
         const amenities = String(body.amenities ?? "").trim();
         const slug = String(body.slug ?? "").trim().toLowerCase();
         const checkInMode = String(body.checkInMode ?? "FLEXIBLE").trim().toUpperCase();
@@ -1024,6 +1026,9 @@ Deno.serve(async (req: Request) => {
             !Number.isInteger(maxGuests) || maxGuests < 1 || maxGuests > 100 ||
             !Number.isInteger(numberOfBedrooms) || numberOfBedrooms < 1 || numberOfBedrooms > 100 ||
             !Number.isFinite(itemPrice) || itemPrice < 0 || itemPrice > 100_000 || amenities.length > 2000 ||
+            ((latitude === undefined) !== (longitude === undefined)) ||
+            (latitude !== undefined && (!Number.isFinite(latitude) || latitude < -90 || latitude > 90)) ||
+            (longitude !== undefined && (!Number.isFinite(longitude) || longitude < -180 || longitude > 180)) ||
             (slug && !/^[a-z0-9-]{2,120}$/.test(slug)) ||
             !["FLEXIBLE", "FROM_TIME", "TIME_WINDOW", "BY_AGREEMENT"].includes(checkInMode) || !timeIsValid(checkInTime) || !timeIsValid(checkInUntil) ||
             !["HOST", "LOCKBOX", "SMART_LOCK", "RECEPTION", "KEY_PICKUP", "OTHER"].includes(accessMethod) || arrivalInstructions.length > 3000) {
@@ -1039,6 +1044,10 @@ Deno.serve(async (req: Request) => {
           maxGuests, numberOfBedrooms, itemPrice, amenities, slug: slug || itemName.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 120),
           checkInMode, checkInTime, checkInUntil, accessMethod, arrivalInstructions,
         };
+        if (latitude !== undefined && longitude !== undefined) {
+          data.latitude = latitude;
+          data.longitude = longitude;
+        }
         if (accommodationId) {
           const accommodation = accommodations.find((item) => String(item._id ?? item.id ?? "") === accommodationId);
           if (!accommodation || String(accommodation.hostId ?? "") !== hostId) {

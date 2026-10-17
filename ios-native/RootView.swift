@@ -5388,17 +5388,23 @@ private struct NativeSeasonalAccommodationForm: View {
         errorMessage = nil
         defer { isSaving = false }
         do {
+            let coordinates = await auth.coordinates(city: city, postalCode: postalCode)
+            var fields: [String: Any] = [
+                "itemName": itemName, "itemDescription": itemDescription,
+                "accommodationType": accommodationType, "locationAddress": locationAddress,
+                "city": city, "postalCode": postalCode, "maxGuests": maxGuests,
+                "numberOfBedrooms": numberOfBedrooms, "itemPrice": price,
+                "amenities": amenities, "slug": slug, "checkInMode": checkInMode,
+                "checkInTime": checkInTime, "checkInUntil": checkInUntil,
+                "accessMethod": accessMethod, "arrivalInstructions": arrivalInstructions,
+            ]
+            if let coordinates {
+                fields["latitude"] = coordinates.latitude
+                fields["longitude"] = coordinates.longitude
+            }
             try await auth.saveHostAccommodation(
                 accommodationID: initialAccommodation?["_id"] as? String,
-                fields: [
-                    "itemName": itemName, "itemDescription": itemDescription,
-                    "accommodationType": accommodationType, "locationAddress": locationAddress,
-                    "city": city, "postalCode": postalCode, "maxGuests": maxGuests,
-                    "numberOfBedrooms": numberOfBedrooms, "itemPrice": price,
-                    "amenities": amenities, "slug": slug, "checkInMode": checkInMode,
-                    "checkInTime": checkInTime, "checkInUntil": checkInUntil,
-                    "accessMethod": accessMethod, "arrivalInstructions": arrivalInstructions,
-                ],
+                fields: fields,
                 status: status
             )
             onSaved()
@@ -5889,6 +5895,31 @@ private struct WixDashboardItem: View {
         let path = raw.hasPrefix("/") ? raw : "/\(raw)"
         return URL(string: "https://www.partenairefoyer.com\(path)")
     }
+    private var contactEmailURL: URL? {
+        let candidate = ["professionalEmail", "senderEmail", "vacationerEmail", "email"]
+            .compactMap { item[$0] as? String }
+            .first { value in
+                let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                return normalized.contains("@") && normalized.count <= 254 && !normalized.contains("\n")
+            }
+        guard let email = candidate?.trimmingCharacters(in: .whitespacesAndNewlines),
+              var components = URLComponents() else { return nil }
+        components.scheme = "mailto"
+        components.path = email
+        if let subject = ["itemName", "propertyTitle", "accommodationTitle", "title"]
+            .compactMap({ item[$0] as? String })
+            .first(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+            components.queryItems = [URLQueryItem(name: "subject", value: "Votre demande PartenaireFoyer · \(subject)")]
+        }
+        return components.url
+    }
+    private var contactPhoneURL: URL? {
+        guard let phone = ["professionalPhone", "senderPhone", "vacationerPhone", "phone", "phoneNumber"]
+            .compactMap({ item[$0] as? String })
+            .first(where: { $0.filter { $0.isNumber }.count >= 6 }) else { return nil }
+        let dialable = phone.filter { $0.isNumber || $0 == "+" }
+        return URL(string: "tel:\(dialable)")
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -5980,17 +6011,16 @@ private struct WixDashboardItem: View {
                         .font(.caption.weight(.medium))
                 }
             }
-            if let email = item["professionalEmail"] as? String,
-               let url = URL(string: "mailto:\(email.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? email)") {
-                Link(destination: url) { Label("Contacter le professionnel", systemImage: "envelope") }
-                    .font(.caption.weight(.medium))
-            }
-            if let phone = item["professionalPhone"] as? String {
-                let digits = phone.filter { $0.isNumber || $0 == "+" }
-                if !digits.isEmpty, let url = URL(string: "tel:\(digits)") {
-                    Link(destination: url) { Label("Appeler le professionnel", systemImage: "phone") }
-                        .font(.caption.weight(.medium))
+            if contactEmailURL != nil || contactPhoneURL != nil {
+                HStack(spacing: 16) {
+                    if let url = contactEmailURL {
+                        Link(destination: url) { Label("Répondre par e-mail", systemImage: "envelope") }
+                    }
+                    if let url = contactPhoneURL {
+                        Link(destination: url) { Label("Appeler", systemImage: "phone") }
+                    }
                 }
+                .font(.caption.weight(.medium))
             }
         }
     }
