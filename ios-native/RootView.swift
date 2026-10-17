@@ -446,6 +446,9 @@ private struct NativeSpacePickerView: View {
                     NativeRoleDashboardView(role: role, member: member) {
                         auth.signOut()
                         activeRoleRaw = ""
+                    } onSwitchSpace: {
+                        auth.resetDashboard()
+                        activeRoleRaw = ""
                     }
                 } else {
                     rolePicker
@@ -480,7 +483,7 @@ private struct NativeSpacePickerView: View {
 
                 Section("Choisir un espace") {
                     ForEach(AccountRole.allCases) { role in
-                        Button { selectedRole = role } label: {
+                        Button { select(role) } label: {
                             HStack(spacing: 13) {
                                 Image(systemName: role.symbol)
                                     .font(.title3)
@@ -509,6 +512,18 @@ private struct NativeSpacePickerView: View {
                     .padding(22)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
             }
+        }
+    }
+
+    private func select(_ role: AccountRole) {
+        // Keep the role spaces distinct while allowing a signed-in Wix member to
+        // move between their own linked spaces without entering their password again.
+        if auth.member != nil {
+            auth.resetDashboard()
+            activeRoleRaw = role.rawValue
+            selectedRole = nil
+        } else {
+            selectedRole = role
         }
     }
 }
@@ -646,6 +661,7 @@ private struct NativeRoleDashboardView: View {
     let role: AccountRole
     let member: WixMember
     let onSignOut: () -> Void
+    let onSwitchSpace: () -> Void
 
     private var sections: [(String, String, [[String: Any]])] {
         guard let data = auth.dashboardData else { return [] }
@@ -730,6 +746,9 @@ private struct NativeRoleDashboardView: View {
             }
 
             Section {
+                Button(action: onSwitchSpace) {
+                    Label("Changer d’espace", systemImage: "person.2")
+                }
                 Button(role: .destructive, action: onSignOut) {
                     Label("Se déconnecter", systemImage: "rectangle.portrait.and.arrow.right")
                 }
