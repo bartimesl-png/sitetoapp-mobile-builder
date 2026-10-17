@@ -45,6 +45,28 @@ async function query(
   return (result.dataItems ?? []).map(unwrap);
 }
 
+async function queryAllConversationMessages(conversationID: string, token: string): Promise<Record<string, unknown>[]> {
+  const messages: Record<string, unknown>[] = [];
+  const limit = 100;
+  for (let offset = 0; offset < 1000; offset += limit) {
+    const page = await wixRequest<{ dataItems?: WixItem[] }>("/wix-data/v2/items/query", token, {
+      method: "POST",
+      body: JSON.stringify({
+        dataCollectionId: "messages",
+        query: {
+          filter: { conversationId: { $eq: conversationID } },
+          paging: { limit, offset },
+          fields: ["conversationId", "senderId", "receiverId", "content", "createdAt", "isRead", "readAt", "seen", "attachments"],
+        },
+      }),
+    });
+    const items = (page.dataItems ?? []).map(unwrap);
+    messages.push(...items);
+    if (items.length < limit) break;
+  }
+  return messages;
+}
+
 const first = (items: Record<string, unknown>[]) => items[0] ?? null;
 
 Deno.serve(async (req: Request) => {
@@ -75,9 +97,7 @@ Deno.serve(async (req: Request) => {
     if (!profile || profile.isActive === false) return response({ error: "Profil professionnel inactif." }, 403);
     const professionalID = String(profile._id ?? "");
 
-    const messages = await query("messages", { conversationId: { $eq: conversationID } }, [
-      "conversationId", "senderId", "receiverId", "content", "createdAt", "isRead", "readAt", "seen", "attachments",
-    ], token);
+    const messages = await queryAllConversationMessages(conversationID, token);
     if (!messages.some((message) => String(message.senderId ?? "") === professionalID || String(message.receiverId ?? "") === professionalID)) {
       return response({ error: "Cette conversation n’est pas associée à votre espace professionnel." }, 403);
     }
