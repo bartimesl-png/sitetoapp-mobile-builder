@@ -391,8 +391,8 @@ async function loadDashboard(role: string, email: string, memberID: string, toke
 
     // These are existing Wix CMS collections. Scope every list through the
     // authenticated host profile or an accommodation owned by that profile.
-    const [accommodations, reservations, conversations] = await Promise.all([
-      query("seasonalaccommodations", { hostId: { $eq: hostId } }, [
+    const [accommodations, reservations, conversations, hostSubscriptions] = await Promise.all([
+      queryAll("seasonalaccommodations", { hostId: { $eq: hostId } }, [
         "hostId", "itemName", "itemPrice", "itemDescription", "itemImage", "photo1", "photo2", "photo3",
         "galleryImage2", "galleryImage3", "galleryImage4", "galleryImage5", "photo4", "photo5", "photo6",
         "photo7", "photo8", "photo9", "photo10", "photo11", "photo12", "photo13", "photo14",
@@ -401,14 +401,17 @@ async function loadDashboard(role: string, email: string, memberID: string, toke
         "accommodationType", "locationAddress", "city", "postalCode", "maxGuests", "numberOfBedrooms",
         "amenities", "slug",
       ], token),
-      query("seasonalreservations", { hostId: { $eq: hostId } }, [
+      queryAll("seasonalreservations", { hostId: { $eq: hostId } }, [
         "hostId", "accommodationId", "vacationerId", "source", "vacationerName", "vacationerEmail",
         "accommodationTitle", "checkInDate", "checkOutDate", "numberOfGuests", "reservationStatus",
         "paymentStatus", "totalPrice", "bookingDateTime",
       ], token),
-      query("seasonalconversations", { hostId: { $eq: hostId } }, [
+      queryAll("seasonalconversations", { hostId: { $eq: hostId } }, [
         "hostId", "vacationerId", "accommodationId", "lastMessageTimestamp", "status",
-      ], token, 50),
+      ], token),
+      queryAll("seasonalhostsubscriptions", { hostProfileId: { $eq: hostId } }, [
+        "hostProfileId", "subscriptionTier", "status", "startDate", "endDate", "renewalDate", "lastPaymentDate", "amountPaid", "paymentMethod",
+      ], token),
     ]);
 
     const accommodationNameByID = new Map(accommodations.map((item) => [
@@ -431,25 +434,25 @@ async function loadDashboard(role: string, email: string, memberID: string, toke
     for (let start = 0; start < accommodationIDs.length; start += 3) {
       const accommodationBatch = accommodationIDs.slice(start, start + 3);
       const relatedPages = await Promise.all(accommodationBatch.map(async (accommodationId) => Promise.all([
-        query("seasonalbookingrequests", { accommodationId: { $eq: accommodationId } }, [
+        queryAll("seasonalbookingrequests", { accommodationId: { $eq: accommodationId } }, [
           "accommodationId", "vacationerId", "vacationerName", "vacationerEmail", "vacationerPhone",
           "checkInDate", "checkOutDate", "proposedCheckInDate", "proposedCheckOutDate", "numberOfNights",
           "numberOfAdults", "numberOfChildren", "numberOfBabies", "petsIncluded", "guestMessage", "status",
           "totalPrice", "hiddenByHost",
-        ], token, 100),
-        query("seasonalcalendars", { linkedEntityId: { $eq: accommodationId } }, [
+        ], token),
+        queryAll("seasonalcalendars", { linkedEntityId: { $eq: accommodationId } }, [
           "linkedEntityId", "linkedEntityType", "calendarDate", "availabilityStatus", "pricePerNight",
           "minimumStay", "bookingRequestId", "checkInFrom", "checkInUntil", "checkOutUntil",
-        ], token, 100),
-        query("seasonalexternalbookings", { accommodationId: { $eq: accommodationId } }, [
+        ], token),
+        queryAll("seasonalexternalbookings", { accommodationId: { $eq: accommodationId } }, [
           "accommodationId", "sourcePlatform", "startDate", "endDate", "externalBookingReference",
-        ], token, 100),
-        query("seasonalrates", { accommodationId: { $eq: accommodationId } }, [
+        ], token),
+        queryAll("seasonalrates", { accommodationId: { $eq: accommodationId } }, [
           "accommodationId", "seasonName", "startDate", "endDate", "pricePerNight", "minimumStayNights",
-        ], token, 100),
-        query("seasonalicalconnections", { accommodationId: { $eq: accommodationId } }, [
+        ], token),
+        queryAll("seasonalicalconnections", { accommodationId: { $eq: accommodationId } }, [
           "accommodationId", "iCalUrl", "platformName", "lastSyncDate", "syncStatus",
-        ], token, 20),
+        ], token),
       ])));
       for (const [requests, calendar, externalBookings, seasonalRates, calendarConnections] of relatedPages) {
         bookingRequestPages.push(requests);
@@ -473,6 +476,7 @@ async function loadDashboard(role: string, email: string, memberID: string, toke
       externalBookings: uniqueItems(externalBookingPages),
       seasonalRates: uniqueItems(seasonalRatePages),
       calendarConnections: uniqueItems(calendarConnectionPages),
+      subscription: [...hostSubscriptions].sort((a, b) => String(b.endDate ?? "").localeCompare(String(a.endDate ?? "")))[0] ?? null,
     };
   }
   return null;
@@ -697,6 +701,238 @@ Deno.serve(async (req: Request) => {
         return response({ success: true, requestId, hiddenByHost: true });
       }
 
+      if (body.action === "transition_booking_request") {
+        if (role !== "hebergeur") return response({ error: "Cette action est réservée à l’espace hébergeur." }, 403);
+        const requestId = String(body.requestId ?? "").trim();
+        const nextStatus = String(body.status ?? "").trim().toLowerCase();
+        if (!/^[A-Za-z0-9_-]{1,160}$/.test(requestId) || !["accepted", "rejected"].includes(nextStatus)) {
+          return response({ error: "Demande ou statut de réservation invalide." }, 400);
+        }
+        const dashboard = await loadDashboard(role, email, result.member.id, token);
+        const requests = (dashboard?.bookingRequests as Record<string, unknown>[] | undefined) ?? [];
+        const bookingRequest = requests.find((item) => String(item._id ?? item.id ?? "") === requestId);
+        if (!bookingRequest) return response({ error: "Cette demande n’est plus disponible dans votre espace." }, 404);
+        const accommodationId = String(bookingRequest.accommodationId ?? "");
+        const accommodations = (dashboard?.accommodations as Record<string, unknown>[] | undefined) ?? [];
+        const accommodation = accommodations.find((item) => String(item._id ?? item.id ?? "") === accommodationId);
+        if (!accommodation) return response({ error: "Cette demande n’est liée à aucun de vos hébergements." }, 403);
+        const currentStatus = String(bookingRequest.status ?? "pending").toLowerCase();
+        const reservations = (dashboard?.reservations as Record<string, unknown>[] | undefined) ?? [];
+        const checkInDate = String(bookingRequest.checkInDate ?? "").slice(0, 10);
+        const checkOutDate = String(bookingRequest.checkOutDate ?? "").slice(0, 10);
+        const vacationerId = String(bookingRequest.vacationerId ?? "");
+        const hostId = String((dashboard?.profile as Record<string, unknown> | undefined)?._id ?? "");
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(checkInDate) || !/^\d{4}-\d{2}-\d{2}$/.test(checkOutDate) || checkOutDate <= checkInDate) {
+          return response({ error: "Les dates de cette demande sont invalides." }, 409);
+        }
+        if (currentStatus === "accepted" && nextStatus === "rejected") {
+          return response({ error: "Une réservation déjà acceptée ne peut pas être refusée depuis cette demande." }, 409);
+        }
+        if (currentStatus === "rejected" && nextStatus === "accepted") {
+          return response({ error: "Cette demande a déjà été refusée." }, 409);
+        }
+        if (currentStatus !== "pending" && currentStatus !== nextStatus) {
+          return response({ error: "Seules les demandes en attente peuvent être modifiées." }, 409);
+        }
+        const existingReservation = reservations.find((item) =>
+          String(item.accommodationId ?? "") === accommodationId &&
+          String(item.vacationerId ?? "") === vacationerId &&
+          String(item.checkInDate ?? "").slice(0, 10) === checkInDate &&
+          String(item.checkOutDate ?? "").slice(0, 10) === checkOutDate &&
+          String(item.reservationStatus ?? "").toLowerCase() === "confirmed"
+        );
+        if (nextStatus === "accepted" && !existingReservation) {
+          const allCalendar = await queryAll("seasonalcalendars", { linkedEntityId: { $eq: accommodationId } }, [
+            "linkedEntityId", "calendarDate", "availabilityStatus", "bookingRequestId",
+          ], token);
+          const nights: string[] = [];
+          const cursor = new Date(`${checkInDate}T00:00:00.000Z`);
+          const checkout = new Date(`${checkOutDate}T00:00:00.000Z`);
+          while (cursor < checkout && nights.length < 366) {
+            nights.push(cursor.toISOString().slice(0, 10));
+            cursor.setUTCDate(cursor.getUTCDate() + 1);
+          }
+          const conflicts = allCalendar.filter((entry) => {
+            const date = String(entry.calendarDate ?? "").slice(0, 10);
+            if (!nights.includes(date) || String(entry.bookingRequestId ?? "") === requestId) return false;
+            const status = String(entry.availabilityStatus ?? "").toLowerCase();
+            return ["unavailable", "reserved", "booked", "blocked", "external"].includes(status) ||
+              (status === "pending" && Boolean(entry.bookingRequestId));
+          });
+          const reservationConflict = reservations.some((item) =>
+            String(item.accommodationId ?? "") === accommodationId &&
+            String(item.reservationStatus ?? "").toLowerCase() === "confirmed" &&
+            String(item.checkInDate ?? "").slice(0, 10) < checkOutDate &&
+            String(item.checkOutDate ?? "").slice(0, 10) > checkInDate
+          );
+          const externalBookings = (dashboard?.externalBookings as Record<string, unknown>[] | undefined) ?? [];
+          const externalConflict = externalBookings.some((item) =>
+            String(item.accommodationId ?? "") === accommodationId &&
+            String(item.startDate ?? "").slice(0, 10) < checkOutDate &&
+            String(item.endDate ?? "").slice(0, 10) > checkInDate
+          );
+          if (conflicts.length || reservationConflict || externalConflict) {
+            return response({ error: "Ces dates ne sont plus disponibles. Actualisez le calendrier avant d’accepter." }, 409);
+          }
+          const adults = Number(bookingRequest.numberOfAdults ?? 0);
+          const children = Number(bookingRequest.numberOfChildren ?? 0);
+          const babies = Number(bookingRequest.numberOfBabies ?? 0);
+          const nightsCount = nights.length;
+          const totalPrice = Number(bookingRequest.totalPrice ?? (Number(accommodation.itemPrice ?? 0) * nightsCount));
+          const bookingDateTime = new Date().toISOString();
+          const insertedReservation = await wixRequest<{ dataItem?: WixItem }>("/wix-data/v2/items", token, {
+            method: "POST",
+            body: JSON.stringify({ dataCollectionId: "seasonalreservations", dataItem: { data: {
+              accommodationId, hostId, vacationerId,
+              vacationerName: String(bookingRequest.vacationerName ?? ""),
+              vacationerEmail: String(bookingRequest.vacationerEmail ?? ""),
+              accommodationTitle: String(accommodation.itemName ?? ""),
+              checkInDate: String(bookingRequest.checkInDate), checkOutDate: String(bookingRequest.checkOutDate),
+              numberOfGuests: adults + children + babies, reservationStatus: "confirmed", paymentStatus: "pending",
+              totalPrice: Number.isFinite(totalPrice) ? totalPrice : 0, bookingDateTime,
+            } } }),
+          });
+          if (!insertedReservation.dataItem?.id && !insertedReservation.dataItem?.data?._id) {
+            return response({ error: "Wix n’a pas confirmé la création de la réservation." }, 502);
+          }
+        }
+
+        const calendarEntries = await queryAll("seasonalcalendars", { bookingRequestId: { $eq: requestId } }, [
+          "linkedEntityId", "bookingRequestId", "availabilityStatus",
+        ], token);
+        if (nextStatus === "accepted") {
+          for (const entry of calendarEntries) {
+            const calendarId = String(entry._id ?? "");
+            if (!calendarId || String(entry.linkedEntityId ?? "") !== accommodationId) continue;
+            await wixRequest(`/wix-data/v2/items/${encodeURIComponent(calendarId)}`, token, {
+              method: "PATCH", body: JSON.stringify({ dataCollectionId: "seasonalcalendars", patch: {
+                dataItemId: calendarId,
+                fieldModifications: [{ fieldPath: "availabilityStatus", action: "SET_FIELD", setFieldOptions: { value: "reserved" } }],
+              } }),
+            });
+          }
+        }
+        if (currentStatus !== nextStatus) {
+          await wixRequest(`/wix-data/v2/items/${encodeURIComponent(requestId)}`, token, {
+            method: "PATCH", body: JSON.stringify({ dataCollectionId: "seasonalbookingrequests", patch: {
+              dataItemId: requestId,
+              fieldModifications: [{ fieldPath: "status", action: "SET_FIELD", setFieldOptions: { value: nextStatus } }],
+            } }),
+          });
+        }
+        if (nextStatus === "rejected") {
+          for (const entry of calendarEntries) {
+            const calendarId = String(entry._id ?? "");
+            if (!calendarId || String(entry.linkedEntityId ?? "") !== accommodationId) continue;
+            await wixRequest(`/wix-data/v2/items/${encodeURIComponent(calendarId)}`, token, {
+              method: "PATCH", body: JSON.stringify({ dataCollectionId: "seasonalcalendars", patch: {
+                dataItemId: calendarId,
+                fieldModifications: [
+                  { fieldPath: "availabilityStatus", action: "SET_FIELD", setFieldOptions: { value: "available" } },
+                  { fieldPath: "bookingRequestId", action: "SET_FIELD", setFieldOptions: { value: "" } },
+                ],
+              } }),
+            });
+          }
+        }
+
+        let emailSent = false;
+        if (currentStatus !== nextStatus && vacationerId) {
+          try {
+            const privateProfile = first(await query("privateprofiles", { ownerId: { $eq: vacationerId } }, ["email", "firstName", "lastName"], token, 2));
+            const recipientEmail = String(privateProfile?.email ?? "").trim();
+            if (recipientEmail.includes("@")) {
+              const emailResponse = await fetch("https://www.partenairefoyer.com/api/send-seasonal-email", {
+                method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" },
+                body: JSON.stringify({
+                  eventType: nextStatus === "accepted" ? "booking_accepted" : "booking_rejected",
+                  toEmail: recipientEmail,
+                  recipientName: [privateProfile?.firstName, privateProfile?.lastName].filter(Boolean).join(" ") || "Vacancier",
+                  accommodationName: String(accommodation.itemName ?? "l’hébergement"),
+                  checkInDate: String(bookingRequest.checkInDate), checkOutDate: String(bookingRequest.checkOutDate),
+                }),
+                signal: AbortSignal.timeout(12_000),
+              });
+              emailSent = emailResponse.ok;
+            }
+          } catch (error) {
+            console.warn("[ios-native-dashboard] Seasonal booking e-mail unavailable", error);
+          }
+        }
+        return response({ success: true, requestId, status: nextStatus, emailSent });
+      }
+
+      if (body.action === "save_seasonal_calendar_dates") {
+        if (role !== "hebergeur") return response({ error: "Cette action est réservée à l’espace hébergeur." }, 403);
+        const accommodationId = String(body.accommodationId ?? "").trim();
+        const status = String(body.availabilityStatus ?? "").trim().toLowerCase();
+        const dates = Array.isArray(body.dates) ? body.dates.map((value) => String(value ?? "").trim()) : [];
+        const pricePerNight = body.pricePerNight == null || body.pricePerNight === "" ? null : Number(body.pricePerNight);
+        const minimumStay = body.minimumStay == null || body.minimumStay === "" ? null : Number(body.minimumStay);
+        if (!/^[A-Za-z0-9_-]{1,160}$/.test(accommodationId) || !["available", "blocked"].includes(status) ||
+            dates.length < 1 || dates.length > 31 || new Set(dates).size !== dates.length ||
+            dates.some((value) => {
+              if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return true;
+              const date = new Date(`${value}T00:00:00.000Z`);
+              return Number.isNaN(date.valueOf()) || date.toISOString().slice(0, 10) !== value;
+            }) || (pricePerNight != null && (!Number.isFinite(pricePerNight) || pricePerNight < 0 || pricePerNight > 100_000)) ||
+            (minimumStay != null && (!Number.isInteger(minimumStay) || minimumStay < 1 || minimumStay > 365))) {
+          return response({ error: "Vérifiez les dates, le tarif et le séjour minimum." }, 400);
+        }
+        const dashboard = await loadDashboard(role, email, result.member.id, token);
+        const accommodations = (dashboard?.accommodations as Record<string, unknown>[] | undefined) ?? [];
+        if (!accommodations.some((item) => String(item._id ?? item.id ?? "") === accommodationId)) {
+          return response({ error: "Cet hébergement n’appartient pas à votre espace." }, 403);
+        }
+        const allCalendar = await queryAll("seasonalcalendars", { linkedEntityId: { $eq: accommodationId } }, [
+          "linkedEntityId", "calendarDate", "availabilityStatus", "bookingRequestId", "pricePerNight", "minimumStay",
+        ], token);
+        const reservations = (dashboard?.reservations as Record<string, unknown>[] | undefined) ?? [];
+        const externalBookings = (dashboard?.externalBookings as Record<string, unknown>[] | undefined) ?? [];
+        const updates: { date: string; calendarId?: string }[] = [];
+        for (const date of dates) {
+          const entry = allCalendar.find((item) => String(item.calendarDate ?? "").slice(0, 10) === date);
+          const reserved = reservations.some((item) =>
+            String(item.accommodationId ?? "") === accommodationId && String(item.reservationStatus ?? "").toLowerCase() === "confirmed" &&
+            String(item.checkInDate ?? "").slice(0, 10) <= date && String(item.checkOutDate ?? "").slice(0, 10) > date
+          );
+          const statusValue = String(entry?.availabilityStatus ?? "").toLowerCase();
+          const external = externalBookings.some((item) =>
+            String(item.accommodationId ?? "") === accommodationId &&
+            String(item.startDate ?? "").slice(0, 10) <= date && String(item.endDate ?? "").slice(0, 10) > date
+          );
+          if (reserved || external || statusValue === "reserved" || statusValue === "booked" || statusValue === "external" || statusValue === "pending") {
+            return response({ error: `La date ${date} est déjà réservée ou liée à une demande.` }, 409);
+          }
+          updates.push({ date, ...(entry?._id ? { calendarId: String(entry._id) } : {}) });
+        }
+        for (const update of updates) {
+          if (update.calendarId) {
+            const fields: Record<string, unknown> = { availabilityStatus: status };
+            if (pricePerNight !== null) fields.pricePerNight = pricePerNight;
+            if (minimumStay !== null) fields.minimumStay = minimumStay;
+            await wixRequest(`/wix-data/v2/items/${encodeURIComponent(update.calendarId)}`, token, {
+              method: "PATCH", body: JSON.stringify({ dataCollectionId: "seasonalcalendars", patch: {
+                dataItemId: update.calendarId,
+                fieldModifications: Object.entries(fields).map(([fieldPath, value]) => ({ fieldPath, action: "SET_FIELD", setFieldOptions: { value } })),
+              } }),
+            });
+          } else {
+            const data: Record<string, unknown> = {
+              linkedEntityId: accommodationId, linkedEntityType: "accommodation",
+              calendarDate: `${update.date}T00:00:00.000Z`, availabilityStatus: status,
+            };
+            if (pricePerNight !== null) data.pricePerNight = pricePerNight;
+            if (minimumStay !== null) data.minimumStay = minimumStay;
+            const inserted = await wixRequest<{ dataItem?: WixItem }>("/wix-data/v2/items", token, {
+              method: "POST", body: JSON.stringify({ dataCollectionId: "seasonalcalendars", dataItem: { data } }),
+            });
+            if (!inserted.dataItem?.id && !inserted.dataItem?.data?._id) return response({ error: `Wix n’a pas confirmé la date ${update.date}.` }, 502);
+          }
+        }
+        return response({ success: true, accommodationId, updatedDates: updates.map(({ date }) => date) });
+      }
+
       if (body.action === "save_seasonal_rate") {
         if (role !== "hebergeur") return response({ error: "Cette action est réservée à l’espace hébergeur." }, 403);
         const accommodationId = String(body.accommodationId ?? "").trim();
@@ -757,6 +993,24 @@ Deno.serve(async (req: Request) => {
         const createdId = String(inserted.dataItem?.id ?? inserted.dataItem?.data?._id ?? "");
         if (!createdId) return response({ error: "Wix n’a pas confirmé la création du tarif." }, 502);
         return response({ success: true, rateId: createdId, accommodationId });
+      }
+
+      if (body.action === "delete_seasonal_rate") {
+        if (role !== "hebergeur") return response({ error: "Cette action est réservée à l’espace hébergeur." }, 403);
+        const rateId = String(body.rateId ?? "").trim();
+        if (!/^[A-Za-z0-9_-]{1,160}$/.test(rateId)) return response({ error: "Tarif saisonnier invalide." }, 400);
+        const dashboard = await loadDashboard(role, email, result.member.id, token);
+        const rates = (dashboard?.seasonalRates as Record<string, unknown>[] | undefined) ?? [];
+        const rate = rates.find((item) => String(item._id ?? item.id ?? "") === rateId);
+        if (!rate) return response({ error: "Ce tarif n’appartient pas à votre espace." }, 404);
+        const accommodations = (dashboard?.accommodations as Record<string, unknown>[] | undefined) ?? [];
+        if (!accommodations.some((item) => String(item._id ?? item.id ?? "") === String(rate.accommodationId ?? ""))) {
+          return response({ error: "Ce tarif n’est lié à aucun de vos hébergements." }, 403);
+        }
+        await wixRequest(`/wix-data/v2/items/${encodeURIComponent(rateId)}?dataCollectionId=seasonalrates`, token, {
+          method: "DELETE",
+        });
+        return response({ success: true, rateId });
       }
 
       if (body.action === "mark_minisite_request_processed") {

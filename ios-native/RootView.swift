@@ -4130,6 +4130,9 @@ private struct NativeRoleDashboardView: View {
     @State private var showClassifiedAdForm = false
     @State private var showSeasonalRateForm = false
     @State private var editingSeasonalRate: [String: Any]?
+    @State private var showSeasonalCalendarEditor = false
+    @State private var pendingSeasonalRateDeletion: String?
+    @State private var showSeasonalRateDeletionConfirmation = false
     @State private var showProfileEditor = false
     @State private var showMiniSitePreview = false
     @State private var editingBuyerSearch: [String: Any]?
@@ -4374,6 +4377,12 @@ private struct NativeRoleDashboardView: View {
                                     .font(.headline)
                             }
                         }
+                        if role == .hebergeur, section.0 == "Calendrier des disponibilités" {
+                            Button { showSeasonalCalendarEditor = true } label: {
+                                Label("Gérer les disponibilités", systemImage: "calendar.badge.checkmark")
+                                    .font(.headline)
+                            }
+                        }
                         if section.2.isEmpty {
                             Text("Aucun élément pour le moment.")
                                 .foregroundStyle(.secondary)
@@ -4409,6 +4418,9 @@ private struct NativeRoleDashboardView: View {
                                     if let demandID = item["_id"] as? String {
                                         await auth.claimDemand(demandID: demandID)
                                     }
+                                } : nil, onHostBookingTransition: role == .hebergeur && section.0 == "Demandes de réservation" ? { status in
+                                    guard let requestID = (item["_id"] as? String) ?? (item["id"] as? String) else { return }
+                                    await auth.transitionHostBookingRequest(requestID: requestID, status: status)
                                 } : nil)
                                 .swipeActions {
                                     if (role == .particulier && ["Mes biens", "Mes petites annonces"].contains(section.0)) ||
@@ -4497,6 +4509,12 @@ private struct NativeRoleDashboardView: View {
                                             showSeasonalRateForm = true
                                         }
                                         .tint(.blue)
+                                        if let rateID = (item["_id"] as? String) ?? (item["id"] as? String) {
+                                            Button("Supprimer", systemImage: "trash", role: .destructive) {
+                                                pendingSeasonalRateDeletion = rateID
+                                                showSeasonalRateDeletionConfirmation = true
+                                            }
+                                        }
                                     }
                                     if [.courtier, .artisan, .diagnostiqueur, .prestataire].contains(role),
                                        section.0.contains("Messages") || section.0.contains("Demandes"),
@@ -4559,6 +4577,19 @@ private struct NativeRoleDashboardView: View {
                     Section("Mon activité") {
                         Text("Hébergements et réservations chargés depuis vos collections Wix. Les demandes masquées dans Wix ne sont pas affichées ici.")
                             .font(.footnote).foregroundStyle(.secondary)
+                        if let subscription = data["subscription"] as? [String: Any] {
+                            LabeledContent("Abonnement", value: display(subscription["subscriptionTier"] ?? subscription["status"] ?? "Statut indisponible"))
+                            LabeledContent("Statut", value: display(subscription["status"] ?? "Inconnu"))
+                            if subscription["endDate"] != nil {
+                                LabeledContent("Fin de période", value: display(subscription["endDate"]))
+                            }
+                            if subscription["renewalDate"] != nil {
+                                LabeledContent("Prochain renouvellement", value: display(subscription["renewalDate"]))
+                            }
+                        } else {
+                            Label("Aucun abonnement saisonnier associé à ce profil.", systemImage: "info.circle")
+                                .font(.footnote).foregroundStyle(.secondary)
+                        }
                         Link(destination: URL(string: "https://www.partenairefoyer.com/hebergeur-abonnement")!) {
                             Label("Gérer l’abonnement et le paiement", systemImage: "creditcard")
                         }
@@ -4623,6 +4654,23 @@ private struct NativeRoleDashboardView: View {
             Button("Annuler", role: .cancel) { pendingHostBookingRequest = nil }
         } message: {
             Text("La demande sera masquée dans votre espace et dans Wix. Elle restera enregistrée pour le suivi de la réservation.")
+        }
+        .confirmationDialog(
+            "Supprimer ce tarif saisonnier ?",
+            isPresented: $showSeasonalRateDeletionConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Supprimer le tarif", role: .destructive) {
+                guard let rateID = pendingSeasonalRateDeletion else { return }
+                Task {
+                    do { try await auth.deleteSeasonalRate(rateID: rateID) }
+                    catch { auth.errorMessage = error.localizedDescription }
+                }
+                pendingSeasonalRateDeletion = nil
+            }
+            Button("Annuler", role: .cancel) { pendingSeasonalRateDeletion = nil }
+        } message: {
+            Text("Ce tarif sera supprimé de Wix et ne pourra pas être restauré.")
         }
         .navigationTitle("Tableau de bord")
         .navigationBarTitleDisplayMode(.inline)
@@ -4740,6 +4788,23 @@ private struct NativeRoleDashboardView: View {
                     showSeasonalRateForm = false
                     editingSeasonalRate = nil
                 }
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showSeasonalCalendarEditor) {
+            NavigationStack {
+                NativeSeasonalCalendarEditor(
+                    accommodations: auth.dashboardData?["accommodations"] as? [[String: Any]] ?? [],
+                    calendarEntries: auth.dashboardData?["calendar"] as? [[String: Any]] ?? [],
+                    reservations: auth.dashboardData?["reservations"] as? [[String: Any]] ?? [],
+                    onSave: { accommodationID, dates, status, price, minimumStay in
+                        try await auth.saveSeasonalCalendarDates(
+                            accommodationID: accommodationID, dates: dates,
+                            availabilityStatus: status, pricePerNight: price, minimumStay: minimumStay
+                        )
+                    }
+                )
             }
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
@@ -5130,6 +5195,190 @@ private struct DashboardOverview: View {
     }
 }
 
+private struct NativeSeasonalCalendarEditor: View {
+    @Environment(\.dismiss) private var dismiss
+    let accommodations: [[String: Any]]
+    let calendarEntries: [[String: Any]]
+    let reservations: [[String: Any]]
+    let onSave: (String, [String], String, Double?, Int?) async throws -> Void
+    @State private var accommodationID = ""
+    @State private var month = Calendar.current.date(from: Calendar.current.dateComponents([.year, .month], from: Date())) ?? Date()
+    @State private var selectedDates = Set<String>()
+    @State private var status = "blocked"
+    @State private var priceText = ""
+    @State private var minimumStayText = ""
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 5), count: 7)
+    private let weekdayNames = ["Lu", "Ma", "Me", "Je", "Ve", "Sa", "Di"]
+
+    private var currentAccommodationID: String {
+        if accommodations.contains(where: { String(describing: $0["_id"] ?? $0["id"] ?? "") == accommodationID }) { return accommodationID }
+        return String(describing: accommodations.first?["_id"] ?? accommodations.first?["id"] ?? "")
+    }
+
+    private var monthDays: [Date] {
+        guard let interval = Calendar.current.range(of: .day, in: .month, for: month),
+              let first = Calendar.current.date(from: Calendar.current.dateComponents([.year, .month], from: month)) else { return [] }
+        return interval.compactMap { Calendar.current.date(byAdding: .day, value: $0 - 1, to: first) }
+    }
+
+    private var leadingEmptyDays: Int {
+        guard let first = monthDays.first else { return 0 }
+        return (Calendar.current.component(.weekday, from: first) + 5) % 7
+    }
+
+    private var selectedDateList: [String] { selectedDates.sorted() }
+
+    var body: some View {
+        Form {
+            Section("Hébergement") {
+                Picker("Hébergement", selection: $accommodationID) {
+                    ForEach(Array(accommodations.enumerated()), id: \.offset) { _, accommodation in
+                        let id = String(describing: accommodation["_id"] ?? accommodation["id"] ?? "")
+                        Text(String(describing: accommodation["itemName"] ?? "Hébergement")).tag(id)
+                    }
+                }
+                .disabled(accommodations.count < 2)
+            }
+            Section("Calendrier") {
+                HStack {
+                    Button { changeMonth(-1) } label: { Image(systemName: "chevron.left") }
+                        .accessibilityLabel("Mois précédent")
+                    Spacer()
+                    Text(month.formatted(.dateTime.month(.wide).year()).capitalized).font(.headline)
+                    Spacer()
+                    Button { changeMonth(1) } label: { Image(systemName: "chevron.right") }
+                        .accessibilityLabel("Mois suivant")
+                }
+                LazyVGrid(columns: columns, spacing: 7) {
+                    ForEach(weekdayNames, id: \.self) { Text($0).font(.caption.weight(.semibold)).foregroundStyle(.secondary).frame(maxWidth: .infinity) }
+                    ForEach(0..<leadingEmptyDays, id: \.self) { _ in Color.clear.frame(height: 38) }
+                    ForEach(monthDays, id: \.self) { date in
+                        let key = Self.dateKey(date)
+                        let reserved = isReserved(key)
+                        let selected = selectedDates.contains(key)
+                        Button {
+                            guard !reserved else { return }
+                            if selected { selectedDates.remove(key) } else { selectedDates.insert(key) }
+                        } label: {
+                            Text(String(Calendar.current.component(.day, from: date)))
+                                .font(.subheadline.weight(.medium))
+                                .frame(maxWidth: .infinity, minHeight: 38)
+                                .foregroundStyle(reserved ? .secondary : selected ? .white : .primary)
+                                .background(selected ? Color.teal : statusColor(key), in: RoundedRectangle(cornerRadius: 9))
+                                .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(reserved ? Color.blue.opacity(0.65) : Color.clear, lineWidth: 1.5))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(reserved)
+                        .accessibilityLabel("\(key)\(reserved ? ", réservé" : "")\(selected ? ", sélectionné" : "")")
+                    }
+                }
+                Text("Bleu : réservé ou demande en cours. Sélectionnez jusqu’à 31 autres dates.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            Section("Modification des dates sélectionnées (\(selectedDates.count))") {
+                Picker("Disponibilité", selection: $status) {
+                    Text("Disponible").tag("available")
+                    Text("Bloquer").tag("blocked")
+                }
+                .pickerStyle(.segmented)
+                TextField("Prix par nuit (€), facultatif", text: $priceText)
+                    .keyboardType(.decimalPad)
+                TextField("Séjour minimum (nuits), facultatif", text: $minimumStayText)
+                    .keyboardType(.numberPad)
+                Button {
+                    Task { await save() }
+                } label: {
+                    HStack {
+                        if isSaving { ProgressView() }
+                        Text(isSaving ? "Enregistrement…" : "Enregistrer les disponibilités")
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.teal)
+                .disabled(isSaving || selectedDates.isEmpty || currentAccommodationID.isEmpty)
+            }
+            if let errorMessage {
+                Section { Label(errorMessage, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange) }
+            }
+        }
+        .navigationTitle("Disponibilités")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) { Button("Fermer") { dismiss() } }
+        }
+        .onAppear { if accommodationID.isEmpty { accommodationID = currentAccommodationID } }
+        .onChange(of: accommodationID) { _, _ in selectedDates.removeAll() }
+    }
+
+    private func changeMonth(_ delta: Int) {
+        if let next = Calendar.current.date(byAdding: .month, value: delta, to: month) { month = next }
+        selectedDates.removeAll()
+    }
+
+    private func isReserved(_ date: String) -> Bool {
+        let calendarReserved = calendarEntries.contains { entry in
+            String(describing: entry["linkedEntityId"] ?? "") == currentAccommodationID &&
+            Self.dateKey(entry["calendarDate"]) == date &&
+            ["reserved", "booked", "external", "pending"].contains(String(describing: entry["availabilityStatus"] ?? "").lowercased())
+        }
+        let reservationReserved = reservations.contains { reservation in
+            guard String(describing: reservation["accommodationId"] ?? "") == currentAccommodationID,
+                  String(describing: reservation["reservationStatus"] ?? "").lowercased() == "confirmed" else { return false }
+            let checkIn = Self.dateKey(reservation["checkInDate"])
+            let checkOut = Self.dateKey(reservation["checkOutDate"])
+            return checkIn <= date && checkOut > date
+        }
+        return calendarReserved || reservationReserved
+    }
+
+    private func statusColor(_ date: String) -> Color {
+        guard let entry = calendarEntries.first(where: {
+            String(describing: $0["linkedEntityId"] ?? "") == currentAccommodationID && Self.dateKey($0["calendarDate"]) == date
+        }) else { return Color(uiColor: .secondarySystemGroupedBackground) }
+        return String(describing: entry["availabilityStatus"] ?? "").lowercased() == "blocked" ? Color.red.opacity(0.18) : Color.green.opacity(0.16)
+    }
+
+    @MainActor
+    private func save() async {
+        guard selectedDateList.count <= 31 else { errorMessage = "Sélectionnez au maximum 31 dates par enregistrement."; return }
+        if !priceText.isEmpty && Double(priceText.replacingOccurrences(of: ",", with: ".")) == nil { errorMessage = "Le prix doit être un nombre valide."; return }
+        if !minimumStayText.isEmpty && Int(minimumStayText) == nil { errorMessage = "Le séjour minimum doit être un nombre entier."; return }
+        isSaving = true
+        errorMessage = nil
+        defer { isSaving = false }
+        do {
+            try await onSave(
+                currentAccommodationID, selectedDateList, status,
+                priceText.isEmpty ? nil : Double(priceText.replacingOccurrences(of: ",", with: ".")),
+                minimumStayText.isEmpty ? nil : Int(minimumStayText)
+            )
+            selectedDates.removeAll()
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private static func dateKey(_ value: Any?) -> String {
+        if let value = value as? String { return String(value.prefix(10)) }
+        if let value = value as? Date { return formatter.string(from: value) }
+        return ""
+    }
+
+    private static let formatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+}
+
 private struct ProfessionalImportCenterView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var service: ProfessionalImportService
@@ -5387,7 +5636,10 @@ private struct WixDashboardItem: View {
     let fallbackTitle: String
     let onOpen: () -> Void
     var onClaim: (() async -> Void)? = nil
+    var onHostBookingTransition: ((String) async -> Void)? = nil
     @State private var isClaiming = false
+    @State private var isTransitioningBooking = false
+    @State private var confirmBookingRejection = false
 
     private var matchLabel: String? {
         guard let matchType = item["matchType"] as? String else { return nil }
@@ -5475,6 +5727,40 @@ private struct WixDashboardItem: View {
                 .buttonStyle(.borderedProminent)
                 .tint(.teal)
                 .disabled(isClaiming)
+            }
+            if let onHostBookingTransition, String(describing: item["status"] ?? "pending").lowercased() == "pending" {
+                HStack {
+                    Button {
+                        Task {
+                            isTransitioningBooking = true
+                            await onHostBookingTransition("accepted")
+                            isTransitioningBooking = false
+                        }
+                    } label: {
+                        Label(isTransitioningBooking ? "Mise à jour…" : "Accepter", systemImage: "checkmark.circle.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent).tint(.teal)
+                    .disabled(isTransitioningBooking)
+                    Button(role: .destructive) { confirmBookingRejection = true } label: {
+                        Label("Refuser", systemImage: "xmark.circle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(isTransitioningBooking)
+                }
+                .confirmationDialog("Refuser cette demande de réservation ?", isPresented: $confirmBookingRejection, titleVisibility: .visible) {
+                    Button("Refuser la demande", role: .destructive) {
+                        Task {
+                            isTransitioningBooking = true
+                            await onHostBookingTransition("rejected")
+                            isTransitioningBooking = false
+                        }
+                    }
+                    Button("Annuler", role: .cancel) { }
+                } message: {
+                    Text("La demande sera marquée comme refusée et les dates liées seront remises à disposition dans Wix.")
+                }
             }
             if let url = propertyLinkURL {
                 Link(destination: url) {

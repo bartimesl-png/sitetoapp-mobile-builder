@@ -694,7 +694,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         return urls
     }
 
-    private func sendDashboardAction(_ payload: [String: Any], fallback: String) async throws {
+    private func sendDashboardAction(_ payload: [String: Any], fallback: String) async throws -> [String: Any] {
         let token = try await validAccessToken()
         let endpoint = URL(string: "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/ios-native-dashboard-v2")!
         var request = URLRequest(url: endpoint, timeoutInterval: 40)
@@ -709,6 +709,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
             let result = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
             throw AuthError.api(result?["error"] as? String ?? fallback)
         }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
     }
 
     func markInquiryRead(role: String, messageID: String) async {
@@ -810,6 +811,44 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         }
     }
 
+    func transitionHostBookingRequest(requestID: String, status: String) async {
+        errorMessage = nil
+        let cleanID = requestID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanID.isEmpty, ["accepted", "rejected"].contains(status) else { return }
+        do {
+            let result = try await sendDashboardAction([
+                "action": "transition_booking_request", "role": "hebergeur",
+                "requestId": cleanID, "status": status,
+            ], fallback: "Impossible de mettre à jour cette réservation.")
+            await loadDashboard(role: "hebergeur")
+            if result["emailSent"] as? Bool == false {
+                errorMessage = "La réservation a été mise à jour, mais l’e-mail de notification n’a pas pu être envoyé."
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func saveSeasonalCalendarDates(accommodationID: String, dates: [String], availabilityStatus: String, pricePerNight: Double?, minimumStay: Int?) async throws {
+        let cleanAccommodationID = accommodationID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanAccommodationID.isEmpty, !dates.isEmpty, dates.count <= 31,
+              ["available", "blocked"].contains(availabilityStatus),
+              dates.allSatisfy({ $0.range(of: "^\\d{4}-\\d{2}-\\d{2}$", options: .regularExpression) != nil }),
+              pricePerNight.map({ $0 >= 0 && $0 <= 100_000 }) ?? true,
+              minimumStay.map({ (1...365).contains($0) }) ?? true else {
+            throw AuthError.api("Vérifiez les dates, le tarif et le séjour minimum.")
+        }
+        var payload: [String: Any] = [
+            "action": "save_seasonal_calendar_dates", "role": "hebergeur",
+            "accommodationId": cleanAccommodationID, "dates": dates,
+            "availabilityStatus": availabilityStatus,
+        ]
+        if let pricePerNight { payload["pricePerNight"] = pricePerNight }
+        if let minimumStay { payload["minimumStay"] = minimumStay }
+        try await sendDashboardAction(payload, fallback: "Impossible de modifier ces disponibilités.")
+        await loadDashboard(role: "hebergeur")
+    }
+
     func saveSeasonalRate(rateID: String?, accommodationID: String, seasonName: String, startDate: String, endDate: String, pricePerNight: Double, minimumStayNights: Int) async throws {
         let cleanAccommodationID = accommodationID.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanRateID = rateID?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -832,6 +871,15 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         ]
         if let cleanRateID, !cleanRateID.isEmpty { payload["rateId"] = cleanRateID }
         try await sendDashboardAction(payload, fallback: "Impossible d’enregistrer ce tarif.")
+        await loadDashboard(role: "hebergeur")
+    }
+
+    func deleteSeasonalRate(rateID: String) async throws {
+        let cleanID = rateID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanID.isEmpty else { throw AuthError.api("Tarif saisonnier invalide.") }
+        try await sendDashboardAction([
+            "action": "delete_seasonal_rate", "role": "hebergeur", "rateId": cleanID,
+        ], fallback: "Impossible de supprimer ce tarif.")
         await loadDashboard(role: "hebergeur")
     }
 
