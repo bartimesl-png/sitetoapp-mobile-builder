@@ -287,6 +287,16 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
             let payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
             throw AuthError.api(payload?["error"] as? String ?? "Impossible de marquer la conversation comme lue.")
         }
+        if var dashboard = dashboardData, let currentMessages = dashboard["messages"] as? [[String: Any]] {
+            dashboard["messages"] = currentMessages.map { item in
+                guard (item["conversationId"] as? String) == conversationID else { return item }
+                var updated = item
+                updated["isRead"] = true
+                updated["seen"] = true
+                return updated
+            }
+            dashboardData = dashboard
+        }
     }
 
     func fetchPublicPrivateListings() async throws -> [Listing] {
