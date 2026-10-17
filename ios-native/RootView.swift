@@ -18,13 +18,9 @@ struct RootView: View {
                 .tabItem { Label("Favoris", systemImage: "heart.fill") }
                 .tag(2)
 
-            FullSiteRootView(initialSection: .deposit)
-                .tabItem { Label("Déposer", systemImage: "plus.app.fill") }
+            NativeSpacePickerView()
+                .tabItem { Label("Menu", systemImage: "line.3.horizontal") }
                 .tag(3)
-
-            FullSiteRootView(initialSection: .account)
-                .tabItem { Label("Compte", systemImage: "person.crop.circle") }
-                .tag(4)
         }
         .tint(Color(red: 0.02, green: 0.38, blue: 0.34))
     }
@@ -87,16 +83,6 @@ private struct NativeListingsView: View {
                             }
                         }
 
-                        Section {
-                            NavigationLink {
-                                FullSiteRootView(initialSection: .listings)
-                            } label: {
-                                Label("Voir aussi les annonces de particuliers", systemImage: "arrow.up.right.square")
-                                    .font(.subheadline.weight(.semibold))
-                            }
-                        } footer: {
-                            Text("Les annonces importées sont affichées ici en natif. Les annonces de particuliers restent accessibles via leur espace Wix.")
-                        }
                     }
                     .listStyle(.plain)
                     .refreshable { await service.reload() }
@@ -311,122 +297,14 @@ private struct ListingFact: View {
     }
 }
 
-private struct HomeFeature: Identifiable {
-    let id: String
-    let title: String
-    let detail: String
-    let symbol: String
-    let tint: Color
-    let destination: PortalSection
-}
-
-private struct ServiceDestination: Identifiable {
-    let destination: PortalSection
-    let detail: String
-    var id: String { destination.rawValue }
-    var title: String { destination.title }
-    var symbol: String { destination.symbol }
-}
-
-private enum ServiceDirectoryData {
-    static let groups: [(title: String, items: [ServiceDestination])] = [
-        ("Immobilier", [
-            .init(destination: .listings, detail: "Annonces de particuliers et de professionnels"),
-            .init(destination: .deposit, detail: "Publier un bien depuis l’espace vendeur"),
-            .init(destination: .matching, detail: "Découvrir le matching immobilier"),
-            .init(destination: .estimate, detail: "Faire estimer un bien"),
-            .init(destination: .professionals, detail: "Trouver un professionnel"),
-            .init(destination: .becomeAgent, detail: "Rejoindre le réseau immobilier")
-        ]),
-        ("Particuliers", [
-            .init(destination: .account, detail: "Se connecter à son compte vendeur"),
-            .init(destination: .privateSignup, detail: "Créer un compte particulier"),
-            .init(destination: .privateDashboard, detail: "Biens, photos, favoris et matchings"),
-            .init(destination: .favorites, detail: "Retrouver ses annonces favorites"),
-            .init(destination: .privateLegal, detail: "CGU applicables aux particuliers"),
-            .init(destination: .privateSalesTerms, detail: "CGV applicables aux particuliers")
-        ]),
-        ("Professionnels de l’immobilier", [
-            .init(destination: .proLogin, detail: "Connexion professionnelle PartenaireFoyer"),
-            .init(destination: .proSignup, detail: "Créer un accès professionnel"),
-            .init(destination: .proDashboard, detail: "Tableau de bord professionnel"),
-            .init(destination: .proProperties, detail: "Biens importés et annonces"),
-            .init(destination: .proBuyers, detail: "Recherches acquéreurs et matching"),
-            .init(destination: .proRequests, detail: "Demandes reçues"),
-            .init(destination: .proMatchings, detail: "Matchings immobiliers"),
-            .init(destination: .proMessages, detail: "Messages liés aux annonces"),
-            .init(destination: .proProfile, detail: "Profil professionnel"),
-            .init(destination: .proLegal, detail: "CGU professionnelles"),
-            .init(destination: .proSalesTerms, detail: "CGV professionnelles")
-        ]),
-        ("Courtiers", [
-            .init(destination: .brokerLogin, detail: "Connexion courtier"),
-            .init(destination: .brokerSignup, detail: "Inscription courtier"),
-            .init(destination: .brokerDashboard, detail: "Tableau de bord et activité"),
-            .init(destination: .brokerMessages, detail: "Messagerie courtier"),
-            .init(destination: .brokerLegal, detail: "CGU courtiers"),
-            .init(destination: .brokerSalesTerms, detail: "CGV courtiers")
-        ]),
-        ("Artisans et diagnostiqueurs", [
-            .init(destination: .artisanLogin, detail: "Connexion artisan / diagnostiqueur"),
-            .init(destination: .artisanSignup, detail: "Inscription artisan / diagnostiqueur"),
-            .init(destination: .artisanDashboard, detail: "Tableau de bord et profil"),
-            .init(destination: .artisanMessages, detail: "Demandes et messages"),
-            .init(destination: .artisanLegal, detail: "CGU artisans"),
-            .init(destination: .artisanSalesTerms, detail: "CGV artisans")
-        ]),
-        ("Prestataires", [
-            .init(destination: .providerLogin, detail: "Connexion prestataire"),
-            .init(destination: .providerSignup, detail: "Inscription prestataire"),
-            .init(destination: .providerDashboard, detail: "Gérer sa fiche prestataire"),
-            .init(destination: .providerProfile, detail: "Créer ou modifier sa fiche"),
-            .init(destination: .providerPhotos, detail: "Galerie photos prestataire"),
-            .init(destination: .providerLegal, detail: "CGU prestataires"),
-            .init(destination: .providerSalesTerms, detail: "CGV prestataires")
-        ]),
-        ("Locations saisonnières", [
-            .init(destination: .seasonalListings, detail: "Consulter les hébergements"),
-            .init(destination: .hostLogin, detail: "Connexion hébergeur"),
-            .init(destination: .hostSignup, detail: "Inscription hébergeur"),
-            .init(destination: .hostDashboard, detail: "Gérer ses hébergements"),
-            .init(destination: .hostCalendar, detail: "Calendrier de disponibilités"),
-            .init(destination: .hostBookings, detail: "Demandes de réservation")
-        ]),
-        ("Informations légales", [
-            .init(destination: .terms, detail: "Conditions générales d’utilisation"),
-            .init(destination: .salesTerms, detail: "Conditions générales de vente"),
-            .init(destination: .privacy, detail: "Politique de confidentialité"),
-            .init(destination: .legalNotices, detail: "Mentions légales")
-        ])
-    ]
-}
-
 private struct HomeDashboardView: View {
     @Binding var selectedTab: Int
-    @State private var selectedPage: PortalSection?
-    @State private var showServiceDirectory = false
-
-    private let columns = [
-        GridItem(.flexible(), spacing: 12),
-        GridItem(.flexible(), spacing: 12)
-    ]
-
-    private let features: [HomeFeature] = [
-        .init(id: "matching", title: "Matching immobilier", detail: "Trouvez les biens adaptés à votre projet", symbol: "arrow.left.arrow.right", tint: .indigo, destination: .matching),
-        .init(id: "estimate", title: "Estimation", detail: "Préparez votre estimation en ligne", symbol: "chart.bar.xaxis", tint: .orange, destination: .estimate),
-        .init(id: "classifieds", title: "Petites annonces", detail: "Acheter, vendre ou donner", symbol: "shippingbox.fill", tint: .purple, destination: .classifieds),
-        .init(id: "professionals", title: "Professionnels", detail: "Immobilier et habitat", symbol: "person.2.fill", tint: .blue, destination: .professionals),
-        .init(id: "private", title: "Espace particulier", detail: "Connexion et tableau de bord", symbol: "person.crop.circle.fill", tint: .green, destination: .account),
-        .init(id: "pro", title: "Espace professionnel", detail: "Activité et annonces", symbol: "building.2.fill", tint: .brown, destination: .proLogin),
-        .init(id: "agent", title: "Devenir mandataire", detail: "Découvrir les opportunités", symbol: "person.badge.plus", tint: .teal, destination: .becomeAgent)
-    ]
 
     var body: some View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 22) {
+                VStack(alignment: .leading, spacing: 20) {
                     hero
-
                     Button { selectedTab = 1 } label: {
                         HStack(spacing: 14) {
                             Image(systemName: "magnifyingglass")
@@ -435,8 +313,8 @@ private struct HomeDashboardView: View {
                                 .frame(width: 46, height: 46)
                                 .background(Color.teal.opacity(0.11), in: RoundedRectangle(cornerRadius: 14))
                             VStack(alignment: .leading, spacing: 3) {
-                                Text("Voir toutes les annonces").font(.headline).foregroundStyle(.primary)
-                                Text("Particuliers et professionnels").font(.subheadline).foregroundStyle(.secondary)
+                                Text("Voir les annonces").font(.headline).foregroundStyle(.primary)
+                                Text("Biens publiés par nos professionnels").font(.subheadline).foregroundStyle(.secondary)
                             }
                             Spacer()
                             Image(systemName: "arrow.right").foregroundStyle(.secondary)
@@ -447,81 +325,26 @@ private struct HomeDashboardView: View {
                     }
                     .buttonStyle(.plain)
 
-                    VStack(alignment: .leading, spacing: 14) {
-                        HStack {
-                            Text("Tous vos services").font(.title2.bold())
-                            Spacer()
-                            Text("PARTENAIREFOYER")
-                                .font(.caption2.bold())
-                                .tracking(0.8)
-                                .foregroundStyle(.secondary)
-                        }
-
-                        LazyVGrid(columns: columns, spacing: 12) {
-                            ForEach(features) { feature in
-                                Button {
-                                    selectedPage = feature.destination
-                                } label: {
-                                    VStack(alignment: .leading, spacing: 11) {
-                                        Image(systemName: feature.symbol)
-                                            .font(.title3.weight(.semibold))
-                                            .foregroundStyle(feature.tint)
-                                            .frame(width: 43, height: 43)
-                                            .background(feature.tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
-                                        Text(feature.title)
-                                            .font(.headline)
-                                            .foregroundStyle(.primary)
-                                            .multilineTextAlignment(.leading)
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                        Text(feature.detail)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                            .multilineTextAlignment(.leading)
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                        Spacer(minLength: 0)
-                                    }
-                                    .padding(14)
-                                    .frame(maxWidth: .infinity, minHeight: 142, alignment: .topLeading)
-                                    .background(.background, in: RoundedRectangle(cornerRadius: 20))
-                                    .overlay(RoundedRectangle(cornerRadius: 20).stroke(.quaternary, lineWidth: 1))
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Votre projet immobilier, au même endroit")
+                            .font(.title3.bold())
+                        Text("Consultez les biens, enregistrez vos favoris et choisissez votre espace depuis le menu.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
                     }
+                    .padding(18)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.background, in: RoundedRectangle(cornerRadius: 20))
+                    .overlay(RoundedRectangle(cornerRadius: 20).stroke(.quaternary, lineWidth: 1))
 
-                    Button { showServiceDirectory = true } label: {
-                        HStack(spacing: 14) {
-                            Image(systemName: "square.grid.2x2.fill")
-                                .font(.title3.weight(.semibold))
-                                .foregroundStyle(.teal)
-                                .frame(width: 46, height: 46)
-                                .background(Color.teal.opacity(0.11), in: RoundedRectangle(cornerRadius: 14))
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("Tous les espaces et services")
-                                    .font(.headline)
-                                    .foregroundStyle(.primary)
-                                Text("Particuliers, pros, courtiers, artisans, prestataires et hébergeurs")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .multilineTextAlignment(.leading)
-                            }
-                            Spacer(minLength: 0)
-                            Image(systemName: "chevron.right")
-                                .font(.caption.weight(.bold))
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(16)
-                        .background(.background, in: RoundedRectangle(cornerRadius: 20))
-                        .overlay(RoundedRectangle(cornerRadius: 20).stroke(.quaternary, lineWidth: 1))
+                    Button { selectedTab = 3 } label: {
+                        Label("Vous êtes… ? Choisir mon espace", systemImage: "person.crop.circle.badge.questionmark")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 15)
                     }
-                    .buttonStyle(.plain)
-
-                    Label("Pages et données du site PartenaireFoyer", systemImage: "link")
-                        .font(.subheadline.weight(.medium))
-                        .padding(17)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.teal.opacity(0.09), in: RoundedRectangle(cornerRadius: 18))
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color(red: 0.02, green: 0.38, blue: 0.34))
                 }
                 .padding(.horizontal, 17)
                 .padding(.top, 14)
@@ -529,16 +352,6 @@ private struct HomeDashboardView: View {
             }
             .background(Color(uiColor: .systemGroupedBackground))
             .toolbar(.hidden, for: .navigationBar)
-            .sheet(item: $selectedPage) { page in
-                FullSiteRootView(initialSection: page)
-                    .presentationDetents([.large])
-                    .presentationDragIndicator(.visible)
-            }
-            .sheet(isPresented: $showServiceDirectory) {
-                ServiceDirectoryView()
-                    .presentationDetents([.large])
-                    .presentationDragIndicator(.visible)
-            }
         }
     }
 
@@ -583,7 +396,7 @@ private struct HomeDashboardView: View {
 
                     Spacer()
 
-                    Button { selectedTab = 4 } label: {
+                    Button { selectedTab = 3 } label: {
                         Image(systemName: "person.crop.circle")
                             .font(.title3)
                             .foregroundStyle(.white)
@@ -618,57 +431,163 @@ private struct HomeDashboardView: View {
     }
 }
 
-private struct ServiceDirectoryView: View {
-    @Environment(\.dismiss) private var dismiss
-    @State private var searchText = ""
 
-    private var filteredGroups: [(title: String, items: [ServiceDestination])] {
-        guard !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return ServiceDirectoryData.groups
-        }
-        return ServiceDirectoryData.groups.compactMap { group in
-            let matches = group.items.filter {
-                $0.title.localizedCaseInsensitiveContains(searchText) ||
-                $0.detail.localizedCaseInsensitiveContains(searchText) ||
-                group.title.localizedCaseInsensitiveContains(searchText)
-            }
-            return matches.isEmpty ? nil : (group.title, matches)
-        }
-    }
+
+private struct NativeSpacePickerView: View {
+    @State private var selectedRole: AccountRole?
 
     var body: some View {
         NavigationStack {
             List {
-                ForEach(filteredGroups, id: \.title) { group in
-                    Section(group.title) {
-                        ForEach(group.items) { item in
-                            NavigationLink {
-                                FullSiteRootView(initialSection: item.destination)
-                            } label: {
-                                Label {
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        Text(item.title).font(.body.weight(.semibold))
-                                        Text(item.detail).font(.caption).foregroundStyle(.secondary)
-                                    }
-                                } icon: {
-                                    Image(systemName: item.symbol)
-                                        .foregroundStyle(.teal)
-                                        .frame(width: 24)
+                Section {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text("Vous êtes… ?")
+                            .font(.largeTitle.bold())
+                        Text("Choisissez votre profil. Chaque espace reste séparé ; les fonctions d’un compte ne s’affichent qu’après connexion à cet espace.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 8)
+                    .listRowBackground(Color.clear)
+                }
+
+                Section("Choisir un espace") {
+                    ForEach(AccountRole.allCases) { role in
+                        Button { selectedRole = role } label: {
+                            HStack(spacing: 13) {
+                                Image(systemName: role.symbol)
+                                    .font(.title3)
+                                    .foregroundStyle(.teal)
+                                    .frame(width: 42, height: 42)
+                                    .background(Color.teal.opacity(0.1), in: RoundedRectangle(cornerRadius: 13))
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(role.title).font(.headline).foregroundStyle(.primary)
+                                    Text(role.subtitle).font(.caption).foregroundStyle(.secondary)
                                 }
-                                .padding(.vertical, 3)
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption.weight(.bold)).foregroundStyle(.tertiary)
                             }
+                            .padding(.vertical, 5)
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
                     }
                 }
             }
             .listStyle(.insetGrouped)
-            .searchable(text: $searchText, prompt: "Rechercher un espace ou service")
-            .navigationTitle("PartenaireFoyer")
+            .navigationTitle("Mon espace")
+            .navigationBarTitleDisplayMode(.inline)
+            .sheet(item: $selectedRole) { role in
+                RoleEntryView(role: role)
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+            }
+        }
+    }
+}
+
+private enum AccountRole: String, CaseIterable, Identifiable {
+    case particulier, professionnel, courtier, artisan, prestataire, hebergeur
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .particulier: "Particulier"
+        case .professionnel: "Professionnel de l’immobilier"
+        case .courtier: "Courtier"
+        case .artisan: "Artisan / diagnostiqueur"
+        case .prestataire: "Prestataire"
+        case .hebergeur: "Hébergeur"
+        }
+    }
+    var subtitle: String {
+        switch self {
+        case .particulier: "Mes annonces, recherches et favoris"
+        case .professionnel: "Mes biens, acquéreurs et matchings"
+        case .courtier: "Mon espace et mes demandes"
+        case .artisan: "Mes services et demandes de diagnostic"
+        case .prestataire: "Ma fiche, mes photos et mes contacts"
+        case .hebergeur: "Mes hébergements et réservations"
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .particulier: "person.crop.circle"
+        case .professionnel: "building.2"
+        case .courtier: "briefcase"
+        case .artisan: "wrench.and.screwdriver"
+        case .prestataire: "person.2"
+        case .hebergeur: "bed.double"
+        }
+    }
+    var loginURL: URL {
+        URL(string: "https://www.partenairefoyer.com\(loginPath)")!
+    }
+    var signupURL: URL {
+        URL(string: "https://www.partenairefoyer.com\(signupPath)")!
+    }
+    private var loginPath: String {
+        switch self {
+        case .particulier: "/vendeur-login"
+        case .professionnel: "/pro-app-login"
+        case .courtier: "/broker-login"
+        case .artisan: "/artisan-login"
+        case .prestataire: "/connexion-prestataire"
+        case .hebergeur: "/hebergeur-connexion"
+        }
+    }
+    private var signupPath: String {
+        switch self {
+        case .particulier: "/vendeur-signup"
+        case .professionnel: "/inscription-pro"
+        case .courtier: "/broker-signup"
+        case .artisan: "/artisan-signup"
+        case .prestataire: "/inscription-prestataire"
+        case .hebergeur: "/hebergeur-inscription"
+        }
+    }
+}
+
+private struct RoleEntryView: View {
+    @Environment(\.dismiss) private var dismiss
+    let role: AccountRole
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 18) {
+                Label(role.title, systemImage: role.symbol)
+                    .font(.title2.bold())
+                Text(role.subtitle)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Text("Vous n’êtes pas connecté à cet espace.")
+                    .font(.subheadline.weight(.medium))
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.teal.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+                Link(destination: role.loginURL) {
+                    Label("Se connecter", systemImage: "person.crop.circle.badge.checkmark")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Color(red: 0.02, green: 0.38, blue: 0.34))
+                Link(destination: role.signupURL) {
+                    Label("Créer un compte", systemImage: "person.badge.plus")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                }
+                .buttonStyle(.bordered)
+                Text("Ces liens ouvrent le formulaire Wix correspondant à ce profil. Les tableaux de bord ne sont pas exposés dans l’application tant que la session native de ce rôle n’est pas confirmée.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(22)
+            .navigationTitle("Accès à l’espace")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Fermer") { dismiss() }
-                }
+                ToolbarItem(placement: .topBarTrailing) { Button("Fermer") { dismiss() } }
             }
         }
     }
