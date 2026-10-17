@@ -1,5 +1,5 @@
-Warning: truncated output (original token count: 31330)
-Total output lines: 2622
+Warning: truncated output (original token count: 31593)
+Total output lines: 2634
 
 import SwiftUI
 import CoreFoundation
@@ -691,7 +691,7 @@ private struct HomeDashboardView: View {
                                 .frame(width: 46, height: 46)
                                 .background(Color.teal.opacity(0.11), in: RoundedRectangle(cornerRadius: 14))
                             VStack(alignment: .leading, spacing: 3) {
-                …15330 tokens truncated…servations", "reservations", "bed.double.fill")]
+                …15593 tokens truncated…servations", "reservations", "bed.double.fill")]
         }
     }
 
