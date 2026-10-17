@@ -1,5 +1,5 @@
-Warning: truncated output (original token count: 31891)
-Total output lines: 2654
+Warning: truncated output (original token count: 31959)
+Total output lines: 2658
 
 import SwiftUI
 import CoreFoundation
@@ -771,11 +771,7 @@ private struct HomeDashboardView: View {
                             Text("Foyer")
                                 .foregroundStyle(Color(red: 0.35, green: 0.91, blue: 0.62))
                         }
-                        .font(.system(size: 17, weight: .bold, desi…13891 tokens truncated…    .padding(.horizontal, 13).padding(.vertical, 10)
-                        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20))
-                        .accessibilityLabel("Votre message")
-                    Button {
-                        Task { await sendMessage() }
+                        .font(.system(size: 17, weight: .bold, desi…13959 tokens truncated…                      Task { await sendMessage() }
                     } label: {
                         if isSending { ProgressView() }
                         else { Image(systemName: "arrow.up.circle.fill").font(.system(size: 34)) }
@@ -1410,7 +1406,7 @@ private struct DashboardItemDetailView: View {
         ("propertyPrice", "Prix du bien"), ("minBudget", "Budget minimum"), ("maxBudget", "Budget maximum"),
         ("radius", "Rayon (km)"), ("minRooms", "Pièces minimum"), ("minBedrooms", "Chambres minimum"),
         ("emailAlertsEnabled", "Alertes e-mail"), ("professionalName", "Professionnel"), ("professionalEmail", "E-mail du professionnel"),
-        ("category", "Catégorie"), ("condition", "État"), ("status", "Statut"),
+        ("category", "Catégorie"), ("subcategory", "Sous-catégorie"), ("condition", "État"), ("itemCondition", "État"), ("status", "Statut"),
         ("matchingType", "Type de matching"), ("matchingScore", "Compatibilité"),
         ("demandType", "Type de demande"), ("seen", "Consulté"),
         ("senderEmail", "E-mail du contact"), ("senderPhone", "Téléphone du contact"),
@@ -1426,7 +1422,11 @@ private struct DashboardItemDetailView: View {
     }
 
     private var imageURLs: [URL] {
-        var values = ["mainImageUrl", "mainImage", "itemImage", "photo", "photo2", "photo3", "photo4", "photo5"]
+        var values = [
+            "mainImageUrl", "mainImage", "itemImage", "photo",
+            "photo2", "photo3", "photo4", "photo5", "photo6", "photo7", "photo8", "photo9", "photo10",
+            "photo11", "photo12", "photo13", "photo14", "photo15", "photo16", "photo17", "photo18", "photo19", "photo20",
+        ]
             .compactMap { item[$0] as? String }
         values += item["photoUrls"] as? [String] ?? []
         values += item["galleryImages"] as? [String] ?? []
