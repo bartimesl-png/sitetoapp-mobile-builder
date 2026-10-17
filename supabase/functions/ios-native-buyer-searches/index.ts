@@ -93,7 +93,7 @@ Deno.serve(async (req: Request) => {
       const emailAlertsEnabled = body.emailAlertsEnabled === true;
       if (searchName.length < 2 || !["buy", "rent"].includes(transactionType) ||
           (!city && !/^\d{5}$/.test(postalCode)) || propertyTypes.length === 0 ||
-          Number.isNaN(radius) || radius! < 1 || radius! > 100 ||
+          radius === undefined || Number.isNaN(radius) || radius < 1 || radius > 100 ||
           [minBudget, maxBudget, minSurface, maxSurface, minRooms, minBedrooms].some((value) => Number.isNaN(value) || (value !== undefined && value < 0)) ||
           (maxBudget > 0 && minBudget > maxBudget) ||
           (maxSurface !== undefined && maxSurface > 0 && minSurface > maxSurface)) {
