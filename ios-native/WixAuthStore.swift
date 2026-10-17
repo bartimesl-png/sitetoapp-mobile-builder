@@ -21,6 +21,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
     @Published private(set) var member: WixMember?
     @Published private(set) var isSigningIn = false
     @Published var errorMessage: String?
+    @Published private(set) var infoMessage: String?
     @Published private(set) var dashboardData: [String: Any]?
     @Published private(set) var dashboardError: String?
     @Published private(set) var isLoadingDashboard = false
@@ -55,6 +56,13 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         let message: String?
     }
 
+    private struct RegistrationResponse: Decodable {
+        let state: String?
+        let sessionToken: String?
+        let stateToken: String?
+        let message: String?
+    }
+
     private struct RedirectResponse: Decodable {
         struct Session: Decodable {
             let fullUrl: String
@@ -86,6 +94,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         guard !isSigningIn else { return }
         isSigningIn = true
         errorMessage = nil
+        infoMessage = nil
         defer { isSigningIn = false }
 
         do {
@@ -167,6 +176,112 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         }
     }
 
+    func signUp(email: String, password: String, firstName: String, lastName: String) async {
+        guard !isSigningIn else { return }
+        isSigningIn = true
+        errorMessage = nil
+        infoMessage = nil
+        defer { isSigningIn = false }
+
+        let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let givenName = firstName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let familyName = lastName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard normalizedEmail.contains("@"), givenName.count >= 2, familyName.count >= 2, password.count >= 8 else {
+            errorMessage = "Indiquez un e-mail valide, vos prénom et nom, et un mot de passe d’au moins 8 caractères."
+            return
+        }
+
+        do {
+            let visitor = try await requestToken([
+                "clientId": clientID,
+                "grantType": "anonymous"
+            ])
+            let registration = try await post(
+                "https://www.wixapis.com/_api/iam/authentication/v2/register",
+                bearer: visitor.accessToken,
+                body: [
+                    "login_id": ["email": normalizedEmail],
+                    "password": password,
+                    "profile": [
+                        "firstName": givenName,
+                        "lastName": familyName,
+                        "nickname": "\(givenName) \(familyName)",
+                        "privacyStatus": "PRIVATE"
+                    ]
+                ],
+                as: RegistrationResponse.self
+            )
+            guard registration.state?.uppercased() == "SUCCESS",
+                  let sessionToken = registration.sessionToken, !sessionToken.isEmpty else {
+                let state = registration.state?.uppercased() ?? ""
+                if state.contains("EMAIL") || state.contains("VERIFY") {
+                    infoMessage = "Un code de vérification a été envoyé à \(normalizedEmail). Après validation, connectez-vous avec vos identifiants."
+                    return
+                }
+                throw AuthError.login(registration.message ?? "L’inscription n’a pas abouti (\(registration.state ?? "état inconnu")).")
+            }
+            try await establishMemberSession(sessionToken: sessionToken, visitorAccessToken: visitor.accessToken)
+        } catch is CancellationError {
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func establishMemberSession(sessionToken: String, visitorAccessToken: String) async throws {
+        let verifier = Self.randomURLSafeString(byteCount: 48)
+        let challenge = Self.sha256URLSafe(verifier)
+        let state = Self.randomURLSafeString(byteCount: 24)
+        let redirect = try await post(
+            "https://www.wixapis.com/_api/redirects-api/v1/redirect-session",
+            bearer: visitorAccessToken,
+            body: [
+                "auth": [
+                    "authRequest": [
+                        "clientId": clientID,
+                        "codeChallenge": challenge,
+                        "codeChallengeMethod": "S256",
+                        "responseMode": "fragment",
+                        "responseType": "code",
+                        "scope": "offline_access",
+                        "sessionToken": sessionToken,
+                        "state": state,
+                        "redirectUri": redirectURI
+                    ]
+                ]
+            ],
+            as: RedirectResponse.self
+        )
+        guard let loginURL = URL(string: redirect.redirectSession.fullUrl) else { throw AuthError.invalidResponse }
+        let callbackURL = try await authenticate(url: loginURL)
+        guard let (code, returnedState) = Self.authorizationValues(from: callbackURL), returnedState == state else {
+            throw AuthError.invalidResponse
+        }
+        let tokens = try await requestToken([
+            "clientId": clientID,
+            "grantType": "authorization_code",
+            "redirectUri": redirectURI,
+            "code": code,
+            "codeVerifier": verifier
+        ])
+        let payload = try await getMember(accessToken: tokens.accessToken)
+        let member = WixMember(
+            id: payload.id,
+            loginEmail: payload.loginEmail,
+            loginEmailVerified: payload.loginEmailVerified,
+            status: payload.status,
+            firstName: payload.contact?.firstName,
+            lastName: payload.contact?.lastName
+        )
+        try save(StoredSession(
+            accessToken: tokens.accessToken,
+            refreshToken: tokens.refreshToken,
+            expiresAt: Date().addingTimeInterval(tokens.expiresIn),
+            member: member
+        ))
+        self.member = member
+    }
+
     func signOut() {
         if let session = readStoredSession(),
            let installationID = UserDefaults.standard.string(forKey: "partenairefoyer.pushDeviceID.v1"),
@@ -179,6 +294,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         deleteStoredSession()
         member = nil
         errorMessage = nil
+        infoMessage = nil
     }
 
     private func disablePushDevices(installationID: String, accessToken: String) async {

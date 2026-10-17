@@ -1282,6 +1282,9 @@ private struct RoleEntryView: View {
     @StateObject private var auth = WixAuthStore.shared
     @State private var email = ""
     @State private var password = ""
+    @State private var firstName = ""
+    @State private var lastName = ""
+    @State private var isCreatingAccount = false
     let role: AccountRole
     let onSignedIn: () -> Void
 
@@ -1296,7 +1299,24 @@ private struct RoleEntryView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                Section("Connexion à votre compte") {
+                if isCreatingAccount {
+                    Section("Créer votre compte Wix") {
+                        TextField("Prénom", text: $firstName)
+                            .textContentType(.givenName)
+                            .textInputAutocapitalization(.words)
+                        TextField("Nom", text: $lastName)
+                            .textContentType(.familyName)
+                            .textInputAutocapitalization(.words)
+                        TextField("Adresse e-mail", text: $email)
+                            .textContentType(.emailAddress)
+                            .keyboardType(.emailAddress)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        SecureField("Mot de passe (8 caractères minimum)", text: $password)
+                            .textContentType(.newPassword)
+                    }
+                } else {
+                    Section("Connexion à votre compte") {
                     TextField("Adresse e-mail", text: $email)
                         .textContentType(.username)
                         .keyboardType(.emailAddress)
@@ -1304,6 +1324,7 @@ private struct RoleEntryView: View {
                         .autocorrectionDisabled()
                     SecureField("Mot de passe", text: $password)
                         .textContentType(.password)
+                    }
                 }
 
                 if let error = auth.errorMessage {
@@ -1312,27 +1333,45 @@ private struct RoleEntryView: View {
                     }
                 }
 
+                if let message = auth.infoMessage {
+                    Section {
+                        Label(message, systemImage: "envelope.badge")
+                            .font(.footnote).foregroundStyle(.teal)
+                    }
+                }
+
                 Section {
                     Button {
                         Task {
-                            await auth.signIn(email: email, password: password)
+                            if isCreatingAccount {
+                                await auth.signUp(email: email, password: password, firstName: firstName, lastName: lastName)
+                            } else {
+                                await auth.signIn(email: email, password: password)
+                            }
                             if auth.member != nil { onSignedIn() }
                         }
                     } label: {
                         HStack {
                             Spacer()
-                            Label("Se connecter", systemImage: "lock.shield")
+                            Label(isCreatingAccount ? "Créer mon compte" : "Se connecter",
+                                  systemImage: isCreatingAccount ? "person.badge.plus" : "lock.shield")
                                 .font(.headline)
                             Spacer()
                         }
                     }
                     .disabled(email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || password.isEmpty || auth.isSigningIn)
 
-                    Link(destination: role.signupURL) {
-                        Label("Créer un compte", systemImage: "person.badge.plus")
+                    Button {
+                        isCreatingAccount.toggle()
+                        auth.errorMessage = nil
+                    } label: {
+                        Label(isCreatingAccount ? "J’ai déjà un compte : me connecter" : "Créer un compte", systemImage: "person.crop.circle.badge.plus")
                     }
+                    .disabled(auth.isSigningIn)
                 } footer: {
-                    Text("La validation du compte passe par l’authentification Wix sécurisée. Le mot de passe n’est pas conservé par l’application.")
+                    Text(isCreatingAccount
+                         ? "Votre compte est créé par l’authentification Wix sécurisée. Le mot de passe n’est pas conservé par l’application."
+                         : "La connexion passe par l’authentification Wix sécurisée. Le mot de passe n’est pas conservé par l’application.")
                 }
             }
             .navigationTitle("Accès à l’espace")
