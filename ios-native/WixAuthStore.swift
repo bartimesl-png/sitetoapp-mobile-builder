@@ -186,8 +186,9 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let givenName = firstName.trimmingCharacters(in: .whitespacesAndNewlines)
         let familyName = lastName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard normalizedEmail.contains("@"), givenName.count >= 2, familyName.count >= 2, password.count >= 8 else {
-            errorMessage = "Indiquez un e-mail valide, vos prénom et nom, et un mot de passe d’au moins 8 caractères."
+        guard normalizedEmail.contains("@"), givenName.count >= 2, familyName.count >= 2,
+              member != nil || password.count >= 8 else {
+            errorMessage = "Indiquez un e-mail valide, vos prénom et nom, et un mot de passe d’au moins 8 caractères pour un nouveau compte."
             return false
         }
         if let member, member.loginEmail.caseInsensitiveCompare(normalizedEmail) != .orderedSame {

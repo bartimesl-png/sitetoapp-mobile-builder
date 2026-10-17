@@ -102,8 +102,14 @@ async function loadDashboard(role: string, email: string, memberID: string, toke
   }
 
   if (role === "prestataire" || role === "artisan" || role === "diagnostiqueur") {
-    const accountCollection = role === "prestataire" ? "serviceprovideraccounts" : "serviceprovideraccounts-1";
-    const account = first(await query(accountCollection, emailFilter(email), ["email", "isActive", "firstName", "lastName"], token, 2));
+    // Native registration uses the current suffixed collections for all service
+    // provider roles. Keep the legacy collection as a read-only fallback for
+    // existing Wix prestataire accounts.
+    const accountFields = ["email", "isActive", "firstName", "lastName"];
+    let account = first(await query("serviceprovideraccounts-1", emailFilter(email), accountFields, token, 2));
+    if (!account) {
+      account = first(await query("serviceprovideraccounts", emailFilter(email), accountFields, token, 2));
+    }
     if (!account || account.isActive === false) return null;
     const accountId = String(account._id ?? "");
     const providers = await query("serviceproviders-1", { accountId: { $eq: accountId } }, ["accountId", "businessName", "category", "subcategory", "description", "services", "city", "postalCode", "phone", "email", "website", "photoUrls", "status", "verified"], token, 3);

@@ -54,6 +54,21 @@ async function insert(collection: string, data: Record<string, unknown>, token: 
   return id;
 }
 
+async function patchFields(collection: string, id: string, fields: Record<string, unknown>, token: string): Promise<void> {
+  const fieldModifications = Object.entries(fields)
+    .filter(([, value]) => value !== undefined && value !== null && value !== "")
+    .map(([fieldPath, value]) => ({
+      fieldPath,
+      action: "SET_FIELD",
+      setFieldOptions: { value },
+    }));
+  if (fieldModifications.length === 0) return;
+  await wix(`/wix-data/v2/items/${encodeURIComponent(id)}`, token, "PATCH", {
+    dataCollectionId: collection,
+    patch: { dataItemId: id, fieldModifications },
+  });
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return response({ error: "Méthode non autorisée." }, 405);
@@ -106,8 +121,18 @@ Deno.serve(async (req: Request) => {
       accountCollection = "privateaccounts";
       profileCollection = "privateprofiles";
       const existing = (await query(accountCollection, accountFilter, ["email", "isActive", "accountType"], token))[0];
-      if (existing?._id) return response({ success: true, role, accountId: String(existing._id), alreadyExists: true });
-      accountId = await insert(accountCollection, { email, accountType: "private_vendor", acceptedTerms: true, acceptedTermsDate: now, isActive: true, createdAt: now }, token);
+      if (existing?._id) {
+        if (existing.isActive === false) return response({ error: "Ce compte particulier est désactivé. Contactez PartenaireFoyer pour le réactiver." }, 403);
+        accountId = String(existing._id);
+        const profile = (await query(profileCollection, { ownerId: { $eq: accountId } }, ["ownerId", "email"], token))[0];
+        if (profile?._id) {
+          const profileId = String(profile._id);
+          await patchFields(profileCollection, profileId, { firstName, lastName, email, phone, city, postalCode }, token);
+          return response({ success: true, role, accountId, profileId, alreadyExists: true, profileUpdated: true });
+        }
+      } else {
+        accountId = await insert(accountCollection, { email, accountType: "private_vendor", acceptedTerms: true, acceptedTermsDate: now, isActive: true, createdAt: now }, token);
+      }
       profileId = await insert(profileCollection, { ownerId: accountId, firstName, lastName, email, phone, city, postalCode, isProfileComplete: false, createdAt: now }, token);
     } else if (role === "professionnel") {
       if (companyName.length < 2 || category.length < 2 || city.length < 2 || postalCode.length < 4) {
@@ -116,8 +141,23 @@ Deno.serve(async (req: Request) => {
       accountCollection = "prosaccounts";
       profileCollection = "prosprofiles";
       const existing = (await query(accountCollection, accountFilter, ["email", "isActive"], token))[0];
-      if (existing?._id) return response({ success: true, role, accountId: String(existing._id), alreadyExists: true });
-      accountId = await insert(accountCollection, { email, isActive: true, cguAccepted: true, cgvAccepted: true, cguAcceptedAt: now, cgvAcceptedAt: now, createdAt: now }, token);
+      if (existing?._id) {
+        if (existing.isActive === false) return response({ error: "Ce compte professionnel est désactivé. Contactez PartenaireFoyer pour le réactiver." }, 403);
+        accountId = String(existing._id);
+        const profile = (await query(profileCollection, { accountId: { $eq: accountId } }, ["accountId", "email"], token))[0];
+        if (profile?._id) {
+          const profileId = String(profile._id);
+          const categories = JSON.stringify([{ mainCategory: category, subCategories: subcategory ? [subcategory] : [] }]);
+          await patchFields(profileCollection, profileId, {
+            professionalType: text(body.professionalType, 40) || undefined,
+            companyName, contactName, phoneNumber: phone, email, city, postalCode,
+            category, categories, description, website: website || undefined,
+          }, token);
+          return response({ success: true, role, accountId, profileId, alreadyExists: true, profileUpdated: true });
+        }
+      } else {
+        accountId = await insert(accountCollection, { email, isActive: true, cguAccepted: true, cgvAccepted: true, cguAcceptedAt: now, cgvAcceptedAt: now, createdAt: now }, token);
+      }
       const categories = JSON.stringify([{ mainCategory: category, subCategories: subcategory ? [subcategory] : [] }]);
       profileId = await insert(profileCollection, {
         accountId, professionalType: text(body.professionalType, 40) || "mandataire", companyName, contactName,
@@ -138,8 +178,23 @@ Deno.serve(async (req: Request) => {
       accountCollection = "brokeraccounts";
       profileCollection = "brokerprofiles";
       const existing = (await query(accountCollection, accountFilter, ["email", "isActive"], token))[0];
-      if (existing?._id) return response({ success: true, role, accountId: String(existing._id), alreadyExists: true });
-      accountId = await insert(accountCollection, { email, isActive: true, cguAccepted: true, cgvAccepted: true, cguAcceptedAt: now, cgvAcceptedAt: now, createdAt: now }, token);
+      if (existing?._id) {
+        if (existing.isActive === false) return response({ error: "Ce compte courtier est désactivé. Contactez PartenaireFoyer pour le réactiver." }, 403);
+        accountId = String(existing._id);
+        const profile = (await query(profileCollection, { accountId: { $eq: accountId } }, ["accountId", "contactEmail"], token))[0];
+        if (profile?._id) {
+          const profileId = String(profile._id);
+          const experience = numeric(body.yearsOfExperience);
+          await patchFields(profileCollection, profileId, {
+            fullName, professionalTitle: text(body.professionalTitle, 100), contactEmail: email,
+            phoneNumber: phone, city, websiteUrl: website || undefined,
+            yearsOfExperience: experience,
+          }, token);
+          return response({ success: true, role, accountId, profileId, alreadyExists: true, profileUpdated: true });
+        }
+      } else {
+        accountId = await insert(accountCollection, { email, isActive: true, cguAccepted: true, cgvAccepted: true, cguAcceptedAt: now, cgvAcceptedAt: now, createdAt: now }, token);
+      }
       const broker: Record<string, unknown> = { accountId, fullName, professionalTitle: text(body.professionalTitle, 100), contactEmail: email, phoneNumber: phone, city };
       if (website) broker.websiteUrl = website;
       const experience = numeric(body.yearsOfExperience);
@@ -153,8 +208,24 @@ Deno.serve(async (req: Request) => {
       profileCollection = "serviceproviders-1";
       accountFilter = { email: { $eq: email } };
       const existing = (await query(accountCollection, accountFilter, ["email", "isActive"], token))[0];
-      if (existing?._id) return response({ success: true, role, accountId: String(existing._id), alreadyExists: true });
-      accountId = await insert(accountCollection, { firstName, lastName, email, phone, isActive: true, createdAt: now }, token);
+      if (existing?._id) {
+        if (existing.isActive === false) return response({ error: "Ce compte professionnel de service est désactivé. Contactez PartenaireFoyer pour le réactiver." }, 403);
+        accountId = String(existing._id);
+        const profiles = await query(profileCollection, { accountId: { $eq: accountId } }, ["accountId", "category", "subcategory"], token);
+        const roleCategory = role === "artisan" ? "Artisan" : role === "diagnostiqueur" ? "Diagnostiqueur" : category;
+        const matchesRole = profiles.find((item) => String(item.category ?? "").toLowerCase() === roleCategory.toLowerCase() &&
+          (role !== "prestataire" || !/artisan|diagnostiqueur/i.test(String(item.category ?? ""))));
+        if (matchesRole?._id) {
+          const profileId = String(matchesRole._id);
+          await patchFields(profileCollection, profileId, {
+            businessName: companyName, category: roleCategory, subcategory, description,
+            city, postalCode, phone, email, website: website || undefined,
+          }, token);
+          return response({ success: true, role, accountId, profileId, alreadyExists: true, profileUpdated: true });
+        }
+      } else {
+        accountId = await insert(accountCollection, { firstName, lastName, email, phone, isActive: true, createdAt: now }, token);
+      }
       const roleCategory = role === "artisan" ? "Artisan" : role === "diagnostiqueur" ? "Diagnostiqueur" : category;
       profileId = await insert(profileCollection, {
         accountId, businessName: companyName, category: roleCategory, subcategory, description,
@@ -172,7 +243,11 @@ Deno.serve(async (req: Request) => {
       }
       profileCollection = "seasonalhostprofiles";
       const existing = (await query(profileCollection, { email: { $eq: email } }, ["email", "isVerified"], token))[0];
-      if (existing?._id) return response({ success: true, role, profileId: String(existing._id), alreadyExists: true });
+      if (existing?._id) {
+        const profileId = String(existing._id);
+        await patchFields(profileCollection, profileId, { fullName: companyName, email, phoneNumber: phone, biography: description }, token);
+        return response({ success: true, role, profileId, alreadyExists: true, profileUpdated: true });
+      }
       profileId = await insert(profileCollection, { fullName: companyName, email, phoneNumber: phone, biography: description, isVerified: false }, token);
     }
 
