@@ -450,6 +450,7 @@ private struct ListingFact: View {
 
 private struct HomeDashboardView: View {
     @Binding var selectedTab: Int
+    @State private var showNativeEstimation = false
 
     var body: some View {
         NavigationStack {
@@ -496,6 +497,26 @@ private struct HomeDashboardView: View {
                     }
                     .buttonStyle(.plain)
 
+                    Button { showNativeEstimation = true } label: {
+                        HStack(spacing: 14) {
+                            Image(systemName: "chart.line.uptrend.xyaxis")
+                                .font(.title3.weight(.semibold))
+                                .foregroundStyle(.teal)
+                                .frame(width: 46, height: 46)
+                                .background(Color.teal.opacity(0.11), in: RoundedRectangle(cornerRadius: 14))
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Faire estimer mon bien").font(.headline).foregroundStyle(.primary)
+                                Text("Envoyez votre demande depuis l’app").font(.subheadline).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "arrow.right").foregroundStyle(.secondary)
+                        }
+                        .padding(16)
+                        .background(.background, in: RoundedRectangle(cornerRadius: 20))
+                        .overlay(RoundedRectangle(cornerRadius: 20).stroke(.quaternary, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Votre projet immobilier, au même endroit")
                             .font(.title3.bold())
@@ -523,6 +544,11 @@ private struct HomeDashboardView: View {
             }
             .background(Color(uiColor: .systemGroupedBackground))
             .toolbar(.hidden, for: .navigationBar)
+        }
+        .sheet(isPresented: $showNativeEstimation) {
+            NavigationStack { NativeEstimationRequestView() }
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
         }
     }
 
@@ -603,6 +629,184 @@ private struct HomeDashboardView: View {
 }
 
 
+
+private struct NativeEstimationRequestView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var firstName = ""
+    @State private var lastName = ""
+    @State private var email = ""
+    @State private var phone = ""
+    @State private var address = ""
+    @State private var city = ""
+    @State private var postalCode = ""
+    @State private var propertyType = "Maison"
+    @State private var propertyCondition = "Bon état"
+    @State private var occupancyStatus = "Occupé par le propriétaire"
+    @State private var projectTimeline = "Dans les 3 mois"
+    @State private var livingArea = ""
+    @State private var landArea = ""
+    @State private var rooms = ""
+    @State private var bedrooms = ""
+    @State private var budget = ""
+    @State private var consent = false
+    @State private var isSubmitting = false
+    @State private var didSubmit = false
+    @State private var errorMessage: String?
+
+    private var canSubmit: Bool {
+        firstName.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 &&
+        lastName.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 &&
+        email.contains("@") && email.contains(".") &&
+        phone.filter(\.isNumber).count >= 8 &&
+        !address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        !city.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        postalCode.count == 5 && postalCode.allSatisfy(\.isNumber) &&
+        (number(livingArea) ?? 0) > 0 && consent
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                Label("Demande d’estimation", systemImage: "chart.line.uptrend.xyaxis")
+                    .font(.title3.bold())
+                Text("Décrivez votre bien. Votre demande sera transmise à PartenaireFoyer pour être traitée selon le parcours d’estimation existant.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Vos coordonnées") {
+                TextField("Prénom", text: $firstName).textContentType(.givenName)
+                TextField("Nom", text: $lastName).textContentType(.familyName)
+                TextField("Adresse e-mail", text: $email)
+                    .textContentType(.emailAddress)
+                    .keyboardType(.emailAddress)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                TextField("Téléphone", text: $phone)
+                    .textContentType(.telephoneNumber)
+                    .keyboardType(.phonePad)
+            }
+
+            Section("Le bien à estimer") {
+                Picker("Type de bien", selection: $propertyType) {
+                    ForEach(["Maison", "Appartement", "Terrain", "Immeuble", "Autre"], id: \.self) { Text($0) }
+                }
+                TextField("Adresse", text: $address)
+                    .textContentType(.fullStreetAddress)
+                TextField("Ville", text: $city)
+                    .textContentType(.addressCity)
+                TextField("Code postal", text: $postalCode)
+                    .keyboardType(.numberPad)
+                    .onChange(of: postalCode) { _, value in
+                        postalCode = String(value.filter(\.isNumber).prefix(5))
+                    }
+                TextField("Surface habitable (m²)", text: $livingArea)
+                    .keyboardType(.decimalPad)
+                TextField("Surface du terrain (m²), facultatif", text: $landArea)
+                    .keyboardType(.decimalPad)
+                TextField("Nombre de pièces, facultatif", text: $rooms)
+                    .keyboardType(.numberPad)
+                TextField("Nombre de chambres, facultatif", text: $bedrooms)
+                    .keyboardType(.numberPad)
+                Picker("État général", selection: $propertyCondition) {
+                    ForEach(["Neuf", "Très bon état", "Bon état", "À rafraîchir", "À rénover"], id: \.self) { Text($0) }
+                }
+                Picker("Occupation", selection: $occupancyStatus) {
+                    ForEach(["Occupé par le propriétaire", "Loué", "Vacant"], id: \.self) { Text($0) }
+                }
+                Picker("Délai du projet", selection: $projectTimeline) {
+                    ForEach(["Au plus vite", "Dans les 3 mois", "Dans les 6 mois", "Plus tard / information"], id: \.self) { Text($0) }
+                }
+                TextField("Budget souhaité, facultatif (€)", text: $budget)
+                    .keyboardType(.decimalPad)
+            }
+
+            Section {
+                Toggle("J’accepte que mes coordonnées et les informations du bien soient transmises pour traiter cette demande.", isOn: $consent)
+                Text("Les informations sont envoyées à la collection Wix existante des demandes d’estimation. L’application n’affiche pas de valeur automatique et ne remplace pas l’avis d’un professionnel.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let errorMessage {
+                Section("Envoi impossible") {
+                    Text(errorMessage).foregroundStyle(.red).font(.footnote)
+                }
+            }
+            if didSubmit {
+                Section {
+                    Label("Votre demande a été transmise.", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                    Text("Vous pouvez fermer cet écran. L’équipe PartenaireFoyer pourra vous recontacter avec les coordonnées fournies.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+
+            Section {
+                Button {
+                    Task { await submit() }
+                } label: {
+                    HStack {
+                        Spacer()
+                        if isSubmitting { ProgressView("Envoi…") }
+                        else { Label("Envoyer ma demande", systemImage: "paperplane.fill").font(.headline) }
+                        Spacer()
+                    }
+                }
+                .disabled(!canSubmit || isSubmitting || didSubmit)
+            } footer: {
+                Text("Les champs marqués facultatifs peuvent rester vides. Le code postal doit comporter 5 chiffres.")
+            }
+        }
+        .navigationTitle("Estimation")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(didSubmit ? "Terminé" : "Fermer") { dismiss() }
+            }
+        }
+    }
+
+    private func number(_ value: String) -> Double? {
+        let normalized = value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: ",", with: ".")
+        guard !normalized.isEmpty else { return nil }
+        return Double(normalized)
+    }
+
+    @MainActor
+    private func submit() async {
+        guard canSubmit else { return }
+        isSubmitting = true
+        errorMessage = nil
+        defer { isSubmitting = false }
+        do {
+            try await WixAuthStore.shared.submitEstimationRequest(
+                firstName: firstName,
+                lastName: lastName,
+                email: email,
+                phone: phone,
+                address: address,
+                city: city,
+                postalCode: postalCode,
+                propertyType: propertyType,
+                propertyCondition: propertyCondition,
+                occupancyStatus: occupancyStatus,
+                projectTimeline: projectTimeline,
+                livingArea: number(livingArea),
+                landArea: number(landArea),
+                rooms: number(rooms),
+                bedrooms: number(bedrooms),
+                budget: number(budget)
+            )
+            didSubmit = true
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}
 
 private struct NativeSpacePickerView: View {
     @State private var selectedRole: AccountRole?
