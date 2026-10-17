@@ -168,10 +168,39 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
     }
 
     func signOut() {
+        if let session = readStoredSession(),
+           let installationID = UserDefaults.standard.string(forKey: "partenairefoyer.pushDeviceID.v1"),
+           !installationID.isEmpty {
+            // Capture the current Wix bearer before removing the local session;
+            // cleanup runs best-effort and never delays the visible sign-out.
+            Task { await disablePushDevices(installationID: installationID, accessToken: session.accessToken) }
+        }
         resetDashboard()
         deleteStoredSession()
         member = nil
         errorMessage = nil
+    }
+
+    private func disablePushDevices(installationID: String, accessToken: String) async {
+        do {
+            let endpoint = URL(string: "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/ios-native-push-registration")!
+            var request = URLRequest(url: endpoint, timeoutInterval: 25)
+            request.httpMethod = "POST"
+            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            request.httpBody = try JSONSerialization.data(withJSONObject: [
+                "action": "disable",
+                "installationId": installationID
+            ])
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                let message = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["error"] as? String
+                throw AuthError.api(message ?? "Désactivation des notifications impossible.")
+            }
+        } catch {
+            NSLog("Notifications iOS : désactivation différée (%@).", error.localizedDescription)
+        }
     }
 
     func resetDashboard() {
