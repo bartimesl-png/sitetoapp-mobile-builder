@@ -1955,6 +1955,13 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
             localImported = []
             warnings.append("les artisans et diagnostiqueurs importés")
         }
+        let brokers: [WixPublicProfessional]
+        do {
+            brokers = try await fetchPublicBrokers(accessToken: visitor.accessToken)
+        } catch {
+            brokers = []
+            warnings.append("l’annuaire des courtiers")
+        }
         let realEstateImported: [WixPublicProfessional]
         do {
             realEstateImported = try await fetchImportedRealEstateProfessionals()
@@ -1962,7 +1969,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
             realEstateImported = []
             warnings.append("les professionnels immobiliers importés")
         }
-        let allRegistered = registered + registeredLocalPros
+        let allRegistered = registered + registeredLocalPros + brokers
         var seen = Set(allRegistered.map { normalizedProfessionalKey($0.resolvedName, $0.postalCode) })
         let registeredContacts = Set(allRegistered.flatMap { [$0.professionalEmail, $0.publicPhone] }.compactMap { $0 }.map(normalizedContactKey))
         let imported = localImported + realEstateImported
@@ -1973,6 +1980,61 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         }
         let warning = warnings.isEmpty ? nil : "Annuaire partiellement chargé : " + warnings.joined(separator: ", ") + ". Réessayez pour actualiser les fiches manquantes."
         return ProfessionalDirectoryResult(professionals: professionals, warning: warning)
+    }
+
+    private func fetchPublicBrokers(accessToken: String) async throws -> [WixPublicProfessional] {
+        let pageSize = 100
+        let collections: [(String, String)] = [("brokerprofiles", "broker"), ("pfcourtiers", "legacy")]
+        var brokers: [WixPublicProfessional] = []
+        for (collection, source) in collections {
+            var offset = 0
+            while true {
+                let result = try await post(
+                    "https://www.wixapis.com/wix-data/v2/items/query",
+                    bearer: accessToken,
+                    body: [
+                        "dataCollectionId": collection,
+                        "query": [
+                            "filter": [:],
+                            "paging": ["limit": pageSize, "offset": offset],
+                            "fields": ["fullName", "professionalTitle", "profilePicture", "bio", "contactEmail", "phoneNumber", "city", "websiteUrl", "yearsOfExperience", "brokerTypes", "companyName", "photo", "email", "website"]
+                        ]
+                    ],
+                    as: WixRawDirectoryResponse.self
+                )
+                brokers.append(contentsOf: result.dataItems.compactMap { item in
+                    let data = item.data.mapValues(\.value)
+                    let name = importedString(data, source == "broker" ? ["fullName"] : ["companyName"])
+                    guard let name, !name.isEmpty else { return nil }
+                    let title = importedString(data, source == "broker" ? ["professionalTitle"] : ["brokerTypes"])
+                    let email = importedString(data, source == "broker" ? ["contactEmail"] : ["email"])
+                    let picture = importedString(data, source == "broker" ? ["profilePicture"] : ["photo"])
+                    let years = data["yearsOfExperience"].map { String(describing: $0) }
+                    return WixPublicProfessional(
+                        id: "broker-\(source)-\(item.id)",
+                        companyName: name,
+                        firstName: nil,
+                        lastName: nil,
+                        network: importedString(data, ["brokerTypes"]),
+                        city: importedString(data, ["city"]),
+                        postalCode: nil,
+                        businessSector: title ?? "Courtier",
+                        description: importedString(data, ["bio"]),
+                        logo: picture,
+                        website: importedString(data, source == "broker" ? ["websiteUrl"] : ["website"]),
+                        importedCategory: "courtier",
+                        experienceYears: years,
+                        professionalEmail: email,
+                        publicPhone: importedString(data, ["phoneNumber"])
+                    )
+                })
+                guard result.dataItems.count == pageSize else { break }
+                let nextOffset = offset + result.dataItems.count
+                guard nextOffset > offset else { break }
+                offset = nextOffset
+            }
+        }
+        return brokers
     }
 
     func fetchPublicProfessionalListings() async throws -> [Listing] {

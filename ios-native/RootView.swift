@@ -43,7 +43,7 @@ private struct NativeProfessionalsView: View {
     @ObservedObject var service: ProfessionalsService
     @State private var searchText = ""
     @State private var selectedDirectoryType = "Tous"
-    private let directoryTypes = ["Tous", "Immobilier", "Profils locaux", "Importés"]
+    private let directoryTypes = ["Tous", "Immobilier", "Profils locaux", "Courtiers", "Importés"]
 
     private var filtered: [WixPublicProfessional] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -56,6 +56,8 @@ private struct NativeProfessionalsView: View {
             case "Profils locaux":
                 matchesType = professional.isLocalProsProfile ||
                     ["artisan", "diagnostiqueur"].contains(professional.importedCategory ?? "")
+            case "Courtiers":
+                matchesType = professional.importedCategory == "courtier"
             case "Importés":
                 matchesType = professional.importedID != nil
             default:
@@ -226,6 +228,26 @@ private struct ProfessionalDetailView: View {
                     }
                 }
             }
+            if professional.importedCategory == "courtier" {
+                Section("Profil courtier") {
+                    if let years = professional.experienceYears, !years.isEmpty {
+                        LabeledContent("Expérience", value: "\(years) ans")
+                    }
+                    if let types = professional.network, !types.isEmpty {
+                        LabeledContent("Spécialités", value: types)
+                    }
+                    if let email = professional.professionalEmail,
+                       let url = mailtoURL(email) {
+                        Link(destination: url) { Label("Envoyer un e-mail", systemImage: "envelope") }
+                    }
+                    if let phone = professional.publicPhone {
+                        let dialable = phone.filter { $0.isNumber || $0 == "+" }
+                        if !dialable.isEmpty, let url = URL(string: "tel:\(dialable)") {
+                            Link(destination: url) { Label("Appeler le courtier", systemImage: "phone") }
+                        }
+                    }
+                }
+            }
             if let importedID = professional.importedID,
                let category = professional.importedCategory {
                 Section {
@@ -258,7 +280,7 @@ private struct ProfessionalDetailView: View {
                     }
                 }
             }
-            if professional.importedID == nil && !professional.isLocalProsProfile {
+            if professional.importedCategory != "courtier" && professional.importedID == nil && !professional.isLocalProsProfile {
                 Section("Contacter ce professionnel") {
                     Button { selectedMinisiteRequest = "contact" } label: {
                         Label("Envoyer un message", systemImage: "message")
@@ -290,6 +312,18 @@ private struct ProfessionalDetailView: View {
         .listStyle(.insetGrouped)
         .navigationTitle("Fiche professionnelle")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func mailtoURL(_ email: String) -> URL? {
+        let trimmed = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              trimmed.range(of: #"^[A-Z0-9a-z.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$"#, options: .regularExpression) != nil else {
+            return nil
+        }
+        var components = URLComponents()
+        components.scheme = "mailto"
+        components.path = trimmed
+        return components.url
     }
 }
 

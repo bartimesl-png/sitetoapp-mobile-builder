@@ -174,6 +174,7 @@ struct WixPublicProfessional: Identifiable {
     let website: String?
     var importedID: String? = nil
     var importedCategory: String? = nil
+    var experienceYears: String? = nil
     var professionalEmail: String? = nil
     var publicPhone: String? = nil
     var dedupeEmail: String? = nil
