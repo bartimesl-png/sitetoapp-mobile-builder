@@ -1,5 +1,6 @@
 import SwiftUI
 import CoreFoundation
+import UIKit
 
 struct RootView: View {
     @State private var selectedTab = 0
@@ -97,11 +98,17 @@ private struct ProfessionalRow: View {
 
     var body: some View {
         HStack(spacing: 13) {
-            Text(initials.isEmpty ? "PF" : initials.uppercased())
-                .font(.headline.weight(.bold))
-                .foregroundStyle(.teal)
-                .frame(width: 58, height: 58)
-                .background(Color.teal.opacity(0.1), in: RoundedRectangle(cornerRadius: 15))
+            if let source = professional.logo {
+                NativeProfileImage(source: source, fallback: "building.2")
+                    .frame(width: 58, height: 58)
+                    .clipShape(RoundedRectangle(cornerRadius: 15))
+            } else {
+                Text(initials.isEmpty ? "PF" : initials.uppercased())
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(.teal)
+                    .frame(width: 58, height: 58)
+                    .background(Color.teal.opacity(0.1), in: RoundedRectangle(cornerRadius: 15))
+            }
             VStack(alignment: .leading, spacing: 5) {
                 Text(professional.resolvedName).font(.headline).foregroundStyle(.primary).lineLimit(2)
                 if let activity = professional.resolvedActivity {
@@ -126,8 +133,14 @@ private struct ProfessionalDetailView: View {
         List {
             Section {
                 VStack(alignment: .leading, spacing: 12) {
-                    Image(systemName: "building.2.crop.circle.fill")
-                        .font(.system(size: 50)).foregroundStyle(.teal)
+                    if let source = professional.logo {
+                        NativeProfileImage(source: source, fallback: "building.2")
+                            .frame(width: 76, height: 76)
+                            .clipShape(RoundedRectangle(cornerRadius: 18))
+                    } else {
+                        Image(systemName: "building.2.crop.circle.fill")
+                            .font(.system(size: 50)).foregroundStyle(.teal)
+                    }
                     Text(professional.resolvedName).font(.title2.bold())
                     if let activity = professional.resolvedActivity {
                         Label(activity, systemImage: "briefcase")
@@ -676,7 +689,7 @@ private struct NativeSpacePickerView: View {
 }
 
 private enum AccountRole: String, CaseIterable, Identifiable {
-    case particulier, professionnel, courtier, artisan, prestataire, hebergeur
+    case particulier, professionnel, courtier, artisan, diagnostiqueur, prestataire, hebergeur
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -684,6 +697,7 @@ private enum AccountRole: String, CaseIterable, Identifiable {
         case .professionnel: "Professionnel de l’immobilier"
         case .courtier: "Courtier"
         case .artisan: "Artisan / diagnostiqueur"
+        case .diagnostiqueur: "Diagnostiqueur"
         case .prestataire: "Prestataire"
         case .hebergeur: "Hébergeur"
         }
@@ -694,6 +708,7 @@ private enum AccountRole: String, CaseIterable, Identifiable {
         case .professionnel: "Mes biens, acquéreurs et matchings"
         case .courtier: "Mon espace et mes demandes"
         case .artisan: "Mes services et demandes de diagnostic"
+        case .diagnostiqueur: "Mes diagnostics et demandes reçues"
         case .prestataire: "Ma fiche, mes photos et mes contacts"
         case .hebergeur: "Mes hébergements et réservations"
         }
@@ -704,6 +719,7 @@ private enum AccountRole: String, CaseIterable, Identifiable {
         case .professionnel: "building.2"
         case .courtier: "briefcase"
         case .artisan: "wrench.and.screwdriver"
+        case .diagnostiqueur: "doc.text.magnifyingglass"
         case .prestataire: "person.2"
         case .hebergeur: "bed.double"
         }
@@ -720,6 +736,7 @@ private enum AccountRole: String, CaseIterable, Identifiable {
         case .professionnel: "/pro-app-login"
         case .courtier: "/broker-login"
         case .artisan: "/artisan-login"
+        case .diagnostiqueur: "/artisan-login"
         case .prestataire: "/connexion-prestataire"
         case .hebergeur: "/hebergeur-connexion"
         }
@@ -730,6 +747,7 @@ private enum AccountRole: String, CaseIterable, Identifiable {
         case .professionnel: "/inscription-pro"
         case .courtier: "/broker-signup"
         case .artisan: "/artisan-signup"
+        case .diagnostiqueur: "/artisan-signup"
         case .prestataire: "/inscription-prestataire"
         case .hebergeur: "/hebergeur-inscription"
         }
@@ -806,8 +824,10 @@ private struct RoleEntryView: View {
 private struct NativeRoleDashboardView: View {
     @StateObject private var auth = WixAuthStore.shared
     @StateObject private var referralService = ReferralService()
+    @StateObject private var professionalImportService = ProfessionalImportService()
     @State private var selectedItem: DashboardItemSelection?
     @State private var showReferralCenter = false
+    @State private var showImportCenter = false
     let role: AccountRole
     let member: WixMember
     let onSignOut: () -> Void
@@ -824,7 +844,9 @@ private struct NativeRoleDashboardView: View {
         case .courtier:
             keys = [("Messages", "bubble.left.and.bubble.right", "messages")]
         case .artisan:
-            keys = [("Demandes et messages", "bubble.left.and.bubble.right", "messages")]
+            keys = [("Demandes d’intervention", "bubble.left.and.bubble.right", "messages")]
+        case .diagnostiqueur:
+            keys = [("Demandes de diagnostic", "doc.text.magnifyingglass", "messages")]
         case .prestataire:
             keys = [("Demandes et messages", "bubble.left.and.bubble.right", "messages")]
         case .hebergeur:
@@ -862,6 +884,7 @@ private struct NativeRoleDashboardView: View {
             } else if let data = auth.dashboardData {
                 if let profile {
                     Section("Mon profil") {
+                        NativeProfileShowcase(profile: profile, role: role)
                         ForEach(Array(profileKeys(for: role).filter { profile[$0.1] != nil }.enumerated()), id: \.offset) { _, field in
                             LabeledContent(field.0, value: display(profile[field.1]))
                         }
@@ -880,10 +903,19 @@ private struct NativeRoleDashboardView: View {
                             }
                         }
                     } header: {
-                        Label("\(section.0) (\(section.2.count))", systemImage: section.1)
+                        let unread = section.2.filter { $0["isRead"] as? Bool == false }.count
+                        Label(unread > 0 ? "\(section.0) (\(section.2.count) · \(unread) non lus)" : "\(section.0) (\(section.2.count))",
+                              systemImage: section.1)
                     }
                 }
                 if role == .professionnel {
+                    Section("Mes annonces importées") {
+                        Button { showImportCenter = true } label: {
+                            Label("Gérer les imports de mon réseau", systemImage: "arrow.down.doc")
+                        }
+                        Text("Autorisation de republication, import automatique et visibilité des biens.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
                     Section("Développer mon réseau") {
                         Button {
                             showReferralCenter = true
@@ -937,6 +969,11 @@ private struct NativeRoleDashboardView: View {
                 ReferralCenterView(service: referralService)
             }
         }
+        .sheet(isPresented: $showImportCenter) {
+            NavigationStack {
+                ProfessionalImportCenterView(service: professionalImportService)
+            }
+        }
         .refreshable { await auth.loadDashboard(role: role.rawValue) }
         .task(id: role.rawValue) { await auth.loadDashboard(role: role.rawValue) }
     }
@@ -944,9 +981,9 @@ private struct NativeRoleDashboardView: View {
     private func profileKeys(for role: AccountRole) -> [(String, String)] {
         switch role {
         case .particulier: [("Prénom", "firstName"), ("Nom", "lastName"), ("Ville", "city"), ("Téléphone", "phone")]
-        case .professionnel: [("Société", "companyName"), ("Contact", "contactName"), ("Ville", "city"), ("Téléphone", "phoneNumber"), ("Type d’activité", "professionalType"), ("Abonnement", "subscriptionStatus")]
-        case .courtier: [("Nom", "fullName"), ("Titre", "professionalTitle"), ("Ville", "city"), ("Téléphone", "phoneNumber")]
-        case .artisan, .prestataire: [("Entreprise", "businessName"), ("Activité", "category"), ("Ville", "city"), ("Téléphone", "phone")]
+        case .professionnel: [("Société", "companyName"), ("Contact", "contactName"), ("Ville", "city"), ("Code postal", "postalCode"), ("Téléphone", "phoneNumber"), ("Type d’activité", "professionalType"), ("Catégories", "categories"), ("Abonnement", "subscriptionStatus"), ("Visible publiquement", "isVisiblePublicly")]
+        case .courtier: [("Nom", "fullName"), ("Titre", "professionalTitle"), ("Ville", "city"), ("Téléphone", "phoneNumber"), ("Expérience (ans)", "yearsOfExperience")]
+        case .artisan, .diagnostiqueur, .prestataire: [("Entreprise", "businessName"), ("Activité", "category"), ("Spécialité", "subcategory"), ("Ville", "city"), ("Code postal", "postalCode"), ("Téléphone", "phone"), ("Vérifié", "verified"), ("Statut", "status")]
         case .hebergeur: [("Nom", "fullName"), ("Téléphone", "phoneNumber"), ("Vérifié", "isVerified")]
         }
     }
@@ -957,6 +994,258 @@ private struct NativeRoleDashboardView: View {
         if let values = value as? [String] { return values.joined(separator: ", ") }
         if let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() { return number.boolValue ? "Oui" : "Non" }
         return String(describing: value)
+    }
+}
+
+private struct ProfessionalImportCenterView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var service: ProfessionalImportService
+    @State private var confirmRevocation = false
+
+    var body: some View {
+        List {
+            Section("Autorisation de republication") {
+                Label(service.isAuthorized ? "Autorisation active" : "Autorisation non accordée",
+                      systemImage: service.isAuthorized ? "checkmark.seal.fill" : "hand.raised.fill")
+                    .foregroundStyle(service.isAuthorized ? .green : .secondary)
+                Text("Cette autorisation permet de présenter les annonces importées, leurs photos et leurs caractéristiques dans PartenaireFoyer, et de les rendre éligibles au matching lorsqu’elles sont validées.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                if service.isAuthorized {
+                    Button("Retirer mon autorisation", role: .destructive) { confirmRevocation = true }
+                } else {
+                    Button {
+                        Task { await service.setConsent(true) }
+                    } label: {
+                        Label("Autoriser l’import et la diffusion", systemImage: "checkmark.circle")
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+
+            Section("Import automatique") {
+                Toggle(isOn: Binding(
+                    get: { service.autoImportEnabled },
+                    set: { enabled in Task { await service.setAutoImport(enabled) } }
+                )) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Actualiser mes annonces automatiquement")
+                        Text("Les nouveaux biens et mises à jour sont récupérés par le service existant.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .disabled(!service.isAuthorized || service.isLoading)
+            }
+
+            if service.isLoading {
+                Section { HStack { Spacer(); ProgressView("Synchronisation avec le service d’import…"); Spacer() } }
+            }
+            if let state = service.state, state["linked"] as? Bool == false {
+                Section("Compte professionnel") {
+                    Label("Aucun compte immobilier éligible n’est associé à cette adresse.", systemImage: "person.crop.circle.badge.exclamationmark")
+                        .font(.footnote).foregroundStyle(.orange)
+                }
+            }
+            if let message = service.statusMessage {
+                Section { Label(message, systemImage: "checkmark.circle.fill").foregroundStyle(.green) }
+            }
+            if let error = service.errorMessage {
+                Section("Erreur") {
+                    Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+                    Button("Réessayer") { Task { await service.load() } }
+                }
+            }
+
+            Section("Annonces du réseau (\(service.listings.count))") {
+                if !service.isAuthorized {
+                    Text("Accordez l’autorisation ci-dessus pour afficher et gérer la diffusion des annonces importées.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                } else if service.listings.isEmpty && !service.isLoading {
+                    Text("Aucune annonce importée pour le moment. L’import est relancé par le service PartenaireFoyer après validation de l’autorisation.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+                ForEach(Array(service.listings.enumerated()), id: \.offset) { _, listing in
+                    ImportedListingControlRow(listing: listing, disabled: service.isLoading) { visible in
+                        guard let id = listing["id"] as? String else { return }
+                        Task { await service.setListingVisible(id, visible: visible) }
+                    }
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .navigationTitle("Imports immobiliers")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) { Button("Fermer") { dismiss() } }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { Task { await service.load() } } label: { Image(systemName: "arrow.clockwise") }
+                    .accessibilityLabel("Actualiser les annonces importées")
+            }
+        }
+        .confirmationDialog("Retirer l’autorisation d’import ?", isPresented: $confirmRevocation, titleVisibility: .visible) {
+            Button("Retirer l’autorisation", role: .destructive) { Task { await service.setConsent(false) } }
+            Button("Annuler", role: .cancel) { }
+        } message: {
+            Text("Les annonces importées seront retirées de la diffusion PartenaireFoyer et ne pourront plus participer au matching.")
+        }
+        .task { await service.load() }
+    }
+}
+
+private struct ImportedListingControlRow: View {
+    let listing: [String: Any]
+    let disabled: Bool
+    let onVisibilityChange: (Bool) -> Void
+
+    private func string(_ key: String) -> String? { listing[key] as? String }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 12) {
+                if let raw = string("imageUrl"), let url = WixImageSource.url(raw) {
+                    AsyncImage(url: url) { phase in
+                        if let image = phase.image { image.resizable().scaledToFill() }
+                        else { Image(systemName: "house.fill").foregroundStyle(.teal).frame(maxWidth: .infinity, maxHeight: .infinity).background(Color.teal.opacity(0.1)) }
+                    }
+                    .frame(width: 76, height: 62).clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(string("title") ?? "Bien immobilier").font(.subheadline.weight(.semibold)).lineLimit(2)
+                    Text([string("postalCode"), string("city")].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " "))
+                        .font(.caption).foregroundStyle(.secondary)
+                    if let price = listing["price"] { Text("\(String(describing: price)) €").font(.caption.weight(.semibold)).foregroundStyle(.teal) }
+                }
+                Spacer(minLength: 0)
+            }
+            HStack {
+                Label(listing["matchingActive"] as? Bool == true ? "Dans le matching" : (listing["publicVisible"] as? Bool == true ? "Publié" : "Non diffusé"),
+                      systemImage: listing["matchingActive"] as? Bool == true ? "sparkles" : "eye")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button(listing["professionalVisible"] as? Bool == true ? "Masquer" : "Afficher") {
+                    onVisibilityChange(listing["professionalVisible"] as? Bool != true)
+                }
+                .font(.caption.weight(.semibold)).buttonStyle(.bordered).disabled(disabled)
+            }
+        }
+        .padding(.vertical, 5)
+    }
+}
+
+private struct NativeProfileShowcase: View {
+    let profile: [String: Any]
+    let role: AccountRole
+
+    private var name: String {
+        let keys = ["companyName", "businessName", "fullName", "contactName"]
+        if let value = keys.compactMap({ profile[$0] as? String }).first(where: { !$0.isEmpty }) { return value }
+        return [profile["firstName"] as? String, profile["lastName"] as? String].compactMap { $0 }.joined(separator: " ")
+    }
+
+    private var photos: [String] {
+        var values = ["logo", "photo", "profilePicture"].compactMap { profile[$0] as? String }
+        values += (profile["photoUrls"] as? [String] ?? [])
+        return values.filter { $0.hasPrefix("data:image/") || WixImageSource.url($0) != nil }
+    }
+
+    private var description: String? {
+        ["description", "bio", "biography"].compactMap { profile[$0] as? String }.first { !$0.isEmpty }
+    }
+
+    private var serviceNames: [String] {
+        (profile["services"] as? [String] ?? []).filter { !$0.isEmpty }
+    }
+
+    private var contactLinks: [(String, String, String)] {
+        var links: [(String, String, String)] = []
+        if let email = (profile["contactEmail"] as? String) ?? (profile["email"] as? String), !email.isEmpty {
+            links.append(("E-mail", "envelope", "mailto:\(email)"))
+        }
+        if let phone = (profile["phoneNumber"] as? String) ?? (profile["phone"] as? String), !phone.isEmpty {
+            let digits = phone.filter { $0.isNumber || $0 == "+" }
+            links.append(("Appeler", "phone", "tel:\(digits)"))
+        }
+        if let website = (profile["website"] as? String) ?? (profile["websiteUrl"] as? String),
+           let url = URL(string: website.hasPrefix("http") ? website : "https://\(website)") {
+            links.append(("Site web", "globe", url.absoluteString))
+        }
+        return links
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            HStack(spacing: 12) {
+                if let source = photos.first {
+                    NativeProfileImage(source: source, fallback: role.symbol)
+                    .frame(width: 62, height: 62).clipShape(RoundedRectangle(cornerRadius: 14))
+                } else {
+                    Image(systemName: role.symbol).font(.title2).foregroundStyle(.teal)
+                        .frame(width: 62, height: 62).background(Color.teal.opacity(0.1), in: RoundedRectangle(cornerRadius: 14))
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(name.isEmpty ? role.title : name).font(.headline)
+                    Text([profile["professionalTitle"] as? String, profile["category"] as? String, profile["subcategory"] as? String,
+                          profile["city"] as? String, profile["postalCode"] as? String]
+                        .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+
+            if let description {
+                Text(description).font(.subheadline).foregroundStyle(.secondary).lineLimit(5)
+            }
+            if !serviceNames.isEmpty {
+                Text(serviceNames.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
+            }
+            if photos.count > 1 {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(Array(photos.dropFirst().enumerated()), id: \.offset) { _, url in
+                            NativeProfileImage(source: url, fallback: "photo")
+                            .frame(width: 100, height: 72).clipShape(RoundedRectangle(cornerRadius: 10))
+                        }
+                    }
+                }
+            }
+            if !contactLinks.isEmpty {
+                HStack(spacing: 16) {
+                    ForEach(Array(contactLinks.enumerated()), id: \.offset) { _, item in
+            if let url = URL(string: item.2) {
+                            Link(destination: url) { Label(item.0, systemImage: item.1).font(.caption.weight(.medium)) }
+                        }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 5)
+    }
+}
+
+private struct NativeProfileImage: View {
+    let source: String
+    let fallback: String
+
+    private var inlineImage: UIImage? {
+        guard source.hasPrefix("data:image/"), let comma = source.firstIndex(of: ",") else { return nil }
+        let encoded = String(source[source.index(after: comma)...])
+        guard let data = Data(base64Encoded: encoded, options: .ignoreUnknownCharacters) else { return nil }
+        return UIImage(data: data)
+    }
+
+    var body: some View {
+        Group {
+            if let image = inlineImage {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else if let url = WixImageSource.url(source) {
+                AsyncImage(url: url) { phase in
+                    if let image = phase.image { image.resizable().scaledToFill() }
+                    else { Image(systemName: fallback).foregroundStyle(.teal).frame(maxWidth: .infinity, maxHeight: .infinity).background(Color.teal.opacity(0.1)) }
+                }
+            } else {
+                Image(systemName: fallback).foregroundStyle(.teal).frame(maxWidth: .infinity, maxHeight: .infinity).background(Color.teal.opacity(0.1))
+            }
+        }
+        .clipped()
     }
 }
 
@@ -982,7 +1271,7 @@ private struct WixDashboardItem: View {
         ["description", "itemDescription", "message", "messageContent", "content"].compactMap { item[$0] as? String }.first
     }
     private var imageURL: URL? {
-        ["mainImageUrl", "mainImage", "itemImage", "photo"].compactMap { item[$0] as? String }.compactMap(URL.init(string:)).first
+        ["mainImageUrl", "mainImage", "itemImage", "photo"].compactMap { item[$0] as? String }.compactMap(WixImageSource.url).first
     }
 
     var body: some View {
@@ -1217,7 +1506,11 @@ private struct DashboardItemDetailView: View {
         ("propertyType", "Type de bien"), ("transactionType", "Transaction"),
         ("category", "Catégorie"), ("condition", "État"), ("status", "Statut"),
         ("matchingType", "Type de matching"), ("matchingScore", "Compatibilité"),
-        ("demandType", "Type de demande"), ("seen", "Consulté")
+        ("demandType", "Type de demande"), ("seen", "Consulté"),
+        ("senderEmail", "E-mail du contact"), ("senderPhone", "Téléphone du contact"),
+        ("contactEmail", "E-mail"), ("phoneNumber", "Téléphone"),
+        ("propertyId", "Bien associé"), ("acquereurId", "Acquéreur associé"),
+        ("createdAt", "Reçu le")
     ]
 
     private var title: String {
@@ -1227,9 +1520,11 @@ private struct DashboardItemDetailView: View {
     }
 
     private var imageURLs: [URL] {
-        ["mainImageUrl", "mainImage", "itemImage", "photo", "photo2", "photo3", "photo4", "photo5"]
+        var values = ["mainImageUrl", "mainImage", "itemImage", "photo", "photo2", "photo3", "photo4", "photo5"]
             .compactMap { item[$0] as? String }
-            .compactMap(URL.init(string:))
+        values += item["photoUrls"] as? [String] ?? []
+        values += item["galleryImages"] as? [String] ?? []
+        return values.compactMap(WixImageSource.url)
     }
 
     private var rows: [(String, String)] {
@@ -1289,6 +1584,18 @@ private struct DashboardItemDetailView: View {
                         Text(row.1).font(.body).textSelection(.enabled)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                if let email = ["senderEmail", "contactEmail", "email"].compactMap({ item[$0] as? String }).first,
+                   let emailURL = URL(string: "mailto:\(email)") {
+                    Link(destination: emailURL) { Label("Répondre par e-mail", systemImage: "envelope") }
+                        .buttonStyle(.borderedProminent)
+                }
+                if let phone = ["senderPhone", "phoneNumber", "phone"].compactMap({ item[$0] as? String }).first {
+                    let number = phone.filter { $0.isNumber || $0 == "+" }
+                    if let phoneURL = URL(string: "tel:\(number)") {
+                        Link(destination: phoneURL) { Label("Appeler le contact", systemImage: "phone") }
+                            .buttonStyle(.bordered)
+                    }
                 }
             }
             .padding(20)

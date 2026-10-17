@@ -200,3 +200,78 @@ final class ReferralService: ObservableObject {
         return payload
     }
 }
+
+/// Native interface to the existing consent and imported-listing controls.
+@MainActor
+final class ProfessionalImportService: ObservableObject {
+    @Published private(set) var state: [String: Any]?
+    @Published private(set) var isLoading = false
+    @Published private(set) var errorMessage: String?
+    @Published private(set) var statusMessage: String?
+
+    private let endpoint = URL(string: "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/pf-real-estate-pro-self-service")!
+
+    var isLinked: Bool { state?["linked"] as? Bool == true }
+    var isAuthorized: Bool { (state?["consent"] as? [String: Any])?["granted"] as? Bool == true }
+    var consentStatus: String { (state?["consent"] as? [String: Any])?["status"] as? String ?? "not_requested" }
+    var autoImportEnabled: Bool { state?["autoImportEnabled"] as? Bool ?? true }
+    var listings: [[String: Any]] { state?["listings"] as? [[String: Any]] ?? [] }
+
+    func load() async { await perform(["action": "get"], status: nil) }
+
+    func setConsent(_ granted: Bool) async {
+        await perform(["action": "set_consent", "granted": granted], status: granted
+            ? "Autorisation enregistrée. L’import va être relancé en priorité."
+            : "Autorisation retirée. Les annonces importées ne seront plus diffusées ni utilisées pour le matching.")
+    }
+
+    func setAutoImport(_ enabled: Bool) async {
+        await perform(["action": "set_auto_import", "enabled": enabled], status: enabled
+            ? "Import automatique activé."
+            : "Import automatique suspendu.")
+    }
+
+    func setListingVisible(_ id: String, visible: Bool) async {
+        await perform(["action": "set_listing_visibility", "listingId": id, "visible": visible], status: visible
+            ? "Visibilité de l’annonce mise à jour."
+            : "Annonce masquée de l’application et du matching.")
+    }
+
+    private func perform(_ body: [String: Any], status: String?) async {
+        guard !isLoading else { return }
+        isLoading = true
+        errorMessage = nil
+        statusMessage = nil
+        defer { isLoading = false }
+        do {
+            let token = try await WixAuthStore.shared.validAccessToken()
+            var request = URLRequest(url: endpoint, timeoutInterval: 40)
+            request.httpMethod = "POST"
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else { throw ImportError.invalidResponse }
+            let payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+            guard (200..<300).contains(http.statusCode) else {
+                throw ImportError.rejected(payload["error"] as? String ?? "Le service d’import a refusé la demande (\(http.statusCode)).")
+            }
+            state = payload
+            statusMessage = status
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private enum ImportError: LocalizedError {
+        case invalidResponse
+        case rejected(String)
+        var errorDescription: String? {
+            switch self {
+            case .invalidResponse: "Réponse invalide du service d’import."
+            case .rejected(let message): message
+            }
+        }
+    }
+}

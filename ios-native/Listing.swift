@@ -1,5 +1,19 @@
 import Foundation
 
+enum WixImageSource {
+    static func url(_ rawValue: String) -> URL? {
+        let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.hasPrefix("https://") || value.hasPrefix("http://") { return URL(string: value) }
+        for prefix in ["wix:image://v1/", "image://v1/"] where value.hasPrefix(prefix) {
+            let remainder = value.dropFirst(prefix.count)
+            guard let mediaId = remainder.split(separator: "/", maxSplits: 1).first,
+                  !mediaId.isEmpty else { return nil }
+            return URL(string: "https://static.wixstatic.com/media/\(mediaId)")
+        }
+        return nil
+    }
+}
+
 /// Public listing DTO returned by the existing PartenaireFoyer Supabase feed.
 /// Unknown fields from the API are intentionally ignored for forward compatibility.
 struct Listing: Decodable, Identifiable, Hashable {
@@ -26,7 +40,7 @@ struct Listing: Decodable, Identifiable, Hashable {
         var seen = Set<String>()
         return candidates.compactMap { value in
             guard seen.insert(value).inserted else { return nil }
-            return URL(string: value)
+            return WixImageSource.url(value)
         }
     }
 
@@ -70,6 +84,8 @@ struct WixPublicProfessionalData: Decodable {
     let professionalType: String?
     let category: String?
     let description: String?
+    let logo: String?
+    let photo: String?
     let isVisiblePublicly: Bool?
     let isActive: Bool?
 
@@ -81,7 +97,8 @@ struct WixPublicProfessionalData: Decodable {
             postalCode: postalCode,
             professionalType: professionalType,
             category: category,
-            description: description
+            description: description,
+            logo: logo ?? photo
         )
     }
 }
@@ -94,6 +111,7 @@ struct WixPublicProfessional: Identifiable {
     let professionalType: String?
     let category: String?
     let description: String?
+    let logo: String?
 
     var resolvedName: String {
         guard let companyName, !companyName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {

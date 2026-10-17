@@ -91,15 +91,18 @@ async function loadDashboard(role: string, email: string, token: string) {
     return { role, account: { id: accountId }, profile, messages };
   }
 
-  if (role === "prestataire" || role === "artisan") {
+  if (role === "prestataire" || role === "artisan" || role === "diagnostiqueur") {
     const accountCollection = role === "prestataire" ? "serviceprovideraccounts" : "serviceprovideraccounts-1";
     const account = first(await query(accountCollection, emailFilter(email), ["email", "isActive", "firstName", "lastName"], token, 2));
     if (!account || account.isActive === false) return null;
     const accountId = String(account._id ?? "");
-    const providers = await query("serviceproviders-1", { accountId: { $eq: accountId } }, ["accountId", "businessName", "category", "subcategory", "description", "services", "city", "postalCode", "phone", "email", "website", "photoUrls", "status", "verified", "featured"], token, 3);
+    const providers = await query("serviceproviders-1", { accountId: { $eq: accountId } }, ["accountId", "businessName", "category", "subcategory", "description", "services", "city", "postalCode", "phone", "email", "website", "photoUrls", "status", "verified"], token, 3);
+    const activity = (entry: Record<string, unknown>) => `${String(entry.category ?? "")} ${String(entry.subcategory ?? "")}`;
     const profile = providers.find((entry) => role === "artisan"
-      ? /artisan|diagnostiqueur/i.test(String(entry.category ?? "") + " " + String(entry.subcategory ?? ""))
-      : !/artisan|diagnostiqueur/i.test(String(entry.category ?? "") + " " + String(entry.subcategory ?? ""))) ?? null;
+      ? /artisan/i.test(activity(entry)) && !/diagnostiqueur/i.test(activity(entry))
+      : role === "diagnostiqueur"
+        ? /diagnostiqueur/i.test(activity(entry))
+        : !/artisan|diagnostiqueur/i.test(activity(entry))) ?? null;
     const messages = profile ? await query("artisanmessages", { artisanId: { $eq: String(profile._id ?? "") } }, ["artisanId", "senderName", "senderEmail", "messageContent", "createdAt", "isRead"], token) : [];
     return { role, account: { id: accountId }, profile, messages };
   }
@@ -118,7 +121,7 @@ Deno.serve(async (req: Request) => {
   const token = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "").trim();
   if (!token) return response({ error: "Connexion requise." }, 401);
   const role = new URL(req.url).searchParams.get("role") ?? "";
-  if (!["particulier", "professionnel", "courtier", "artisan", "prestataire", "hebergeur"].includes(role)) {
+  if (!["particulier", "professionnel", "courtier", "artisan", "diagnostiqueur", "prestataire", "hebergeur"].includes(role)) {
     return response({ error: "Espace inconnu." }, 400);
   }
 
