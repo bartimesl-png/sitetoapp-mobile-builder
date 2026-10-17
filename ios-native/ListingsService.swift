@@ -185,7 +185,17 @@ final class ReferralService: ObservableObject {
         guard let http = response as? HTTPURLResponse else { throw ServiceError.invalidResponse }
         let payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
         guard (200..<300).contains(http.statusCode) else {
-            throw ServiceError.rejected(payload["error"] as? String ?? "Le service de parrainage a refusé la demande (\(http.statusCode)).")
+            let code = payload["error"] as? String ?? ""
+            let message: String
+            switch code {
+            case "SUBSCRIPTION_REQUIRED": message = "L’accès aux candidatures nécessite un espace professionnel éligible."
+            case "VALIDATION": message = "Vérifiez les coordonnées, le code postal et votre accord avant l’envoi."
+            case "RATE_LIMIT": message = "Une recommandation similaire a déjà été envoyée récemment. Réessayez plus tard."
+            case "FULL": message = "Cette candidature a déjà reçu le nombre maximal d’attributions."
+            case "CLAIM_FAILED": message = "L’attribution n’a pas abouti. Actualisez la liste puis réessayez."
+            default: message = "Le service de parrainage n’a pas pu traiter la demande (\(http.statusCode))."
+            }
+            throw ServiceError.rejected(message)
         }
         return payload
     }
