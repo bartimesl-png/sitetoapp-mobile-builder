@@ -1032,7 +1032,13 @@ private struct NativeRoleDashboardView: View {
             }
         }
         .refreshable { await auth.loadDashboard(role: role.dashboardQueryRole) }
-        .task(id: role.rawValue) { await auth.loadDashboard(role: role.dashboardQueryRole) }
+        .task(id: role.rawValue) {
+            await auth.loadDashboard(role: role.dashboardQueryRole)
+            await auth.registerPushDevice(role: role.rawValue)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .partenaireFoyerFCMTokenDidChange)) { _ in
+            Task { await auth.registerPushDevice(role: role.rawValue) }
+        }
     }
 
     private func profileKeys(for role: AccountRole) -> [(String, String)] {
