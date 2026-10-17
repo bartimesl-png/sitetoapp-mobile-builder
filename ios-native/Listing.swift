@@ -79,26 +79,32 @@ struct WixPublicProfessionalItem: Decodable {
 
 struct WixPublicProfessionalData: Decodable {
     let companyName: String?
+    let firstName: String?
+    let lastName: String?
+    let network: String?
     let city: String?
     let postalCode: String?
-    let professionalType: String?
-    let category: String?
+    let businessSector: String?
     let description: String?
-    let logo: String?
     let photo: String?
-    let isVisiblePublicly: Bool?
+    let website: String?
+    let memberId: String?
+    let isVisibleInDirectory: Bool?
     let isActive: Bool?
 
     func professional(id: String) -> WixPublicProfessional {
         WixPublicProfessional(
             id: id,
             companyName: companyName,
+            firstName: firstName,
+            lastName: lastName,
+            network: network,
             city: city,
             postalCode: postalCode,
-            professionalType: professionalType,
-            category: category,
+            businessSector: businessSector,
             description: description,
-            logo: logo ?? photo
+            logo: photo,
+            website: website
         )
     }
 }
@@ -106,21 +112,26 @@ struct WixPublicProfessionalData: Decodable {
 struct WixPublicProfessional: Identifiable {
     let id: String
     let companyName: String?
+    let firstName: String?
+    let lastName: String?
+    let network: String?
     let city: String?
     let postalCode: String?
-    let professionalType: String?
-    let category: String?
+    let businessSector: String?
     let description: String?
     let logo: String?
+    let website: String?
 
     var resolvedName: String {
-        guard let companyName, !companyName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return "Professionnel immobilier"
-        }
-        return companyName
+        let company = companyName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !company.isEmpty { return company }
+        let person = [firstName, lastName].compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        return person.isEmpty ? "Professionnel immobilier" : person
     }
     var resolvedActivity: String? {
-        [professionalType, category]
+        [businessSector, network]
             .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
             .first { !$0.isEmpty }
     }
@@ -141,12 +152,14 @@ struct WixPublicProperty: Decodable {
     let postalCode: String?
     let sellingPrice: Double?
     let estimatedPrice: Double?
+    let status: String?
     let surface: Double?
     let rooms: Double?
     let bedrooms: Double?
     let propertyType: String?
     let transactionType: String?
     let mainImage: String?
+    let isPublic: Bool?
     let photo1: String?
     let photo2: String?
     let photo3: String?
@@ -175,8 +188,15 @@ struct WixPublicProperty: Decodable {
                       photo12, photo13, photo14, photo15, photo16, photo17,
                       photo18, photo19, photo20].compactMap { $0 }
         if let galleryImages, let data = galleryImages.data(using: .utf8),
-           let decoded = try? JSONSerialization.jsonObject(with: data) as? [String] {
-            result.append(contentsOf: decoded)
+           let decoded = try? JSONSerialization.jsonObject(with: data) as? [Any] {
+            for image in decoded {
+                if let url = image as? String {
+                    result.append(url)
+                } else if let object = image as? [String: Any],
+                          let url = (object["url"] as? String) ?? (object["src"] as? String) {
+                    result.append(url)
+                }
+            }
         }
         var seen = Set<String>()
         return result.filter { !$0.isEmpty && seen.insert($0).inserted }
@@ -200,6 +220,73 @@ struct WixPublicProperty: Decodable {
             propertyType: propertyType,
             sourceUrl: nil,
             ownerType: "particulier"
+        )
+    }
+}
+
+struct WixPublicProfessionalPropertiesResponse: Decodable {
+    let dataItems: [WixPublicProfessionalPropertyItem]
+}
+
+struct WixPublicProfessionalPropertyItem: Decodable {
+    let id: String
+    let data: WixPublicProfessionalProperty
+}
+
+struct WixPublicProfessionalProperty: Decodable {
+    let title: String?
+    let description: String?
+    let city: String?
+    let postalCode: String?
+    let price: Double?
+    let surface: Double?
+    let surfaceHouse: Double?
+    let surfaceLand: Double?
+    let landSurface: Double?
+    let rooms: Double?
+    let bedrooms: Double?
+    let bathrooms: Double?
+    let propertyType: String?
+    let transactionType: String?
+    let mainImageUrl: String?
+    let galleryImages: String?
+    let commercialStatus: String?
+    let status: String?
+    let slug: String?
+
+    func listing(id: String) -> Listing {
+        var gallery: [String] = []
+        if let galleryImages, let data = galleryImages.data(using: .utf8),
+           let values = try? JSONSerialization.jsonObject(with: data) as? [Any] {
+            for value in values {
+                if let url = value as? String {
+                    gallery.append(url)
+                } else if let object = value as? [String: Any],
+                          let url = (object["url"] as? String) ?? (object["src"] as? String) {
+                    gallery.append(url)
+                }
+            }
+        }
+        if let mainImageUrl, !gallery.contains(mainImageUrl) { gallery.insert(mainImageUrl, at: 0) }
+        var seen = Set<String>()
+        gallery = gallery.filter { !$0.isEmpty && seen.insert($0).inserted }
+        return Listing(
+            id: "wix-pro-\(id)",
+            title: title,
+            description: description,
+            city: city,
+            postalCode: postalCode,
+            price: price,
+            surface: surfaceHouse ?? surface,
+            rooms: rooms.map(Int.init),
+            bedrooms: bedrooms.map(Int.init),
+            bathrooms: bathrooms.map(Int.init),
+            images: gallery,
+            imageUrl: mainImageUrl ?? gallery.first,
+            transactionType: transactionType,
+            propertyType: propertyType,
+            sourceUrl: nil,
+            ownerType: "professionnel"
         )
     }
 }
