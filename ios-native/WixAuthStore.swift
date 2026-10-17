@@ -2095,6 +2095,46 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         return accommodations
     }
 
+    func fetchPublicSeasonalCalendarEntries() async throws -> [WixSeasonalCalendarEntry] {
+        let visitor = try await requestToken([
+            "clientId": clientID,
+            "grantType": "anonymous"
+        ])
+        var offset = 0
+        var entries: [WixSeasonalCalendarEntry] = []
+        while true {
+            let response = try await post(
+                "https://www.wixapis.com/wix-data/v2/items/query",
+                bearer: visitor.accessToken,
+                body: [
+                    "dataCollectionId": "seasonalcalendars",
+                    "query": [
+                        "paging": ["limit": 100, "offset": offset],
+                        "fields": ["linkedEntityId", "calendarDate", "availabilityStatus"]
+                    ]
+                ],
+                as: WixRawDirectoryResponse.self
+            )
+            entries.append(contentsOf: response.dataItems.compactMap { item in
+                let data = item.data.mapValues(\.value)
+                guard let accommodationID = importedString(data, ["linkedEntityId"]),
+                      let date = importedString(data, ["calendarDate"]),
+                      let status = importedString(data, ["availabilityStatus"]) else { return nil }
+                return WixSeasonalCalendarEntry(
+                    id: item.id,
+                    accommodationID: accommodationID,
+                    calendarDate: date,
+                    availabilityStatus: status
+                )
+            })
+            guard response.dataItems.count == 100 else { break }
+            let nextOffset = offset + response.dataItems.count
+            guard nextOffset > offset else { break }
+            offset = nextOffset
+        }
+        return entries
+    }
+
     func fetchPublicProfessionalListings() async throws -> [Listing] {
         let visitor = try await requestToken([
             "clientId": clientID,

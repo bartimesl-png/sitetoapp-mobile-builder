@@ -243,6 +243,13 @@ struct WixSeasonalAccommodation: Identifiable, Hashable {
     }
 }
 
+struct WixSeasonalCalendarEntry: Identifiable {
+    let id: String
+    let accommodationID: String
+    let calendarDate: String
+    let availabilityStatus: String
+}
+
 struct WixPublicPropertyItem: Decodable {
     let id: String
     let data: WixPublicProperty

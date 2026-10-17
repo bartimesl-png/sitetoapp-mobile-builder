@@ -50,6 +50,15 @@ private struct NativeSeasonalStaysView: View {
     @State private var guests = 1
     @State private var petsOnly = false
     @State private var sortByPrice = false
+    @State private var minimumPrice = ""
+    @State private var maximumPrice = ""
+    @State private var minimumBedrooms = ""
+    @State private var checkInDate: Date?
+    @State private var checkOutDate: Date?
+    @State private var calendarEntries: [WixSeasonalCalendarEntry] = []
+    @State private var calendarWarning: String?
+    @State private var isLoadingCalendar = false
+    @State private var showFilters = false
     @State private var isLoading = false
     @State private var hasLoaded = false
     @State private var errorMessage: String?
@@ -61,6 +70,10 @@ private struct NativeSeasonalStaysView: View {
 
     private var filtered: [WixSeasonalAccommodation] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let minPrice = Double(minimumPrice.replacingOccurrences(of: ",", with: "."))
+        let maxPrice = Double(maximumPrice.replacingOccurrences(of: ",", with: "."))
+        let minBeds = Int(minimumBedrooms)
+        let blockedDates = blockedCalendarDatesByAccommodation
         let matches = accommodations.filter { accommodation in
             let text = [accommodation.name, accommodation.accommodationType, accommodation.city,
                         accommodation.postalCode, accommodation.department, accommodation.description,
@@ -68,7 +81,11 @@ private struct NativeSeasonalStaysView: View {
             return (query.isEmpty || text.localizedCaseInsensitiveContains(query)) &&
                 (selectedType == "Tous" || accommodation.accommodationType == selectedType) &&
                 ((accommodation.guestCapacity ?? guests) >= guests) &&
-                (!petsOnly || accommodation.petsAllowed)
+                (!petsOnly || accommodation.petsAllowed) &&
+                (minPrice.map { min in accommodation.nightlyPrice.map { $0 >= min } ?? false } ?? true) &&
+                (maxPrice.map { max in accommodation.nightlyPrice.map { $0 <= max } ?? false } ?? true) &&
+                (minBeds.map { min in accommodation.bedroomCount.map { $0 >= min } ?? false } ?? true) &&
+                isAvailable(accommodation.id, blockedDates: blockedDates)
         }
         return sortByPrice ? matches.sorted { ($0.nightlyPrice ?? .greatestFiniteMagnitude) < ($1.nightlyPrice ?? .greatestFiniteMagnitude) } : matches
     }
@@ -91,6 +108,10 @@ private struct NativeSeasonalStaysView: View {
                 } else {
                     List {
                         Section {
+                            if let calendarWarning {
+                                Label(calendarWarning, systemImage: "exclamationmark.triangle.fill")
+                                    .font(.footnote).foregroundStyle(.orange)
+                            }
                             HStack {
                                 Label("\(filtered.count) hébergement\(filtered.count > 1 ? "s" : "")", systemImage: "bed.double")
                                     .font(.footnote).foregroundStyle(.secondary)
@@ -118,20 +139,58 @@ private struct NativeSeasonalStaysView: View {
             .searchable(text: $searchText, prompt: "Destination, ville, hébergement…")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Picker("Type d’hébergement", selection: $selectedType) {
-                            ForEach(accommodationTypes, id: \.self) { Text($0).tag($0) }
-                        }
-                        Stepper("Voyageurs : \(guests)", value: $guests, in: 1...30)
-                        Toggle("Animaux acceptés", isOn: $petsOnly)
-                        Toggle("Trier par prix", isOn: $sortByPrice)
-                    } label: {
-                        Image(systemName: selectedType == "Tous" && guests == 1 && !petsOnly && !sortByPrice
+                    Button { showFilters = true } label: {
+                        Image(systemName: selectedType == "Tous" && guests == 1 && !petsOnly && !sortByPrice && minimumPrice.isEmpty && maximumPrice.isEmpty && minimumBedrooms.isEmpty
+                              && checkInDate == nil && checkOutDate == nil
                               ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
                     }
                     .accessibilityLabel("Filtrer les séjours")
                 }
             }
+            .sheet(isPresented: $showFilters) {
+                NavigationStack {
+                    Form {
+                        Section("Destination et logement") {
+                            Picker("Type d’hébergement", selection: $selectedType) {
+                                ForEach(accommodationTypes, id: \.self) { Text($0).tag($0) }
+                            }
+                            Stepper("Voyageurs : \(guests)", value: $guests, in: 1...30)
+                            Toggle("Animaux acceptés", isOn: $petsOnly)
+                            Toggle("Trier par prix", isOn: $sortByPrice)
+                        }
+                        Section("Budget et chambres") {
+                            TextField("Prix minimum par nuit (€)", text: $minimumPrice).keyboardType(.decimalPad)
+                            TextField("Prix maximum par nuit (€)", text: $maximumPrice).keyboardType(.decimalPad)
+                            TextField("Chambres minimum", text: $minimumBedrooms).keyboardType(.numberPad)
+                        }
+                        Section("Dates du séjour") {
+                            DatePicker("Arrivée", selection: arrivalBinding, in: Calendar.current.startOfDay(for: Date())...Date.distantFuture, displayedComponents: .date)
+                            DatePicker("Départ", selection: departureBinding, in: earliestDeparture...Date.distantFuture, displayedComponents: .date)
+                            if checkInDate != nil || checkOutDate != nil {
+                                Button("Effacer les dates", role: .destructive) {
+                                    checkInDate = nil
+                                    checkOutDate = nil
+                                    calendarEntries = []
+                                    calendarWarning = nil
+                                }
+                            }
+                            if isLoadingCalendar {
+                                HStack { ProgressView(); Text("Vérification des disponibilités…").font(.footnote).foregroundStyle(.secondary) }
+                            }
+                        }
+                    }
+                    .navigationTitle("Filtres des séjours")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) { Button("Fermer") { showFilters = false } }
+                        ToolbarItem(placement: .topBarTrailing) { Button("Terminé") { showFilters = false } }
+                    }
+                }
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+            }
+            .onChange(of: checkInDate) { _, _ in Task { await loadAvailabilityIfSelected() } }
+            .onChange(of: checkOutDate) { _, _ in Task { await loadAvailabilityIfSelected() } }
             .task { if !hasLoaded { await load() } }
         }
     }
@@ -146,6 +205,91 @@ private struct NativeSeasonalStaysView: View {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    private var arrivalBinding: Binding<Date> {
+        Binding(
+            get: { checkInDate ?? Calendar.current.startOfDay(for: Date()) },
+            set: { value in
+                checkInDate = value
+                if let checkOutDate, checkOutDate <= value {
+                    self.checkOutDate = Calendar.current.date(byAdding: .day, value: 1, to: value)
+                }
+            }
+        )
+    }
+
+    private var earliestDeparture: Date {
+        Calendar.current.date(byAdding: .day, value: 1, to: checkInDate ?? Calendar.current.startOfDay(for: Date()))
+            ?? Date().addingTimeInterval(86_400)
+    }
+
+    private var validDateRange: (Date, Date)? {
+        guard let checkInDate, let checkOutDate, checkOutDate > checkInDate else { return nil }
+        return (checkInDate, checkOutDate)
+    }
+
+    @MainActor
+    private func loadAvailabilityIfSelected() async {
+        guard validDateRange != nil else {
+            calendarEntries = []
+            calendarWarning = nil
+            return
+        }
+        isLoadingCalendar = true
+        defer { isLoadingCalendar = false }
+        do {
+            calendarEntries = try await WixAuthStore.shared.fetchPublicSeasonalCalendarEntries()
+            calendarWarning = nil
+        } catch {
+            calendarWarning = "Les disponibilités ne se chargent pas. Confirmez les dates dans le calendrier avant toute demande."
+        }
+    }
+
+    private var blockedCalendarDatesByAccommodation: [String: Set<String>] {
+        let blocked = Set(["unavailable", "pending", "reserved", "booked", "blocked", "external"])
+        var grouped: [String: Set<String>] = [:]
+        for entry in calendarEntries where blocked.contains(entry.availabilityStatus.lowercased()) {
+            if let key = localDateKey(from: entry.calendarDate) {
+                grouped[entry.accommodationID, default: []].insert(key)
+            }
+        }
+        return grouped
+    }
+
+    private func isAvailable(_ accommodationID: String, blockedDates: [String: Set<String>]) -> Bool {
+        guard let (checkIn, checkOut) = validDateRange, calendarWarning == nil else { return true }
+        let blockedKeys = blockedDates[accommodationID] ?? []
+        var night = Calendar.current.startOfDay(for: checkIn)
+        while night < checkOut {
+            if blockedKeys.contains(localDateKey(for: night)) { return false }
+            guard let nextNight = Calendar.current.date(byAdding: .day, value: 1, to: night) else { break }
+            night = nextNight
+        }
+        return true
+    }
+
+    private func localDateKey(for date: Date) -> String {
+        let parts = Calendar.current.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
+    }
+
+    private func localDateKey(from rawDate: String) -> String? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let date = formatter.date(from: rawDate)
+            ?? ISO8601DateFormatter().date(from: rawDate)
+            ?? dateFromDayString(rawDate)
+        guard let date else { return nil }
+        return localDateKey(for: date)
+    }
+
+    private func dateFromDayString(_ rawDate: String) -> Date? {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.date(from: String(rawDate.prefix(10)))
     }
 }
 
