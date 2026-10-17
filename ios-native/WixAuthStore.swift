@@ -382,7 +382,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         var properties: [WixPublicPropertyItem] = []
         let fields = [
             "title", "description", "city", "postalCode", "sellingPrice", "estimatedPrice",
-            "surface", "rooms", "bedrooms", "propertyType", "transactionType", "mainImage",
+            "surface", "rooms", "bedrooms", "propertyType", "transactionType", "mainImage", "isPublic", "status",
             "galleryImages", "photo1", "photo2", "photo3", "photo4", "photo5", "photo6",
             "photo7", "photo8", "photo9", "photo10", "photo11", "photo12", "photo13",
             "photo14", "photo15", "photo16", "photo17", "photo18", "photo19", "photo20"
@@ -412,7 +412,9 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
             offset += pageSize
         }
 
-        return properties.map(\.listing)
+        return properties
+            .filter { $0.data.isPublic == true && $0.data.status == "active" }
+            .map(\.listing)
     }
 
     func fetchPublicProfessionals() async throws -> [WixPublicProfessional] {
@@ -420,24 +422,78 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
             "clientId": clientID,
             "grantType": "anonymous"
         ])
+        let records = try await fetchVisibleProfessionalRecords(accessToken: visitor.accessToken)
+        return records.map { $0.data.professional(id: $0.id) }
+    }
+
+    func fetchPublicProfessionalListings() async throws -> [Listing] {
+        let visitor = try await requestToken([
+            "clientId": clientID,
+            "grantType": "anonymous"
+        ])
+        let professionals = try await fetchVisibleProfessionalRecords(accessToken: visitor.accessToken)
+        let professionalIDs = Array(Set(professionals.compactMap { $0.data.memberId }))
+        guard !professionalIDs.isEmpty else { return [] }
+
         let pageSize = 100
-        var offset = 0
-        var profiles: [WixPublicProfessional] = []
+        var listings: [Listing] = []
         let fields = [
-            "companyName", "city", "postalCode", "professionalType",
-            "category", "description", "logo", "photo", "isVisiblePublicly", "isActive"
+            "title", "description", "city", "postalCode", "price", "surface", "surfaceHouse",
+            "surfaceLand", "landSurface", "rooms", "bedrooms", "bathrooms", "propertyType",
+            "transactionType", "mainImageUrl", "galleryImages", "commercialStatus", "slug", "status"
         ]
 
-        // Only profiles that Wix explicitly marks public and active are eligible.
-        for _ in 0..<10 {
+        // Listings are connected to Wix Members through `wixMemberId`, while
+        // public directory records store the same ID as `memberId`. Query only
+        // active listings for visible profiles and recheck the status in-app.
+        for start in stride(from: 0, to: professionalIDs.count, by: 100) {
+            let end = min(start + 100, professionalIDs.count)
+            let batch = Array(professionalIDs[start..<end])
+            var offset = 0
+            for _ in 0..<20 {
+                let response = try await post(
+                    "https://www.wixapis.com/wix-data/v2/items/query",
+                    bearer: visitor.accessToken,
+                    body: [
+                        "dataCollectionId": "biensprofessionnels",
+                        "query": [
+                            "filter": [
+                                "wixMemberId": ["$in": batch],
+                                "status": ["$eq": "active"]
+                            ],
+                            "paging": ["limit": pageSize, "offset": offset],
+                            "fields": fields
+                        ]
+                    ],
+                    as: WixPublicProfessionalPropertiesResponse.self
+                )
+                let activeItems = response.dataItems.filter { $0.data.status == "active" }
+                listings.append(contentsOf: activeItems.map { $0.data.listing(id: $0.id) })
+                guard response.dataItems.count == pageSize else { break }
+                offset += pageSize
+            }
+        }
+        return listings
+    }
+
+    private func fetchVisibleProfessionalRecords(accessToken: String) async throws -> [WixPublicProfessionalItem] {
+        let pageSize = 100
+        var offset = 0
+        var records: [WixPublicProfessionalItem] = []
+        let fields = [
+            "companyName", "firstName", "lastName", "network", "city", "postalCode",
+            "businessSector", "description", "photo", "website", "memberId", "isActive", "isVisibleInDirectory"
+        ]
+
+        for _ in 0..<20 {
             let response = try await post(
                 "https://www.wixapis.com/wix-data/v2/items/query",
-                bearer: visitor.accessToken,
+                bearer: accessToken,
                 body: [
-                    "dataCollectionId": "prosprofiles",
+                    "dataCollectionId": "professionnels",
                     "query": [
                         "filter": [
-                            "isVisiblePublicly": ["$eq": true],
+                            "isVisibleInDirectory": ["$eq": true],
                             "isActive": ["$eq": true]
                         ],
                         "paging": ["limit": pageSize, "offset": offset],
@@ -446,14 +502,13 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
                 ],
                 as: WixPublicProfessionalsResponse.self
             )
-            let visible = response.dataItems.filter {
-                $0.data.isVisiblePublicly == true && $0.data.isActive == true
-            }
-            profiles.append(contentsOf: visible.map { $0.data.professional(id: $0.id) })
+            records.append(contentsOf: response.dataItems.filter {
+                $0.data.isVisibleInDirectory == true && $0.data.isActive == true
+            })
             guard response.dataItems.count == pageSize else { break }
             offset += pageSize
         }
-        return profiles
+        return records
     }
 
     func validAccessToken() async throws -> String {
