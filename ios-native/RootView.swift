@@ -1707,6 +1707,20 @@ private struct NativeRoleDashboardView: View {
                                             Task { await buyerSearchService.deactivate(searchID: searchID) }
                                         }
                                     }
+                                    if role == .professionnel,
+                                       section.0 == "Mes matchings" || section.0 == "Demandes reçues",
+                                       let itemID = (item["_id"] as? String) ?? (item["id"] as? String),
+                                       item["seen"] as? Bool != true || (section.0 == "Demandes reçues" && item["isViewed"] as? Bool != true) {
+                                        Button("Marquer comme vu", systemImage: "eye") {
+                                            Task {
+                                                await auth.markMatchingSeen(
+                                                    list: section.0 == "Mes matchings" ? "matchings" : "demands",
+                                                    itemID: itemID
+                                                )
+                                            }
+                                        }
+                                        .tint(.teal)
+                                    }
                                     if [.courtier, .artisan, .diagnostiqueur, .prestataire].contains(role),
                                        section.0.contains("Messages") || section.0.contains("Demandes"),
                                        let messageID = (item["_id"] as? String) ?? (item["id"] as? String),
