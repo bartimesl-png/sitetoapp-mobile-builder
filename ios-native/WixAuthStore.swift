@@ -219,6 +219,50 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         }
     }
 
+    func fetchPublicPrivateListings() async throws -> [Listing] {
+        let visitor = try await requestToken([
+            "clientId": clientID,
+            "grantType": "anonymous"
+        ])
+
+        let pageSize = 100
+        var offset = 0
+        var properties: [WixPublicPropertyItem] = []
+        let fields = [
+            "title", "description", "city", "postalCode", "sellingPrice", "estimatedPrice",
+            "surface", "rooms", "bedrooms", "propertyType", "transactionType", "mainImage",
+            "galleryImages", "photo1", "photo2", "photo3", "photo4", "photo5", "photo6",
+            "photo7", "photo8", "photo9", "photo10", "photo11", "photo12", "photo13",
+            "photo14", "photo15", "photo16", "photo17", "photo18", "photo19", "photo20"
+        ]
+
+        // Offset paging is capped at 2,000 public records per refresh to bound
+        // network and memory use on the device.
+        for _ in 0..<20 {
+            let response = try await post(
+                "https://www.wixapis.com/wix-data/v2/items/query",
+                bearer: visitor.accessToken,
+                body: [
+                    "dataCollectionId": "privateproperties",
+                    "query": [
+                        "filter": [
+                            "isPublic": ["$eq": true],
+                            "status": ["$eq": "active"]
+                        ],
+                        "paging": ["limit": pageSize, "offset": offset],
+                        "fields": fields
+                    ]
+                ],
+                as: WixPublicPropertiesResponse.self
+            )
+            properties.append(contentsOf: response.dataItems)
+            guard response.dataItems.count == pageSize else { break }
+            offset += pageSize
+        }
+
+        return properties.map(\.listing)
+    }
+
     func validAccessToken() async throws -> String {
         guard var session = readStoredSession() else { throw AuthError.login("Connectez-vous pour accéder à cet espace.") }
         guard session.expiresAt <= Date().addingTimeInterval(60) else { return session.accessToken }

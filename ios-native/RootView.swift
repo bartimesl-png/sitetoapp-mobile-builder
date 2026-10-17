@@ -64,7 +64,7 @@ private struct NativeListingsView: View {
                             HStack(spacing: 10) {
                                 Image(systemName: "sparkles")
                                     .foregroundStyle(.teal)
-                                Text("Annonces de professionnels actualisées depuis le catalogue PartenaireFoyer.")
+                                Text("Biens de particuliers publiés sur Wix et annonces professionnelles du catalogue PartenaireFoyer.")
                                     .font(.footnote)
                                     .foregroundStyle(.secondary)
                             }
