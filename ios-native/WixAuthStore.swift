@@ -223,7 +223,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         }
         do {
             let token = try await validAccessToken()
-            var components = URLComponents(string: "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/ios-native-dashboard")!
+            var components = URLComponents(string: "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/ios-native-dashboard-v2")!
             components.queryItems = [URLQueryItem(name: "role", value: role)]
             var request = URLRequest(url: components.url!, timeoutInterval: 35)
             request.httpMethod = "GET"
