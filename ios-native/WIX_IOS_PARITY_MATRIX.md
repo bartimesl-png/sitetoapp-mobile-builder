@@ -358,13 +358,14 @@ Les trois parcours demandés sont trois flux CMS distincts dans Wix. Ils ne part
 
 ## Inventaire SwiftUI complet
 
-Les **54 déclarations `View`** de `RootView.swift` au moment de l’audit :
+Les **56 déclarations `View`** de `RootView.swift` au moment de l’audit :
 
 - `RootView`
 - `NativeSeasonalStaysView`
 - `SeasonalAccommodationRow`
 - `NativeSeasonalAccommodationDetail`
 - `NativeProfessionalsView`
+- `ProfessionalDirectoryListView`
 - `ProfessionalRow`
 - `ProfessionalDetailView`
 - `PrivatePropertyContactForm`
@@ -372,6 +373,7 @@ Les **54 déclarations `View`** de `RootView.swift` au moment de l’audit :
 - `ImportedProfessionalContactForm`
 - `ImportedListingContactForm`
 - `NativeListingsView`
+- `NativeCatalogContentView`
 - `BuyerSearchDirectoryRow`
 - `ClassifiedAdRow`
 - `NativeClassifiedAdDetailView`
