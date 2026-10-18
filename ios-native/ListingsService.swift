@@ -26,32 +26,21 @@ final class ListingsService: ObservableObject {
         var successfulSources = 0
         var failures: [String] = []
 
+        // Start the three independent catalogue sources together so the screen
+        // does not make visitors wait for each network request in sequence.
+        let importedTask = Task { try await loadImportedListings() }
+        let privateTask = Task { try await WixAuthStore.shared.fetchPublicPrivateListings() }
+        let professionalTask = Task { try await WixAuthStore.shared.fetchPublicProfessionalListings() }
+
         let imported: [Listing]
-        do {
-            imported = try await loadImportedListings()
-            successfulSources += 1
-        } catch {
-            imported = []
-            failures.append("les annonces importées")
-        }
-
+        do { imported = try await importedTask.value; successfulSources += 1 }
+        catch { imported = []; failures.append("les annonces importées") }
         let privateListings: [Listing]
-        do {
-            privateListings = try await WixAuthStore.shared.fetchPublicPrivateListings()
-            successfulSources += 1
-        } catch {
-            privateListings = []
-            failures.append("les biens de particuliers")
-        }
-
+        do { privateListings = try await privateTask.value; successfulSources += 1 }
+        catch { privateListings = []; failures.append("les biens de particuliers") }
         let professionalListings: [Listing]
-        do {
-            professionalListings = try await WixAuthStore.shared.fetchPublicProfessionalListings()
-            successfulSources += 1
-        } catch {
-            professionalListings = []
-            failures.append("les biens de professionnels")
-        }
+        do { professionalListings = try await professionalTask.value; successfulSources += 1 }
+        catch { professionalListings = []; failures.append("les biens de professionnels") }
 
         guard successfulSources > 0 else {
             if listings.isEmpty {
@@ -293,9 +282,10 @@ final class ProfessionalsService: ObservableObject {
         defer { isLoading = false }
         do {
             let result = try await WixAuthStore.shared.fetchPublicProfessionals()
-            professionals = result.professionals.sorted {
-                $0.resolvedName.localizedStandardCompare($1.resolvedName) == .orderedAscending
-            }
+            // Keep the ordering returned by the existing Wix directory and its
+            // imported feeds. Sorting every profile by name here discarded the
+            // source's visibility/priority order.
+            professionals = result.professionals
             warningMessage = result.warning
             hasLoaded = true
         } catch {

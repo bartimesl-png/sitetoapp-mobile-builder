@@ -122,7 +122,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
             let login = try await post(
                 "https://www.wixapis.com/_api/iam/authentication/v2/login",
                 bearer: visitor.accessToken,
-                body: ["login_id": ["email": email.trimmingCharacters(in: .whitespacesAndNewlines)], "password": password],
+                body: ["login_id": ["email": email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()], "password": password],
                 as: LoginResponse.self
             )
             guard let sessionToken = login.sessionToken, login.state?.uppercased() == "SUCCESS" else {
@@ -188,7 +188,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         } catch is CancellationError {
             errorMessage = nil
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = userFacingAuthError(error)
         }
     }
 
@@ -253,7 +253,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         } catch is CancellationError {
             errorMessage = nil
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = userFacingAuthError(error)
         }
         return false
     }
@@ -1766,7 +1766,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         ])
         let fields = [
             "itemName", "itemDescription", "itemPrice", "category", "subcategory",
-            "itemCondition", "adListingType", "attributesJSON", "slug", "city", "postalCode", "status", "itemImage", "isImported",
+            "itemCondition", "adListingType", "attributesJSON", "slug", "city", "postalCode", "status", "itemImage", "isImported", "bumpedAt",
             "photo2", "photo3", "photo4", "photo5", "photo6", "photo7", "photo8",
             "photo9", "photo10", "photo11", "photo12", "photo13", "photo14",
             "photo15", "photo16", "photo17", "photo18", "photo19", "photo20"
@@ -1775,6 +1775,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         var ads: [ClassifiedAd] = []
         var warnings: [String] = []
         let pageSize = 100
+        async let importedVehicleAds = fetchImportedVehicleClassifiedAds()
         do {
             while true {
                 let response = try await post(
@@ -1800,12 +1801,21 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
             warnings.append("Les petites annonces PartenaireFoyer n’ont pas pu être chargées.")
         }
         do {
-            ads.append(contentsOf: try await fetchImportedVehicleClassifiedAds())
+            ads.append(contentsOf: try await importedVehicleAds)
         } catch {
             warnings.append("Les annonces de véhicules importées ne sont pas disponibles pour le moment.")
         }
         var seen = Set<String>()
-        return (ads.filter { seen.insert($0.id).inserted }, warnings.isEmpty ? nil : warnings.joined(separator: " "))
+        let unique = ads.filter { seen.insert($0.id).inserted }
+        // Wix's `bumpedAt` is the site's existing small-ad refresh order. Keep
+        // that order across Wix and imported feeds, falling back to creation time.
+        let ordered = unique.enumerated().sorted { left, right in
+            let lhs = left.element.catalogOrderDate
+            let rhs = right.element.catalogOrderDate
+            if lhs == rhs { return left.offset < right.offset }
+            return lhs > rhs
+        }.map(\.element)
+        return (ordered, warnings.isEmpty ? nil : warnings.joined(separator: " "))
     }
 
     private func fetchImportedVehicleClassifiedAds() async throws -> [ClassifiedAd] {
@@ -1883,7 +1893,9 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
                     isImported: true,
                     importedAttributesJSON: attributesJSON,
                     importedProviderName: importedString(item, ["providerName"]) ?? "Vendeur externe",
-                    listingType: "sell"
+                    listingType: "sell",
+                    bumpedAt: importedString(item, ["bumpedAt"]),
+                    createdAt: importedString(item, ["createdAt", "updatedAt", "lastUpdatedAt", "lastSeenAt"])
                 ))
             }
 
@@ -1949,34 +1961,24 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         let records = try await fetchVisibleProfessionalRecords(accessToken: visitor.accessToken)
         let registered = records.map { $0.data.professional(id: $0.id) }
         var warnings: [String] = []
+        // These independent sources were previously fetched one after another,
+        // making a complete directory wait for every feed in sequence.
+        async let registeredLocalTask = fetchRegisteredLocalProsProfiles(accessToken: visitor.accessToken)
+        async let localImportedTask = fetchImportedLocalProfessionals()
+        async let brokersTask = fetchPublicBrokers(accessToken: visitor.accessToken)
+        async let realEstateImportedTask = fetchImportedRealEstateProfessionals()
         let registeredLocalPros: [WixPublicProfessional]
-        do {
-            registeredLocalPros = try await fetchRegisteredLocalProsProfiles(accessToken: visitor.accessToken)
-        } catch {
-            registeredLocalPros = []
-            warnings.append("les fiches locales inscrites")
-        }
+        do { registeredLocalPros = try await registeredLocalTask }
+        catch { registeredLocalPros = []; warnings.append("les fiches locales inscrites") }
         let localImported: [WixPublicProfessional]
-        do {
-            localImported = try await fetchImportedLocalProfessionals()
-        } catch {
-            localImported = []
-            warnings.append("les artisans et diagnostiqueurs importés")
-        }
+        do { localImported = try await localImportedTask }
+        catch { localImported = []; warnings.append("les artisans et diagnostiqueurs importés") }
         let brokers: [WixPublicProfessional]
-        do {
-            brokers = try await fetchPublicBrokers(accessToken: visitor.accessToken)
-        } catch {
-            brokers = []
-            warnings.append("l’annuaire des courtiers")
-        }
+        do { brokers = try await brokersTask }
+        catch { brokers = []; warnings.append("l’annuaire des courtiers") }
         let realEstateImported: [WixPublicProfessional]
-        do {
-            realEstateImported = try await fetchImportedRealEstateProfessionals()
-        } catch {
-            realEstateImported = []
-            warnings.append("les professionnels immobiliers importés")
-        }
+        do { realEstateImported = try await realEstateImportedTask }
+        catch { realEstateImported = []; warnings.append("les professionnels immobiliers importés") }
         let allRegistered = registered + registeredLocalPros + brokers
         var seen = Set(allRegistered.map { normalizedProfessionalKey($0.resolvedName, $0.postalCode) })
         let registeredContacts = Set(allRegistered.flatMap { [$0.professionalEmail, $0.publicPhone] }.compactMap { $0 }.map(normalizedContactKey))
@@ -2577,6 +2579,15 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
                 return
             }
         }
+    }
+
+    private func userFacingAuthError(_ error: Error) -> String {
+        let message = error.localizedDescription
+        let lowercased = message.lowercased()
+        if lowercased.contains("associated domains") || lowercased.contains("webcredentials") {
+            return "Les identifiants Wix ont été acceptés, mais iOS ne peut pas encore revenir dans l’application. Le domaine www.partenairefoyer.com doit être associé à l’identifiant Apple de l’app pour le rappel sécurisé."
+        }
+        return message
     }
 
     private func requestToken(_ body: [String: String]) async throws -> TokenResponse {

@@ -2600,6 +2600,7 @@ private struct HomeDashboardView: View {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 20) {
                     hero
+                    matchingCard
                     Button { selectedTab = 1 } label: {
                         HStack(spacing: 14) {
                             Image(systemName: "magnifyingglass")
@@ -2810,14 +2811,55 @@ private struct HomeDashboardView: View {
                     }
                     Spacer(minLength: 0)
                 }
-                Text("Le logement et les services pour chaque étape de votre projet.")
-                    .font(.subheadline)
+                Text("Votre projet immobilier, accompagné de la bonne rencontre.")
+                    .font(.subheadline.weight(.medium))
                     .foregroundStyle(.white.opacity(0.88))
             }
             .padding(22)
         }
         .frame(maxWidth: .infinity, minHeight: 190, alignment: .leading)
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+    }
+
+    private var matchingCard: some View {
+        VStack(alignment: .leading, spacing: 15) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "sparkles")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(Color(red: 0.02, green: 0.45, blue: 0.39))
+                    .frame(width: 44, height: 44)
+                    .background(Color.teal.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Le matching intelligent")
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                    Text("Vos critères sont rapprochés des biens et des professionnels compatibles : budget, type de projet, surface et localisation.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Button {
+                publicDemandType = "recherche_achat"
+                showPublicDemand = true
+            } label: {
+                HStack {
+                    Text("Décrire ma recherche")
+                    Spacer()
+                    Image(systemName: "arrow.right")
+                }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 15)
+                .padding(.vertical, 13)
+                .background(Color(red: 0.02, green: 0.38, blue: 0.34), in: RoundedRectangle(cornerRadius: 14))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(17)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.background, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(Color.teal.opacity(0.22), lineWidth: 1))
     }
 }
 

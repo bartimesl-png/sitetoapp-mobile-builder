@@ -82,6 +82,24 @@ struct ListingFeedResponse: Decodable {
     let total: Int?
 }
 
+/// Wix CMS date values may arrive either as an ISO string or as `{ "$date": ... }`.
+struct WixDateValue: Decodable {
+    let value: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case date = "$date"
+    }
+
+    init(from decoder: Decoder) throws {
+        if let single = try? decoder.singleValueContainer(), let string = try? single.decode(String.self) {
+            value = string
+            return
+        }
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        value = try container.decodeIfPresent(String.self, forKey: .date)
+    }
+}
+
 struct WixPublicPropertiesResponse: Decodable {
     let dataItems: [WixPublicPropertyItem]
 }
@@ -300,6 +318,7 @@ struct WixPublicProperty: Decodable {
     let photo20: String?
     let galleryImages: String?
     let createdAt: String?
+    let _createdDate: WixDateValue?
 
     var photos: [String] {
         var result = [mainImage, photo1, photo2, photo3, photo4, photo5,
@@ -342,7 +361,7 @@ struct WixPublicProperty: Decodable {
             ownerType: "particulier",
             importedProId: nil,
             professionalID: nil,
-            createdAt: createdAt,
+            createdAt: createdAt ?? _createdDate?.value,
             firstSeenAt: nil,
             updatedAt: nil,
             lastSeenAt: nil
@@ -449,6 +468,10 @@ struct ClassifiedAd: Identifiable, Hashable {
     var importedProviderName: String? = nil
     var listingType: String? = nil
     var wixSlug: String? = nil
+    var bumpedAt: String? = nil
+    var createdAt: String? = nil
+
+    var catalogOrderDate: String { bumpedAt ?? createdAt ?? "" }
 
     var wixDetailURL: URL? {
         guard !isImported,
@@ -589,6 +612,8 @@ struct WixPublicClassifiedAdData: Decodable {
     let photo18: String?
     let photo19: String?
     let photo20: String?
+    let bumpedAt: WixDateValue?
+    let _createdDate: WixDateValue?
 
     func classifiedAd(id: String) -> ClassifiedAd? {
         guard status == "published" || status == "active",
@@ -616,7 +641,9 @@ struct WixPublicClassifiedAdData: Decodable {
             isImported: false,
             importedAttributesJSON: attributesJSON?.jsonString,
             listingType: adListingType,
-            wixSlug: slug
+            wixSlug: slug,
+            bumpedAt: bumpedAt?.value,
+            createdAt: _createdDate?.value
         )
     }
 }
