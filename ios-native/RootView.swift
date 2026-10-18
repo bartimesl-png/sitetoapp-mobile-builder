@@ -559,8 +559,7 @@ private struct ProfessionalDirectoryListView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            Group {
+        Group {
                 if service.isLoading && service.professionals.isEmpty {
                     ProgressView("Chargement des professionnels…")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
