@@ -2845,7 +2845,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
                     throw URLError(.badServerResponse)
                 }
 
-                let page = items.compactMap { item in
+                let page: [WixPublicProfessional] = items.compactMap { (item: [String: Any]) -> WixPublicProfessional? in
                     guard (item["claimed"] as? Bool) != true,
                           let rawID = importedString(item, ["id", "_id"]), !rawID.isEmpty else { return nil }
                     let firstName = importedString(item, ["first_name", "firstName"])
@@ -2907,7 +2907,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
                   payload["success"] as? Bool != false,
                   let items = payload["items"] as? [[String: Any]],
                   let total = payload["total"] as? Int else { throw URLError(.badServerResponse) }
-            let page = items.compactMap { item in
+            let page: [WixPublicProfessional] = items.compactMap { (item: [String: Any]) -> WixPublicProfessional? in
                 guard (item["claimed"] as? Bool) != true,
                       let id = importedString(item, ["id"]), !id.isEmpty else { return nil }
                 let first = importedString(item, ["firstName", "first_name"])
