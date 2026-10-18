@@ -217,6 +217,13 @@ private struct NativeSeasonalStaysView: View {
         )
     }
 
+    private var departureBinding: Binding<Date> {
+        Binding(
+            get: { checkOutDate ?? earliestDeparture },
+            set: { value in checkOutDate = max(value, earliestDeparture) }
+        )
+    }
+
     private var earliestDeparture: Date {
         Calendar.current.date(byAdding: .day, value: 1, to: checkInDate ?? Calendar.current.startOfDay(for: Date()))
             ?? Date().addingTimeInterval(86_400)
@@ -1063,7 +1070,8 @@ private struct ProfessionalMinisiteRequestForm: View {
                listingContext.id.hasPrefix("wix-pro-") {
                 guard let recipientEmail = professional.professionalEmail,
                       recipientEmail.contains("@") else {
-                    throw AuthError.api("L’e-mail du professionnel n’est pas disponible pour cette annonce.")
+                    error = "L’e-mail du professionnel n’est pas disponible pour cette annonce."
+                    return
                 }
                 let listingID = String(listingContext.id.dropFirst("wix-pro-".count))
                 propertyContactMessage = note
@@ -5868,7 +5876,7 @@ private struct DashboardOverview: View {
                             if isUnread { count += 1 }
                         }
                         Text(unread == 0 ? "À jour" : "\(unread) non lu(s)")
-                            .font(.caption2).foregroundStyle(unread == 0 ? .secondary : .orange)
+                            .font(.caption2).foregroundStyle(unread == 0 ? Color.secondary : Color.orange)
                     } else {
                         Text(items.isEmpty ? "Aucun élément" : "Données Wix")
                             .font(.caption2).foregroundStyle(.secondary)
@@ -6160,7 +6168,7 @@ private struct NativeSeasonalCalendarEditor: View {
                             guard !reserved else { return }
                             if selected { selectedDates.remove(key) } else { selectedDates.insert(key) }
                         } label: {
-                            Text(String(dayNumber))
+                            Text("\(dayNumber)")
                                 .font(.subheadline.weight(.medium))
                                 .frame(maxWidth: .infinity, minHeight: 38)
                                 .foregroundStyle(reserved ? .secondary : selected ? .white : .primary)
