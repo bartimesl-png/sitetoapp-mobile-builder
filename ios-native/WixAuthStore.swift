@@ -2196,7 +2196,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
                     "query": [
                         "filter": [
                             "isPublic": ["$eq": true],
-                            "status": ["$eq": "active"]
+                            "status": ["$in": ["active", "published"]]
                         ],
                         "paging": ["limit": pageSize, "offset": offset],
                         "fields": fields
@@ -2212,7 +2212,10 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         }
 
         return properties
-            .filter { $0.data.isPublic == true && $0.data.status == "active" }
+            .filter {
+                $0.data.isPublic == true &&
+                    ["active", "published"].contains($0.data.status?.lowercased() ?? "")
+            }
             .map { $0.data.listing(id: $0.id) }
     }
 
@@ -2650,7 +2653,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
                         "query": [
                             "filter": [
                                 "wixMemberId": ["$in": batch],
-                                "status": ["$eq": "active"]
+                                "status": ["$in": ["active", "published"]]
                             ],
                             "paging": ["limit": pageSize, "offset": offset],
                             "fields": fields
@@ -2658,7 +2661,9 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
                     ],
                     as: WixPublicProfessionalPropertiesResponse.self
                 )
-                let activeItems = response.dataItems.filter { $0.data.status == "active" }
+                let activeItems = response.dataItems.filter {
+                    ["active", "published"].contains($0.data.status?.lowercased() ?? "")
+                }
                 listings.append(contentsOf: activeItems.map { $0.data.listing(id: $0.id) })
                 guard response.dataItems.count == pageSize else { break }
                 let nextOffset = offset + response.dataItems.count
