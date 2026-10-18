@@ -2724,8 +2724,8 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
                         importedCategory: "prestataire",
                         professionalEmail: importedString(data, ["email"]),
                         publicPhone: importedString(data, ["phone", "phoneNumber"]),
-                        isDirectoryFeatured: data["featured"] as? Bool == true,
-                        isServiceProviderProfile: true
+                        isServiceProviderProfile: true,
+                        isDirectoryFeatured: data["featured"] as? Bool == true
                     )
                 })
                 guard response.dataItems.count == pageSize else { break }
@@ -2791,7 +2791,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
                   let decoded = try? JSONSerialization.jsonObject(with: encodedData) as? [[String: Any]] {
             categoryRecords = decoded
         }
-        let mainCategory = categoryRecords.lazy.compactMap { importedString($0, ["mainCategory", "category"]) }.first
+        let mainCategory = categoryRecords.lazy.compactMap { self.importedString($0, ["mainCategory", "category"]) }.first
         let rawCategory = mainCategory ?? importedString(data, ["professionalType", "category"]) ?? "Professionnel"
         let normalized = rawCategory.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "fr_FR"))
         let directoryCategory = normalized.contains("diagnost") ? "diagnostiqueur" : "artisan"
