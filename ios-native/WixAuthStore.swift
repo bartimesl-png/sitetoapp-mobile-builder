@@ -2384,7 +2384,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
                         "query": [
                             "filter": [:],
                             "paging": ["limit": pageSize, "offset": offset],
-                            "fields": ["fullName", "professionalTitle", "profilePicture", "bio", "contactEmail", "phoneNumber", "city", "websiteUrl", "yearsOfExperience", "brokerTypes", "companyName", "photo", "email", "website"]
+                            "fields": ["fullName", "professionalTitle", "profilePicture", "bio", "contactEmail", "phoneNumber", "city", "websiteUrl", "yearsOfExperience", "brokerTypes", "companyName", "photo", "email", "website", "slug"]
                         ]
                     ],
                     as: WixRawDirectoryResponse.self
@@ -2409,6 +2409,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
                         description: importedString(data, ["bio"]),
                         logo: picture,
                         website: importedString(data, source == "broker" ? ["websiteUrl"] : ["website"]),
+                        miniSiteSlug: importedString(data, ["slug", "miniSiteSlug"]),
                         importedCategory: "courtier",
                         experienceYears: years,
                         professionalEmail: email,
@@ -2706,7 +2707,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         let fields = [
             "accountId", "businessName", "companyName", "name", "category", "subcategory",
             "description", "services", "city", "postalCode", "phone", "email", "website",
-            "photo", "photoUrl", "photoUrls", "logo", "companyLogo", "status", "featured"
+            "photo", "photoUrl", "photoUrls", "logo", "companyLogo", "slug", "status", "featured"
         ]
         var results: [WixPublicProfessional] = []
         var seenAccounts = Set<String>()
@@ -2753,6 +2754,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
                         description: importedString(data, ["description"]),
                         logo: photo,
                         website: importedString(data, ["website"]),
+                        miniSiteSlug: importedString(data, ["slug", "miniSiteSlug"]),
                         importedCategory: "prestataire",
                         professionalEmail: importedString(data, ["email"]),
                         publicPhone: importedString(data, ["phone", "phoneNumber"]),
@@ -2976,7 +2978,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
 
     private func fetchRegisteredLocalProsProfiles(accessToken: String) async throws -> [WixPublicProfessional] {
         let endpoint = "https://www.wixapis.com/wix-data/v2/items/query"
-        let fields = ["companyName", "contactName", "email", "phoneNumber", "city", "postalCode", "category", "categories", "description", "photo", "logo", "website", "professionalType", "isRGE", "isActive", "isVisiblePublicly", "hasActiveSubscription", "subscriptionStatus"]
+        let fields = ["companyName", "contactName", "email", "phoneNumber", "city", "postalCode", "category", "categories", "description", "photo", "logo", "website", "slug", "professionalType", "isRGE", "isActive", "isVisiblePublicly", "hasActiveSubscription", "subscriptionStatus"]
         var offset = 0
         var results: [WixPublicProfessional] = []
         let pageSize = 100
@@ -3006,6 +3008,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
                     postalCode: importedString(data, ["postalCode"]), businessSector: category.label,
                     description: importedString(data, ["description"]),
                     logo: importedString(data, ["logo", "photo"]), website: importedString(data, ["website"]),
+                    miniSiteSlug: importedString(data, ["slug", "miniSiteSlug"]),
                     importedCategory: category.directoryCategory,
                     professionalEmail: email, publicPhone: phone, isLocalProsProfile: true
                 )
@@ -3031,7 +3034,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         var records: [WixPublicProfessionalItem] = []
         let fields = [
             "companyName", "firstName", "lastName", "network", "city", "postalCode",
-            "businessSector", "description", "photo", "website", "email", "phone", "memberId",
+            "businessSector", "description", "photo", "website", "slug", "email", "phone", "memberId",
             "isActive", "isVisibleInDirectory", "activityScore", "profileCompleted"
         ]
 
