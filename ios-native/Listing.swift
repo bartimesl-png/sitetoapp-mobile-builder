@@ -256,6 +256,7 @@ struct WixPublicProfessionalData: Decodable {
     let description: String?
     let photo: String?
     let website: String?
+    let slug: String?
     let memberId: String?
     let isVisibleInDirectory: WixFlexibleBool?
     let isActive: WixFlexibleBool?
@@ -282,6 +283,7 @@ struct WixPublicProfessionalData: Decodable {
             description: description,
             logo: photo,
             website: website,
+            miniSiteSlug: slug,
             professionalEmail: email,
             publicPhone: phone,
             activityScore: activityScore,
@@ -304,6 +306,7 @@ struct WixPublicProfessional: Identifiable {
     let description: String?
     let logo: String?
     let website: String?
+    var miniSiteSlug: String? = nil
     var importedID: String? = nil
     var importedCategory: String? = nil
     var experienceYears: String? = nil
@@ -316,6 +319,12 @@ struct WixPublicProfessional: Identifiable {
     var isLocalProsProfile: Bool = false
     var isServiceProviderProfile: Bool = false
     var isDirectoryFeatured: Bool = false
+
+    var miniSiteURL: URL? {
+        guard let slug = miniSiteSlug?.trimmingCharacters(in: .whitespacesAndNewlines),
+              slug.range(of: "^[A-Za-z0-9-]{1,180}$", options: .regularExpression) != nil else { return nil }
+        return URL(string: "https://www.partenairefoyer.com/minisite/\\(slug)")
+    }
 
     var resolvedName: String {
         let company = companyName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
