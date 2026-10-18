@@ -473,32 +473,30 @@ private struct NativeSeasonalAccommodationDetail: View {
 private struct NativeProfessionalsView: View {
     @ObservedObject var service: ProfessionalsService
 
-    private let directories: [(String, String, String)] = [
-        ("Immobilier", "building.2.fill", "Professionnels de l’immobilier"),
-        ("Courtiers", "person.text.rectangle.fill", "Courtiers"),
-        ("Artisans", "hammer.fill", "Artisans"),
-        ("Diagnostiqueurs", "checkmark.seal.fill", "Diagnostiqueurs"),
-        ("Prestataires", "wrench.and.screwdriver.fill", "Prestataires de services")
+    private let directories: [(String, String, String, String)] = [
+        ("Immobilier", "building.2.fill", "Professionnels de l’immobilier", "CategoryMaison"),
+        ("Courtiers", "person.text.rectangle.fill", "Courtiers", "CategoryPro"),
+        ("Artisans", "hammer.fill", "Artisans", "CategoryPro"),
+        ("Diagnostiqueurs", "checkmark.seal.fill", "Diagnostiqueurs", "CategoryPro"),
+        ("Prestataires", "wrench.and.screwdriver.fill", "Prestataires de services", "CategoryPetitesAnnonces")
     ]
 
     var body: some View {
         NavigationStack {
-            List {
-                Section {
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("Choisissez un métier").font(.title2.bold()).foregroundStyle(PFTheme.deepGreen)
+                    Text("Chaque métier dispose de son propre annuaire et de sa recherche.")
+                        .font(.subheadline).foregroundStyle(.secondary)
                     ForEach(directories, id: \.0) { directory in
                         NavigationLink {
                             ProfessionalDirectoryListView(service: service, directoryType: directory.0, title: directory.2)
                         } label: {
-                            Label(directory.2, systemImage: directory.1)
-                        }
+                            CatalogPhotoCard(title: directory.2, subtitle: "Voir l’annuaire", image: directory.3, symbol: directory.1)
+                        }.buttonStyle(.plain)
                     }
-                } header: {
-                    Text("Choisir un annuaire")
-                } footer: {
-                    Text("Chaque métier dispose de sa propre liste et de sa recherche.")
-                }
+                }.padding(17)
             }
-            .listStyle(.insetGrouped)
             .navigationTitle("Professionnels")
             .task { await service.loadIfNeeded() }
         }
@@ -1370,23 +1368,30 @@ private struct NativeListingsView: View {
         Group {
             if catalogSection == .hub {
                 NavigationStack {
-                    List {
-                        Section("Immobilier") {
-                            Button { catalogSection = .realEstate } label: {
-                                Label("Annonces immobilières", systemImage: "house.fill")
+                    ScrollView(showsIndicators: false) {
+                        VStack(alignment: .leading, spacing: 16) {
+                            Text("Trouvez ce qu’il vous faut")
+                                .font(.title2.bold()).foregroundStyle(PFTheme.deepGreen)
+                            Button {
+                                catalogSection = .realEstate
+                            } label: {
+                                CatalogPhotoCard(title: "Annonces immobilières", subtitle: "Maisons, appartements et terrains", image: "CategoryMaison", symbol: "house.fill")
                             }
-                            Button { catalogSection = .buyerSearches } label: {
-                                Label("Demandes de recherche", systemImage: "person.crop.circle.badge.magnifyingglass")
+                            Button {
+                                catalogSection = .buyerSearches
+                            } label: {
+                                CatalogPhotoCard(title: "Demandes de recherche", subtitle: "Les projets immobiliers des particuliers", image: "CategoryPro", symbol: "person.crop.circle.badge.magnifyingglass")
                             }
-                        }
-                        Section("Petites annonces") {
-                            Button { catalogSection = .classifiedAds } label: {
-                                Label("Vendre, donner, échanger ou louer", systemImage: "tag.fill")
+                            Button {
+                                catalogSection = .classifiedAds
                             }
-                        }
+                            label: {
+                                CatalogPhotoCard(title: "Petites annonces", subtitle: "Vendre, donner, échanger ou louer", image: "CategoryPetitesAnnonces", symbol: "tag.fill")
+                            }
+                            .buttonStyle(.plain)
+                        }.padding(17)
                     }
                     .navigationTitle("Annonces")
-                    .listStyle(.insetGrouped)
                 }
             } else {
                 NativeCatalogContentView(service: service, classifiedAds: classifiedAds,
@@ -2906,18 +2911,18 @@ private struct HomeDashboardView: View {
                         .buttonStyle(.plain)
                     }
                     LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
-                        homeActionCard("Biens immobiliers", subtitle: "Acheter, louer, consulter", symbol: "house.fill") {
+                        homeActionCard("Biens immobiliers", subtitle: "Acheter, louer, consulter", symbol: "house.fill", image: "CategoryMaison") {
                             catalogSection = .realEstate
                             selectedTab = 1
                         }
-                        homeActionCard("Petites annonces", subtitle: "Vendre, donner, échanger, louer", symbol: "tag.fill") {
+                        homeActionCard("Petites annonces", subtitle: "Vendre, donner, échanger, louer", symbol: "tag.fill", image: "CategoryPetitesAnnonces") {
                             catalogSection = .classifiedAds
                             selectedTab = 1
                         }
-                        homeActionCard("Séjours", subtitle: "Hébergements saisonniers", symbol: "bed.double.fill") {
+                        homeActionCard("Séjours", subtitle: "Hébergements saisonniers", symbol: "bed.double.fill", image: "CategorySejours") {
                             selectedTab = 2
                         }
-                        homeActionCard("Professionnels", subtitle: "Immo, courtiers, artisans, services", symbol: "person.2.fill") {
+                        homeActionCard("Professionnels", subtitle: "Immo, courtiers, artisans, services", symbol: "person.2.fill", image: "CategoryPro") {
                             selectedTab = 3
                         }
                     }
@@ -3028,34 +3033,30 @@ private struct HomeDashboardView: View {
         _ title: String,
         subtitle: String,
         symbol: String,
+        image: String,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 11) {
-                Image(systemName: symbol)
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(PFTheme.brand)
-                    .frame(width: 40, height: 40)
-                    .background(PFTheme.paleMint, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-                Text(title)
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(PFTheme.deepGreen)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            ZStack(alignment: .bottomLeading) {
+                Image(image).resizable().scaledToFill()
+                    .frame(maxWidth: .infinity, minHeight: 164, maxHeight: 164).clipped()
+                LinearGradient(colors: [.clear, .black.opacity(0.76)], startPoint: .center, endPoint: .bottom)
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack {
+                        Image(systemName: symbol).font(.caption.weight(.bold))
+                            .padding(8).background(.white.opacity(0.22), in: Circle())
+                        Spacer()
+                        Image(systemName: "arrow.up.right").font(.caption.weight(.bold))
+                            .padding(8).background(.white.opacity(0.22), in: Circle())
+                    }
+                    Spacer(minLength: 15)
+                    Text(title).font(.subheadline.weight(.bold)).lineLimit(2)
+                    Text(subtitle).font(.caption).lineLimit(2).opacity(0.9)
+                }.foregroundStyle(.white).padding(12)
             }
-            .padding(14)
-            .frame(maxWidth: .infinity, minHeight: 140, alignment: .topLeading)
-            .background(.background, in: RoundedRectangle(cornerRadius: 19, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 19, style: .continuous).stroke(PFTheme.brand.opacity(0.12), lineWidth: 1))
-            .shadow(color: PFTheme.deepGreen.opacity(0.045), radius: 9, y: 4)
-            .contentShape(RoundedRectangle(cornerRadius: 19, style: .continuous))
+            .frame(maxWidth: .infinity, minHeight: 164, maxHeight: 164)
+            .clipShape(RoundedRectangle(cornerRadius: 19, style: .continuous))
+            .shadow(color: PFTheme.deepGreen.opacity(0.14), radius: 9, y: 4)
         }
         .buttonStyle(.plain)
     }
@@ -3086,11 +3087,16 @@ private struct HomeDashboardView: View {
 
     private var hero: some View {
         ZStack(alignment: .topTrailing) {
-            LinearGradient(
-                colors: [PFTheme.deepGreen, PFTheme.brand, Color(red: 0.02, green: 0.56, blue: 0.43)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+            Image("CategoryMaison")
+                .resizable()
+                .scaledToFill()
+                .overlay {
+                    LinearGradient(
+                        colors: [PFTheme.deepGreen.opacity(0.65), PFTheme.deepGreen.opacity(0.84)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                }
             Circle()
                 .fill(.white.opacity(0.07))
                 .frame(width: 250, height: 250)
@@ -3238,6 +3244,34 @@ private struct HomeDashboardView: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 8)
         .background(PFTheme.paleMint, in: Capsule())
+    }
+}
+
+private struct CatalogPhotoCard: View {
+    let title: String
+    let subtitle: String
+    let image: String
+    let symbol: String
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            Image(image).resizable().scaledToFill()
+                .frame(maxWidth: .infinity, minHeight: 142, maxHeight: 142).clipped()
+            LinearGradient(colors: [.clear, .black.opacity(0.78)], startPoint: .center, endPoint: .bottom)
+            HStack(alignment: .bottom, spacing: 10) {
+                Image(systemName: symbol).font(.headline.weight(.semibold))
+                    .frame(width: 38, height: 38).background(.white.opacity(0.2), in: Circle())
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title).font(.headline.weight(.bold)).lineLimit(2)
+                    Text(subtitle).font(.caption).lineLimit(2).opacity(0.9)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "arrow.right").font(.subheadline.bold())
+            }.foregroundStyle(.white).padding(14)
+        }
+        .frame(maxWidth: .infinity, minHeight: 142, maxHeight: 142)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .shadow(color: PFTheme.deepGreen.opacity(0.14), radius: 8, y: 3)
     }
 }
 

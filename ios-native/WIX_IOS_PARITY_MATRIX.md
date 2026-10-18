@@ -384,6 +384,7 @@ Les **56 déclarations `View`** de `RootView.swift` au moment de l’audit :
 - `ListingDetailView`
 - `ListingFact`
 - `HomeDashboardView`
+- `CatalogPhotoCard`
 - `NativePostalLocationFields`
 - `NativePublicDemandForm`
 - `NativeEstimationRequestView`
