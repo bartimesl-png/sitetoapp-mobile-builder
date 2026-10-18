@@ -15,7 +15,7 @@ private enum PFTheme {
 
 struct RootView: View {
     @State private var selectedTab = 0
-    @State private var selectedCatalogSection: NativeCatalogSection = .realEstate
+    @State private var selectedCatalogSection: NativeCatalogSection = .hub
     @AppStorage("partenairefoyer.activeRole") private var activeRoleRaw = ""
     @StateObject private var listingsService = ListingsService()
     @StateObject private var classifiedAdsService = ClassifiedAdsService()
@@ -472,27 +472,65 @@ private struct NativeSeasonalAccommodationDetail: View {
 
 private struct NativeProfessionalsView: View {
     @ObservedObject var service: ProfessionalsService
+
+    private let directories: [(String, String, String)] = [
+        ("Immobilier", "building.2.fill", "Professionnels de l’immobilier"),
+        ("Courtiers", "person.text.rectangle.fill", "Courtiers"),
+        ("Artisans", "hammer.fill", "Artisans"),
+        ("Diagnostiqueurs", "checkmark.seal.fill", "Diagnostiqueurs"),
+        ("Prestataires", "wrench.and.screwdriver.fill", "Prestataires de services")
+    ]
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(directories, id: \.0) { directory in
+                        NavigationLink {
+                            ProfessionalDirectoryListView(service: service, directoryType: directory.0, title: directory.2)
+                        } label: {
+                            Label(directory.2, systemImage: directory.1)
+                        }
+                    }
+                } header: {
+                    Text("Choisir un annuaire")
+                } footer: {
+                    Text("Chaque métier dispose de sa propre liste et de sa recherche.")
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle("Professionnels")
+            .task { await service.loadIfNeeded() }
+        }
+    }
+}
+
+private struct ProfessionalDirectoryListView: View {
+    @ObservedObject var service: ProfessionalsService
+    let directoryType: String
+    let title: String
     @State private var searchText = ""
-    @State private var selectedDirectoryType = "Tous"
-    private let directoryTypes = ["Tous", "Immobilier", "Courtiers", "Artisans et diagnostiqueurs", "Prestataires", "Importés"]
 
     private var filtered: [WixPublicProfessional] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         let matches = service.professionals.filter { professional in
             let matchesType: Bool
-            switch selectedDirectoryType {
+            let activity = (professional.resolvedActivity ?? "").lowercased()
+            let isDiagnostician = professional.importedCategory == "diagnostiqueur" ||
+                activity.contains("diagnostic") || activity.contains("diagnostiqueur")
+            switch directoryType {
             case "Immobilier":
                 matchesType = professional.importedCategory == "immobilier" ||
                     (professional.importedCategory == nil && !professional.isLocalProsProfile)
             case "Courtiers":
                 matchesType = professional.importedCategory == "courtier"
-            case "Artisans et diagnostiqueurs":
-                matchesType = professional.isLocalProsProfile ||
-                    ["artisan", "diagnostiqueur"].contains(professional.importedCategory ?? "")
+            case "Artisans":
+                matchesType = professional.importedCategory == "artisan" ||
+                    (professional.isLocalProsProfile && !isDiagnostician)
+            case "Diagnostiqueurs":
+                matchesType = isDiagnostician
             case "Prestataires":
                 matchesType = professional.isServiceProviderProfile || professional.importedCategory == "prestataire"
-            case "Importés":
-                matchesType = professional.importedID != nil
             default:
                 matchesType = true
             }
@@ -507,7 +545,7 @@ private struct NativeProfessionalsView: View {
             (professional.resolvedActivity ?? "").localizedCaseInsensitiveContains(query) ||
             (professional.description ?? "").localizedCaseInsensitiveContains(query)
         }
-        if selectedDirectoryType == "Prestataires" {
+        if directoryType == "Prestataires" {
             return matches.enumerated().sorted { left, right in
                 if left.element.importedID == nil && right.element.importedID != nil { return true }
                 if left.element.importedID != nil && right.element.importedID == nil { return false }
@@ -548,6 +586,9 @@ private struct NativeProfessionalsView: View {
                     ContentUnavailableView.search(text: searchText)
                 } else {
                     List {
+                        if service.isLoading {
+                            Section { ProgressView("Chargement des autres fiches…").font(.footnote) }
+                        }
                         if let warning = service.warningMessage {
                             Section {
                                 Label(warning, systemImage: "exclamationmark.triangle.fill")
@@ -573,22 +614,17 @@ private struct NativeProfessionalsView: View {
                     }
                 }
             }
-            .navigationTitle("Professionnels")
+            .navigationTitle(title)
             .searchable(text: $searchText, prompt: "Nom, métier, ville, code postal…")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Picker("Type de professionnel", selection: $selectedDirectoryType) {
-                            ForEach(directoryTypes, id: \.self) { Text($0).tag($0) }
-                        }
-                    } label: {
-                        Image(systemName: selectedDirectoryType == "Tous" ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+                    Button { Task { await service.reload() } } label: {
+                        Image(systemName: "arrow.clockwise")
                     }
-                    .accessibilityLabel("Filtrer les professionnels : \(selectedDirectoryType)")
+                    .accessibilityLabel("Actualiser l’annuaire")
                 }
             }
             .task { await service.loadIfNeeded() }
-        }
     }
 }
 
@@ -1317,6 +1353,7 @@ private struct ImportedListingContactForm: View {
 }
 
 private enum NativeCatalogSection: String, CaseIterable, Identifiable {
+    case hub = "Rubriques"
     case realEstate = "Immobilier"
     case buyerSearches = "Recherches"
     case classifiedAds = "Petites annonces"
@@ -1324,6 +1361,44 @@ private enum NativeCatalogSection: String, CaseIterable, Identifiable {
 }
 
 private struct NativeListingsView: View {
+    @ObservedObject var service: ListingsService
+    @ObservedObject var classifiedAds: ClassifiedAdsService
+    @ObservedObject var buyerSearches: PublicBuyerSearchesService
+    @ObservedObject var professionalsService: ProfessionalsService
+    @Binding var catalogSection: NativeCatalogSection
+
+    var body: some View {
+        Group {
+            if catalogSection == .hub {
+                NavigationStack {
+                    List {
+                        Section("Immobilier") {
+                            Button { catalogSection = .realEstate } label: {
+                                Label("Annonces immobilières", systemImage: "house.fill")
+                            }
+                            Button { catalogSection = .buyerSearches } label: {
+                                Label("Demandes de recherche", systemImage: "person.crop.circle.badge.magnifyingglass")
+                            }
+                        }
+                        Section("Petites annonces") {
+                            Button { catalogSection = .classifiedAds } label: {
+                                Label("Vendre, donner, échanger ou louer", systemImage: "tag.fill")
+                            }
+                        }
+                    }
+                    .navigationTitle("Annonces")
+                    .listStyle(.insetGrouped)
+                }
+            } else {
+                NativeCatalogContentView(service: service, classifiedAds: classifiedAds,
+                                         buyerSearches: buyerSearches, professionalsService: professionalsService,
+                                         catalogSection: $catalogSection)
+            }
+        }
+    }
+}
+
+private struct NativeCatalogContentView: View {
     @ObservedObject var service: ListingsService
     @ObservedObject var classifiedAds: ClassifiedAdsService
     @ObservedObject var buyerSearches: PublicBuyerSearchesService
@@ -1447,7 +1522,7 @@ private struct NativeListingsView: View {
              (ad.description ?? "").localizedCaseInsensitiveContains(query)) &&
             (classifiedCategory == "Toutes" || ad.category == classifiedCategory) &&
             (classifiedSubcategory == "Toutes" || ad.subcategory == classifiedSubcategory) &&
-            (classifiedListingType == "Tous" || ad.listingType == classifiedListingType) &&
+            (classifiedListingType == "Tous" || ad.canonicalListingType == classifiedListingType) &&
             (classifiedCondition == "Tous" || ad.condition == classifiedCondition) &&
             (city.isEmpty || (ad.city ?? "").localizedCaseInsensitiveContains(city)) &&
             (postal.isEmpty || (ad.postalCode ?? "").localizedCaseInsensitiveContains(postal)) &&
@@ -1577,16 +1652,6 @@ private struct NativeListingsView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section {
-                    Picker("Type d’annonce", selection: $catalogSection) {
-                        ForEach(NativeCatalogSection.allCases) { section in
-                            Text(section.rawValue).tag(section)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
-                }
-
                 if catalogSection == .realEstate {
                     Section {
                         HStack(spacing: 10) {
@@ -1680,6 +1745,9 @@ private struct NativeListingsView: View {
                                 .font(.footnote).foregroundStyle(.orange)
                             Button("Réessayer le chargement") { Task { await service.reload() } }
                         }
+                    }
+                    if service.isLoading && !service.listings.isEmpty {
+                        Section { ProgressView("Chargement des autres sources immobilières…").font(.footnote) }
                     }
                     if service.isLoading && service.listings.isEmpty {
                         Section { HStack { Spacer(); ProgressView("Chargement des biens…"); Spacer() } }
@@ -1808,7 +1876,7 @@ private struct NativeListingsView: View {
             .navigationDestination(for: ClassifiedAd.self) { ad in
                 NativeClassifiedAdDetailView(ad: ad)
             }
-            .navigationTitle("Annonces")
+            .navigationTitle(catalogSection.rawValue)
             .navigationBarTitleDisplayMode(.large)
             .searchable(text: $searchText, prompt: catalogSection == .realEstate ? "Ville, code postal, bien…" : catalogSection == .classifiedAds ? "Article, catégorie, ville…" : "Ville, type de bien, demande…")
             .sheet(isPresented: $showClassifiedFilters) {
@@ -1936,6 +2004,13 @@ private struct NativeListingsView: View {
                 if catalogSection == .realEstate { await service.loadIfNeeded() }
                 else if catalogSection == .classifiedAds { await classifiedAds.loadIfNeeded() }
                 else { await buyerSearches.loadIfNeeded() }
+            }
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { catalogSection = .hub } label: {
+                        Label("Rubriques", systemImage: "square.grid.2x2")
+                    }
+                }
             }
         }
     }
