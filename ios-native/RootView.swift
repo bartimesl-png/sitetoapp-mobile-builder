@@ -606,7 +606,14 @@ private struct ProfessionalDirectoryListView: View {
                     .refreshable { await service.reload() }
                     .navigationDestination(for: String.self) { id in
                         if let professional = service.professionals.first(where: { $0.id == id }) {
-                            ProfessionalDetailView(professional: professional)
+                            if let miniSiteURL = professional.miniSiteURL {
+                                InAppSafariView(url: miniSiteURL)
+                                    .ignoresSafeArea()
+                                    .navigationTitle(professional.directoryDisplayName)
+                                    .navigationBarTitleDisplayMode(.inline)
+                            } else {
+                                ProfessionalDetailView(professional: professional)
+                            }
                         }
                     }
                 }
@@ -799,7 +806,7 @@ private struct ProfessionalDetailView: View {
                     .presentationDragIndicator(.visible)
                 }
             }
-            if professional.isLocalProsProfile || professional.isServiceProviderProfile {
+            if professional.importedID == nil && professional.importedCategory != "courtier" {
                 Section("Coordonnées professionnelles") {
                     if let phone = professional.publicPhone,
                        let url = URL(string: "tel:\(phone.filter { $0.isNumber || $0 == "+" })") {
