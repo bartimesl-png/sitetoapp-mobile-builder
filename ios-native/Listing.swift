@@ -321,7 +321,7 @@ struct WixPublicProperty: Decodable {
         return result.filter { !$0.isEmpty && seen.insert($0).inserted }
     }
 
-    var listing: Listing {
+    func listing(id: String) -> Listing {
         Listing(
             id: "wix-private-\(id)",
             title: title,
