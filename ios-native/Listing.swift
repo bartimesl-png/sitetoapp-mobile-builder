@@ -128,6 +128,32 @@ struct WixPublicProfessionalsResponse: Decodable {
     let dataItems: [WixPublicProfessionalItem]
 }
 
+/// Wix CMS fields are not schema-enforced and some published profile records
+/// store boolean flags as strings (for example, "false"). Accept both forms
+/// so one legacy item cannot invalidate the entire professional directory.
+struct WixFlexibleBool: Decodable {
+    let value: Bool?
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let boolean = try? container.decode(Bool.self) {
+            value = boolean
+        } else if let string = try? container.decode(String.self) {
+            switch string.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+            case "true", "1", "yes", "oui": value = true
+            case "false", "0", "no", "non": value = false
+            default: value = nil
+            }
+        } else if let integer = try? container.decode(Int.self), integer == 0 || integer == 1 {
+            value = integer == 1
+        } else if let number = try? container.decode(Double.self), number == 0 || number == 1 {
+            value = number == 1
+        } else {
+            value = nil
+        }
+    }
+}
+
 struct WixRawDirectoryResponse: Decodable {
     let dataItems: [WixRawDirectoryItem]
 }
@@ -231,10 +257,10 @@ struct WixPublicProfessionalData: Decodable {
     let photo: String?
     let website: String?
     let memberId: String?
-    let isVisibleInDirectory: Bool?
-    let isActive: Bool?
+    let isVisibleInDirectory: WixFlexibleBool?
+    let isActive: WixFlexibleBool?
     let activityScore: Double?
-    let profileCompleted: Bool?
+    let profileCompleted: WixFlexibleBool?
     let mainPostalCode: String?
     let coveredPostalCodes: String?
     let secondaryPostalCodes: String?
@@ -259,7 +285,7 @@ struct WixPublicProfessionalData: Decodable {
             professionalEmail: email,
             publicPhone: phone,
             activityScore: activityScore,
-            profileCompleted: profileCompleted
+            profileCompleted: profileCompleted?.value
         )
     }
 }

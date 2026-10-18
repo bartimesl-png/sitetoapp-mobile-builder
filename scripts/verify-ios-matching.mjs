@@ -134,8 +134,10 @@ const publicProfessionalQuery = wixAuthStoreSource.slice(
   wixAuthStoreSource.indexOf("private func fetchVisibleProfessionalRecords"),
   wixAuthStoreSource.indexOf("func validAccessToken()"),
 );
-assert.ok(publicProfessionalQuery.includes("isVisibleInDirectory != false"),
-  "a Wix professional profile must stay visible unless the site explicitly hides it");
+assert.ok(publicProfessionalQuery.includes("isVisibleInDirectory?.value != false") &&
+  listingSource.includes("struct WixFlexibleBool: Decodable") &&
+  listingSource.includes('case "false", "0", "no", "non": value = false'),
+  "Wix professional visibility must decode both boolean and legacy string values without hiding unspecified profiles");
 const professionalOrdering = wixAuthStoreSource.slice(
   wixAuthStoreSource.indexOf("private func sortedRegisteredProfessionals"),
   wixAuthStoreSource.indexOf("private func profileQuality"),

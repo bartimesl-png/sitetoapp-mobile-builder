@@ -3013,7 +3013,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
             records.append(contentsOf: response.dataItems.filter {
                 // Match ProfessionnelsPage.tsx: only an explicit false hides a
                 // profile; old published records may not have either flag.
-                $0.data.isVisibleInDirectory != false &&
+                $0.data.isVisibleInDirectory?.value != false &&
                     !($0.data.firstName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) &&
                     !($0.data.lastName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) &&
                     (!($0.data.network?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) ||
