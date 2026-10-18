@@ -2798,7 +2798,7 @@ private struct HomeDashboardView: View {
                             Text("Foyer")
                                 .foregroundStyle(Color(red: 0.35, green: 0.91, blue: 0.62))
                         }
-                        .font(.system(size: 17, weight: .bold, desi…13959 tokens truncated…                      Task { await sendMessage() }
+                        .font(.system(size: 17, weight: .bold, design: .rounded))
                     } label: {
                         if isSending { ProgressView() }
                         else { Image(systemName: "arrow.up.circle.fill").font(.system(size: 34)) }
