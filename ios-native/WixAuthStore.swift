@@ -2095,7 +2095,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
 
     private func fetchImportedVehicleClassifiedAds(onPage: @escaping @MainActor ([ClassifiedAd]) -> Void = { _ in }) async throws -> [ClassifiedAd] {
         let endpoint = URL(string: "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/pf-imported-vehicle-listings-public")!
-        let pageSize = 50
+        let pageSize = 500
         var offset = 0
         var results: [ClassifiedAd] = []
         var seen = Set<String>()
@@ -2128,6 +2128,17 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
                 var attributes = item["attributes"] as? [String: Any] ?? [:]
                 for key in ["brand", "model", "year", "mileage", "energy", "gearbox", "bodyType", "engineCapacity", "fiscalPower", "powerHp", "doors", "seats", "color", "externalReference", "partType", "partReference", "oemReference", "compatibleMake", "compatibleModel", "compatibleYearFrom", "compatibleYearTo", "engineCode", "dimensions"] {
                     if let value = item[key], !(value is NSNull), String(describing: value).isEmpty == false { attributes[key] = value }
+                }
+                var imageCandidates = item["images"] as? [Any] ?? []
+                if let imageUrl = item["imageUrl"] { imageCandidates.insert(imageUrl, at: 0) }
+                var imageURLs: [URL] = []
+                for candidate in imageCandidates {
+                    guard let value = candidate as? String,
+                          let imageURL = URL(string: value),
+                          ["https", "http"].contains(imageURL.scheme?.lowercased() ?? ""),
+                          imageURL.user == nil, imageURL.password == nil,
+                          !imageURLs.contains(imageURL) else { continue }
+                    imageURLs.append(imageURL)
                 }
                 let noDescriptionConsent = attributes["noRepublishingConsent"] as? Bool == true
                 let description = noDescriptionConsent
@@ -2164,7 +2175,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
                     condition: nil,
                     city: city,
                     postalCode: postalCode,
-                    images: [],
+                    images: imageURLs,
                     externalURL: source,
                     isImported: true,
                     importedAttributesJSON: attributesJSON,
