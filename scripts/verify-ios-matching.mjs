@@ -111,6 +111,7 @@ assert.equal(calculateBuyerSearchScore({ ...savedSearch, singleStory: true }, {
 
 const matrix = await readFile(new URL("../ios-native/WIX_IOS_PARITY_MATRIX.md", import.meta.url), "utf8");
 const source = await readFile(new URL("../ios-native/RootView.swift", import.meta.url), "utf8");
+const listingSource = await readFile(new URL("../ios-native/Listing.swift", import.meta.url), "utf8");
 const listingsServiceSource = await readFile(new URL("../ios-native/ListingsService.swift", import.meta.url), "utf8");
 const wixAuthStoreSource = await readFile(new URL("../ios-native/WixAuthStore.swift", import.meta.url), "utf8");
 const favoritesSource = await readFile(new URL("../ios-native/FavoritesStore.swift", import.meta.url), "utf8");
@@ -135,8 +136,59 @@ const publicProfessionalQuery = wixAuthStoreSource.slice(
 );
 assert.ok(publicProfessionalQuery.includes("isVisibleInDirectory != false"),
   "a Wix professional profile must stay visible unless the site explicitly hides it");
+const professionalOrdering = wixAuthStoreSource.slice(
+  wixAuthStoreSource.indexOf("private func sortedRegisteredProfessionals"),
+  wixAuthStoreSource.indexOf("private func profileQuality"),
+);
+assert.ok(professionalOrdering.includes("leftScore > rightScore") &&
+  professionalOrdering.includes("Locale(identifier: \"fr_FR\")"),
+  "registered real-estate agents must retain Wix activity-score order and French name tie-breaks");
 assert.ok(!publicProfessionalQuery.includes('"isActive": ["$eq": true]') && !publicProfessionalQuery.includes("isActive == true"),
   "public registered professionals must not be dropped by an extra active-only gate");
+assert.ok(publicProfessionalQuery.includes('"activityScore"') &&
+  listingSource.includes("var directoryDisplayName: String") &&
+  listingSource.includes("var directoryOrganizationName: String?"),
+  "the registered agent directory must fetch Wix activity scores and retain both the agent's name and company");
+assert.ok(source.includes("professional.firstName ?? \"\"") &&
+  source.includes("professional.lastName ?? \"\"") &&
+  source.includes("professional.directoryDisplayName.localizedCaseInsensitiveContains(query)"),
+  "directory search must find a registered agent by personal name even when Wix companyName is the organization");
+const registeredProviderQuery = wixAuthStoreSource.slice(
+  wixAuthStoreSource.indexOf("private func fetchRegisteredServiceProviders"),
+  wixAuthStoreSource.indexOf("private func directoryPhoto"),
+);
+assert.ok(registeredProviderQuery.includes('"serviceproviders", "serviceproviders-1"') &&
+  registeredProviderQuery.includes('"status"])?.lowercased() == "active"') &&
+  registeredProviderQuery.includes('isServiceProviderProfile: true') &&
+  registeredProviderQuery.includes('2027-01-01T00:00:00+01:00') &&
+  registeredProviderQuery.includes('fetchAllowedPublicProviderAccess()') &&
+  registeredProviderQuery.includes('if access.freeAccess { return results }'),
+  "the native directory must load active registered service providers from both Wix collections");
+assert.ok(wixAuthStoreSource.includes('categories: ["prestataire"]') &&
+  wixAuthStoreSource.includes('categories: ["courtier"]') &&
+  wixAuthStoreSource.includes('"prestataire"') &&
+  wixAuthStoreSource.includes('"courtier", "prestataire", "immobilier"') &&
+  wixAuthStoreSource.includes('PublicProfessionalAccessResponse.self') &&
+  source.includes('case "Prestataires"') &&
+  source.includes('case "Artisans et diagnostiqueurs"'),
+  "the directory must expose imported providers and separate local-pro categories");
+const publicLocalProsAccess = wixAuthStoreSource.slice(
+  wixAuthStoreSource.indexOf("private func hasPublicLocalProfessionalAccess"),
+  wixAuthStoreSource.indexOf("private func fetchVisibleProfessionalRecords"),
+);
+assert.ok(publicLocalProsAccess.includes('2026-12-31T23:59:59+01:00') &&
+  publicLocalProsAccess.includes('if now < freeAccessEnds { return true }') &&
+  publicLocalProsAccess.includes('status == "active" || status == "trialing"'),
+  "registered artisans and diagnosticians must follow the directory's free-through-2026 and post-launch access rules");
+const localProsCategorySource = wixAuthStoreSource.slice(
+  wixAuthStoreSource.indexOf("private func localProfessionalCategory"),
+  wixAuthStoreSource.indexOf("private func fetchImportedLocalProfessionals"),
+);
+assert.ok(localProsCategorySource.includes('data["categories"] as? String') &&
+  localProsCategorySource.includes('JSONSerialization.jsonObject') &&
+  localProsCategorySource.includes('normalized.contains("diagnost")') &&
+  wixAuthStoreSource.includes('importedCategory: category.directoryCategory'),
+  "local Wix profiles must be classified from the serialized CMS categories.mainCategory field");
 const publicBuyerSearchQuery = wixAuthStoreSource.slice(
   wixAuthStoreSource.indexOf("func fetchPublicBuyerSearches"),
   wixAuthStoreSource.indexOf("private func fetchImportedVehicleClassifiedAds"),
@@ -148,6 +200,8 @@ assert.ok(publicBuyerSearchQuery.includes('"dataCollectionId": "particularbuyers
 assert.ok(source.includes('"brand": "Marque"') && source.includes('"catalog version": "Version du catalogue"') &&
   source.includes('!lower.hasPrefix("external")') && source.includes('!lower.hasSuffix("url")'),
   "classified attribute filters must use French labels and omit technical source metadata");
+assert.ok(source.includes('"Version du catalogue"') && source.includes('Autre caractéristique'),
+  "dynamic small-ad filters must not fall back to raw English CMS field names");
 for (const adType of ['Text("Je vends").tag("sell")', 'Text("Je donne").tag("give")',
   'Text("J’échange").tag("exchange")', 'Text("Je loue").tag("rent")']) {
   assert.ok(source.includes(adType), `small-ad filters must expose ${adType}`);
@@ -189,5 +243,20 @@ assert.ok(source.includes("expectedDashboardRole.dashboardURL.path"),
   "legacy role login must only hand off after the selected role dashboard route is reached");
 assert.ok(source.includes("configuration.websiteDataStore = .default()"),
   "role dashboards and login flows must share persistent website cookies");
+const homeDashboard = source.slice(source.indexOf("private struct HomeDashboardView"), source.indexOf("private struct NativeEstimationRequestView"));
+assert.ok(homeDashboard.includes('homeActionCard("Professionnels"') &&
+  homeDashboard.includes('selectedTab = 3') &&
+  source.includes('.tabItem { Label("Professionnels", systemImage: "person.2") }'),
+  "the Home professional shortcut and persistent tab must open the same directory");
+assert.ok(homeDashboard.includes('LazyVGrid(columns:') &&
+  homeDashboard.includes('homeActionCard("Petites annonces"') &&
+  homeDashboard.includes('subtitle: "Vendre, donner, échanger, louer"'),
+  "the Home dashboard must group its destinations and make the small-ad actions discoverable");
+assert.ok(homeDashboard.includes('matchingStep("Mise en relation"'),
+  "the matching explanation must not repeat the directory card's professional wording");
+assert.ok(wixAuthStoreSource.includes('sortedRegisteredProfessionals(registered)') &&
+  wixAuthStoreSource.includes('            brokers,\n            registeredLocalPros,\n            registeredProviders') &&
+  wixAuthStoreSource.includes('let importedGroups = [realEstateImported, importedBrokers, localImported, importedProviders]'),
+  "professional de-duplication and source order must preserve Wix's separate registered directories before imports");
 
 console.log("Matching rules and parity inventory checks passed.");

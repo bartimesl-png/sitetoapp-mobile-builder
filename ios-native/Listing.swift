@@ -137,6 +137,11 @@ struct WixRawDirectoryItem: Decodable {
     let data: [String: AnyCodableValue]
 }
 
+struct PublicProfessionalAccessResponse: Decodable {
+    let freeAccess: Bool?
+    let allowedProfileIds: [String]?
+}
+
 struct WixPublicBuyerSearch: Identifiable, Hashable {
     let id: String
     let searchName: String?
@@ -283,6 +288,8 @@ struct WixPublicProfessional: Identifiable {
     var dedupeEmail: String? = nil
     var dedupePhone: String? = nil
     var isLocalProsProfile: Bool = false
+    var isServiceProviderProfile: Bool = false
+    var isDirectoryFeatured: Bool = false
 
     var resolvedName: String {
         let company = companyName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -291,6 +298,19 @@ struct WixPublicProfessional: Identifiable {
             .filter { !$0.isEmpty }
             .joined(separator: " ")
         return person.isEmpty ? "Professionnel immobilier" : person
+    }
+    var directoryDisplayName: String {
+        let person = [firstName, lastName]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        return person.isEmpty ? resolvedName : person
+    }
+    var directoryOrganizationName: String? {
+        guard let company = companyName?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !company.isEmpty,
+              company.localizedCaseInsensitiveCompare(directoryDisplayName) != .orderedSame else { return nil }
+        return company
     }
     var resolvedActivity: String? {
         [businessSector, network]

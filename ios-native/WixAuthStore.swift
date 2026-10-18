@@ -1607,7 +1607,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
 
     @discardableResult
     func contactImportedProfessional(id: String, category: String, senderName: String, senderEmail: String, senderPhone: String, message: String, listingID: String? = nil, pageUrl: String? = nil) async throws -> Bool {
-        guard ["artisan", "diagnostiqueur", "immobilier"].contains(category), !id.isEmpty else {
+        guard ["artisan", "diagnostiqueur", "courtier", "prestataire", "immobilier"].contains(category), !id.isEmpty else {
             throw AuthError.api("Cette fiche professionnelle ne peut pas recevoir de demande.")
         }
         let endpoint = URL(string: "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/pf-imported-professional-contact")!
@@ -2230,34 +2230,64 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         var warnings: [String] = []
         // Load independent feeds together while preserving the visible order.
         async let registeredLocalTask = fetchRegisteredLocalProsProfiles(accessToken: visitor.accessToken)
+        async let registeredProvidersTask = fetchRegisteredServiceProviders(accessToken: visitor.accessToken)
         async let localImportedTask = fetchImportedLocalProfessionals()
+        async let importedProvidersTask = fetchImportedLocalProfessionals(categories: ["prestataire"])
+        async let importedBrokersTask = fetchImportedLocalProfessionals(categories: ["courtier"])
         async let brokersTask = fetchPublicBrokers(accessToken: visitor.accessToken)
         async let realEstateImportedTask = fetchImportedRealEstateProfessionals()
         let registeredLocalPros: [WixPublicProfessional]
         do { registeredLocalPros = try await registeredLocalTask }
         catch { registeredLocalPros = []; warnings.append("les fiches locales inscrites") }
-        let localImported: [WixPublicProfessional]
-        do { localImported = try await localImportedTask }
-        catch { localImported = []; warnings.append("les artisans et diagnostiqueurs importés") }
+        let registeredProviders: [WixPublicProfessional]
+        do { registeredProviders = try await registeredProvidersTask }
+        catch { registeredProviders = []; warnings.append("les prestataires inscrits") }
         let brokers: [WixPublicProfessional]
         do { brokers = try await brokersTask }
         catch { brokers = []; warnings.append("l’annuaire des courtiers") }
+        // Wix exposes these as separate directories. De-duplicate within each
+        // collection family only; the same e-mail can legitimately own an
+        // immobilier profile and a broker, artisan, or service-provider profile.
+        let registeredGroups = [
+            sortedRegisteredProfessionals(registered),
+            brokers,
+            registeredLocalPros,
+            registeredProviders
+        ]
+        let allRegistered = registeredGroups.flatMap { $0 }
+        let orderedRegistered = allRegistered
+        onPartialUpdate(orderedRegistered, nil)
+        let localImported: [WixPublicProfessional]
+        do { localImported = try await localImportedTask }
+        catch { localImported = []; warnings.append("les artisans et diagnostiqueurs importés") }
+        let importedBrokers: [WixPublicProfessional]
+        do { importedBrokers = try await importedBrokersTask }
+        catch { importedBrokers = []; warnings.append("les courtiers importés") }
+        let importedProviders: [WixPublicProfessional]
+        do { importedProviders = try await importedProvidersTask }
+        catch { importedProviders = []; warnings.append("les prestataires importés") }
         let realEstateImported: [WixPublicProfessional]
         do { realEstateImported = try await realEstateImportedTask }
         catch { realEstateImported = []; warnings.append("les professionnels immobiliers importés") }
-        let allRegistered = registered + registeredLocalPros + brokers
-        let orderedRegistered = sortedRegisteredProfessionals(allRegistered)
-        onPartialUpdate(orderedRegistered, nil)
-        var seen = Set(orderedRegistered.map { normalizedProfessionalKey($0.resolvedName, $0.postalCode) })
-        let registeredContacts = Set(allRegistered.flatMap { [$0.professionalEmail, $0.publicPhone] }
-            .compactMap { $0 }.map(normalizedContactKey).filter { !$0.isEmpty })
-        let imported = localImported + realEstateImported
-        let professionals = orderedRegistered + imported.filter {
-            let contacts = [$0.dedupeEmail, $0.dedupePhone].compactMap { $0 }
-                .map(normalizedContactKey).filter { !$0.isEmpty }
-            return contacts.allSatisfy { !registeredContacts.contains($0) } &&
-                seen.insert(normalizedProfessionalKey($0.resolvedName, $0.postalCode)).inserted
+        let importedGroups = [realEstateImported, importedBrokers, localImported, importedProviders]
+        var visibleImported: [WixPublicProfessional] = []
+        for group in importedGroups {
+            let categories = Set(group.compactMap(\.importedCategory))
+            let categoryRegistered = registeredGroups.flatMap { $0 }.filter {
+                let category = $0.importedCategory ?? "immobilier"
+                return categories.contains(category)
+            }
+            let registeredContacts = Set(categoryRegistered.flatMap { [$0.professionalEmail, $0.publicPhone] }
+                .compactMap { $0 }.map(normalizedContactKey).filter { !$0.isEmpty })
+            var seen = Set(categoryRegistered.map { normalizedProfessionalKey($0.resolvedName, $0.postalCode) })
+            visibleImported.append(contentsOf: group.filter { professional in
+                let contacts = [professional.dedupeEmail, professional.dedupePhone].compactMap { $0 }
+                    .map(normalizedContactKey).filter { !$0.isEmpty }
+                return contacts.allSatisfy { !registeredContacts.contains($0) } &&
+                    seen.insert(normalizedProfessionalKey(professional.resolvedName, professional.postalCode)).inserted
+            })
         }
+        let professionals = orderedRegistered + visibleImported
         let warning = warnings.isEmpty ? nil : "Annuaire partiellement chargé : " + warnings.joined(separator: ", ") + ". Réessayez pour actualiser les fiches manquantes."
         return ProfessionalDirectoryResult(professionals: professionals, warning: warning)
     }
@@ -2639,12 +2669,141 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         return listings
     }
 
-    private func fetchImportedLocalProfessionals() async throws -> [WixPublicProfessional] {
+    private func fetchRegisteredServiceProviders(accessToken: String) async throws -> [WixPublicProfessional] {
+        let collections = ["serviceproviders", "serviceproviders-1"]
+        let fields = [
+            "accountId", "businessName", "companyName", "name", "category", "subcategory",
+            "description", "services", "city", "postalCode", "phone", "email", "website",
+            "photo", "photoUrl", "photoUrls", "logo", "companyLogo", "status", "featured"
+        ]
+        var results: [WixPublicProfessional] = []
+        var seenAccounts = Set<String>()
+        var seenIDs = Set<String>()
+
+        for collection in collections {
+            var offset = 0
+            let pageSize = 100
+            while true {
+                let response = try await post(
+                    "https://www.wixapis.com/wix-data/v2/items/query",
+                    bearer: accessToken,
+                    body: [
+                        "dataCollectionId": collection,
+                        "query": [
+                            "paging": ["limit": pageSize, "offset": offset],
+                            "fields": fields
+                        ]
+                    ],
+                    as: WixRawDirectoryResponse.self
+                )
+                results.append(contentsOf: response.dataItems.compactMap { item in
+                    let data = item.data.mapValues(\.value)
+                    guard importedString(data, ["status"])?.lowercased() == "active" else { return nil }
+                    guard !seenIDs.contains(item.id) else { return nil }
+                    let accountKey = importedString(data, ["accountId"])?.lowercased()
+                    if let accountKey, seenAccounts.contains(accountKey) { return nil }
+                    let name = importedString(data, ["businessName", "companyName", "name"]) ?? "Prestataire référencé"
+                    seenIDs.insert(item.id)
+                    if let accountKey { seenAccounts.insert(accountKey) }
+                    let services = directoryText(data, "services")
+                    let category = importedString(data, ["category", "subcategory"]) ?? "Service du quotidien"
+                    let photo = directoryPhoto(data, ["photoUrls", "photo", "photoUrl", "companyLogo", "logo"])
+                    return WixPublicProfessional(
+                        id: "serviceprovider-\(collection)-\(item.id)",
+                        cmsProfileID: item.id,
+                        companyName: name,
+                        firstName: importedString(data, ["contactName"]),
+                        lastName: nil,
+                        network: category,
+                        city: importedString(data, ["city"]),
+                        postalCode: importedString(data, ["postalCode", "postal_code"]),
+                        businessSector: services ?? category,
+                        description: importedString(data, ["description"]),
+                        logo: photo,
+                        website: importedString(data, ["website"]),
+                        importedCategory: "prestataire",
+                        professionalEmail: importedString(data, ["email"]),
+                        publicPhone: importedString(data, ["phone", "phoneNumber"]),
+                        isDirectoryFeatured: data["featured"] as? Bool == true,
+                        isServiceProviderProfile: true
+                    )
+                })
+                guard response.dataItems.count == pageSize else { break }
+                let nextOffset = offset + response.dataItems.count
+                guard nextOffset > offset else { break }
+                offset = nextOffset
+            }
+        }
+        let freeAccessEnds = ISO8601DateFormatter().date(from: "2027-01-01T00:00:00+01:00")!
+        guard Date() >= freeAccessEnds else { return results }
+        let access = try await fetchAllowedPublicProviderAccess()
+        if access.freeAccess { return results }
+        return results.filter { professional in
+            guard let profileID = professional.cmsProfileID else { return false }
+            return access.allowedProfileIDs.contains(profileID)
+        }
+    }
+
+    private func fetchAllowedPublicProviderAccess() async throws -> (freeAccess: Bool, allowedProfileIDs: Set<String>) {
+        var components = URLComponents(string: "https://www.partenairefoyer.com/api/public-professional-access")!
+        components.queryItems = [URLQueryItem(name: "type", value: "service_provider")]
+        var request = URLRequest(url: components.url!, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+        let payload = try JSONDecoder().decode(PublicProfessionalAccessResponse.self, from: data)
+        let allowedIDs = Set((payload.allowedProfileIds ?? []).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })
+        return (payload.freeAccess == true, allowedIDs)
+    }
+
+    private func directoryPhoto(_ data: [String: Any], _ keys: [String]) -> String? {
+        for key in keys {
+            if let value = data[key] as? String, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return value.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            if let values = data[key] as? [String], let first = values.first(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+                return first.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+        return nil
+    }
+
+    private func directoryText(_ data: [String: Any], _ key: String) -> String? {
+        if let value = data[key] as? String {
+            let parts = value.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+            return parts.isEmpty ? nil : parts.joined(separator: ", ")
+        }
+        if let values = data[key] as? [String] {
+            let parts = values.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+            return parts.isEmpty ? nil : parts.joined(separator: ", ")
+        }
+        return nil
+    }
+
+    private func localProfessionalCategory(_ data: [String: Any]) -> (directoryCategory: String, label: String)? {
+        var categoryRecords: [[String: Any]] = []
+        if let records = data["categories"] as? [[String: Any]] {
+            categoryRecords = records
+        } else if let encoded = data["categories"] as? String,
+                  let encodedData = encoded.data(using: .utf8),
+                  let decoded = try? JSONSerialization.jsonObject(with: encodedData) as? [[String: Any]] {
+            categoryRecords = decoded
+        }
+        let mainCategory = categoryRecords.lazy.compactMap { importedString($0, ["mainCategory", "category"]) }.first
+        let rawCategory = mainCategory ?? importedString(data, ["professionalType", "category"]) ?? "Professionnel"
+        let normalized = rawCategory.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "fr_FR"))
+        let directoryCategory = normalized.contains("diagnost") ? "diagnostiqueur" : "artisan"
+        return (directoryCategory, rawCategory)
+    }
+
+    private func fetchImportedLocalProfessionals(categories: [String] = ["artisan", "diagnostiqueur"]) async throws -> [WixPublicProfessional] {
         let endpoint = URL(string: "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/pf-imported-local-pros-public")!
         var results: [WixPublicProfessional] = []
         let pageSize = 250
 
-        for category in ["artisan", "diagnostiqueur"] {
+        for category in categories {
             var offset = 0
             while true {
                 var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)!
@@ -2774,7 +2933,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
 
     private func fetchRegisteredLocalProsProfiles(accessToken: String) async throws -> [WixPublicProfessional] {
         let endpoint = "https://www.wixapis.com/wix-data/v2/items/query"
-        let fields = ["companyName", "contactName", "email", "phoneNumber", "city", "postalCode", "category", "categories", "description", "photo", "logo", "website", "professionalType", "isRGE", "isActive", "isVisiblePublicly", "isProfileComplete", "hasActiveSubscription", "subscriptionStatus"]
+        let fields = ["companyName", "contactName", "email", "phoneNumber", "city", "postalCode", "category", "categories", "description", "photo", "logo", "website", "professionalType", "isRGE", "isActive", "isVisiblePublicly", "hasActiveSubscription", "subscriptionStatus"]
         var offset = 0
         var results: [WixPublicProfessional] = []
         let pageSize = 100
@@ -2788,33 +2947,23 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
                 ]],
                 as: WixRawDirectoryResponse.self
             )
-            let now = Date()
-            // Keep the website's Paris-time boundary: free through 31 Dec 2026,
-            // with the paid/trial rules starting at 00:00 on 1 Jan 2027.
-            let freeAccessEnd = ISO8601DateFormatter().date(from: "2027-01-01T00:00:00+01:00")!
             results.append(contentsOf: response.dataItems.compactMap { item in
                 let data = item.data.mapValues(\.value)
                 guard data["isActive"] as? Bool == true,
                       data["isVisiblePublicly"] as? Bool == true,
                       let company = importedString(data, ["companyName"]), !company.isEmpty,
                       let contactName = importedString(data, ["contactName"]), !contactName.isEmpty,
-                      let email = importedString(data, ["email"]), email.contains("@"),
-                      let phone = importedString(data, ["phoneNumber"]), phone.filter(\.isNumber).count >= 8 else { return nil }
-                if now >= freeAccessEnd {
-                    let status = importedString(data, ["subscriptionStatus"])?.lowercased()
-                    guard data["hasActiveSubscription"] as? Bool == true || status == "active" || status == "trialing" else { return nil }
-                }
-                let activity = importedString(data, ["category", "professionalType"]) ?? "Professionnel"
-                let profileType = (importedString(data, ["professionalType"]) ?? activity)
-                    .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "fr_FR"))
-                let favoriteCategory = profileType.contains("diagnost") ? "diagnostiqueur" : "artisan"
+                      let email = importedString(data, ["email"]), !email.isEmpty,
+                      let phone = importedString(data, ["phoneNumber"]), !phone.isEmpty,
+                      hasPublicLocalProfessionalAccess(data) else { return nil }
+                let category = localProfessionalCategory(data) ?? (directoryCategory: "artisan", label: "Artisan")
                 return WixPublicProfessional(
                     id: "prosprofile-\(item.id)", cmsProfileID: item.id, companyName: company, firstName: contactName,
-                    lastName: nil, network: activity, city: importedString(data, ["city"]),
-                    postalCode: importedString(data, ["postalCode"]), businessSector: activity,
+                    lastName: nil, network: category.label, city: importedString(data, ["city"]),
+                    postalCode: importedString(data, ["postalCode"]), businessSector: category.label,
                     description: importedString(data, ["description"]),
                     logo: importedString(data, ["logo", "photo"]), website: importedString(data, ["website"]),
-                    importedCategory: favoriteCategory,
+                    importedCategory: category.directoryCategory,
                     professionalEmail: email, publicPhone: phone, isLocalProsProfile: true
                 )
             })
@@ -2824,6 +2973,13 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
             offset = nextOffset
         }
         return results
+    }
+
+    private func hasPublicLocalProfessionalAccess(_ data: [String: Any], now: Date = Date()) -> Bool {
+        let freeAccessEnds = ISO8601DateFormatter().date(from: "2026-12-31T23:59:59+01:00")!
+        if now < freeAccessEnds { return true }
+        let status = importedString(data, ["subscriptionStatus"])?.lowercased()
+        return data["hasActiveSubscription"] as? Bool == true || status == "active" || status == "trialing"
     }
 
     private func fetchVisibleProfessionalRecords(accessToken: String) async throws -> [WixPublicProfessionalItem] {
