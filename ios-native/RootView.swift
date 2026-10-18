@@ -6164,16 +6164,19 @@ private struct NativeSeasonalCalendarEditor: View {
                         let dayNumber = Calendar.current.component(.day, from: date)
                         let reserved = isReserved(key)
                         let selected = selectedDates.contains(key)
+                        let foregroundColor: Color = reserved ? Color.secondary : (selected ? Color.white : Color.primary)
+                        let backgroundColor: Color = selected ? Color.teal : statusColor(key)
+                        let borderColor: Color = reserved ? Color.blue.opacity(0.65) : Color.clear
                         Button {
                             guard !reserved else { return }
                             if selected { selectedDates.remove(key) } else { selectedDates.insert(key) }
                         } label: {
-                            Text("\(dayNumber)")
+                            Text(dayNumber.formatted())
                                 .font(.subheadline.weight(.medium))
                                 .frame(maxWidth: .infinity, minHeight: 38)
-                                .foregroundStyle(reserved ? .secondary : selected ? .white : .primary)
-                                .background(selected ? Color.teal : statusColor(key), in: RoundedRectangle(cornerRadius: 9))
-                                .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(reserved ? Color.blue.opacity(0.65) : Color.clear, lineWidth: 1.5))
+                                .foregroundStyle(foregroundColor)
+                                .background(backgroundColor, in: RoundedRectangle(cornerRadius: 9))
+                                .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(borderColor, lineWidth: 1.5))
                         }
                         .buttonStyle(.plain)
                         .disabled(reserved)
