@@ -115,7 +115,7 @@ workflows:
 
 
   # ============================================================
-  # WORKFLOW iOS NATIF PARTENAIREFOYER
+  # WORKFLOW iOS NATIF PARTENAIREFOYER — build avec compilation Swift incrémentale
   # ============================================================
 
   partenairefoyer-ios-native:
