@@ -173,6 +173,7 @@ workflows:
             --project "$CM_BUILD_DIR/$XCODE_PROJECT" \
             --scheme "$XCODE_SCHEME" \
             --archive-flags="-jobs 1" \
+            --archive-xcargs="SWIFT_ENABLE_EXPLICIT_MODULES=NO" \
             --disable-xcpretty \
             --verbose 2>&1 | tee /tmp/partenairefoyer-xcode-build.log
           BUILD_STATUS=${PIPESTATUS[0]}
