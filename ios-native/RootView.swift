@@ -3843,8 +3843,8 @@ private struct NativePrivatePropertyForm: View {
                 title: title, description: description, propertyType: propertyType,
                 transactionType: transactionType, price: number(price), surface: number(surface),
                 landSurface: optionalNumber(landSurface), rooms: rooms, bedrooms: bedrooms,
-                bathrooms: bathrooms, city: city, postalCode: postalCode,
-                hasGarage: hasGarage, hasSwimmingPool: hasSwimmingPool, hasAnnex: hasAnnex,
+                bathrooms: bathrooms, hasGarage: hasGarage, hasSwimmingPool: hasSwimmingPool,
+                hasAnnex: hasAnnex, city: city, postalCode: postalCode,
                 latitude: coordinates?.latitude, longitude: coordinates?.longitude, photos: imageURLs,
                 publishImmediately: publishImmediately
             )
