@@ -587,6 +587,20 @@ struct ClassifiedAd: Identifiable, Hashable {
 
     var catalogOrderDate: String { bumpedAt ?? createdAt ?? "" }
 
+    var canonicalListingType: String? {
+        guard let listingType else { return nil }
+        let normalized = listingType.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "fr_FR"))
+        switch normalized {
+        case "sell", "sale", "vente", "a vendre", "vendre": return "sell"
+        case "give", "don", "donner", "a donner": return "give"
+        case "exchange", "echange", "echanger", "a echanger": return "exchange"
+        case "rent", "rental", "location", "louer", "a louer": return "rent"
+        default: return nil
+        }
+    }
+
     var wixDetailURL: URL? {
         guard !isImported,
               id.hasPrefix("wix-classified-") else { return nil }
@@ -602,7 +616,7 @@ struct ClassifiedAd: Identifiable, Hashable {
     }
 
     var listingTypeLabel: String? {
-        switch listingType {
+        switch canonicalListingType {
         case "sell": return "À vendre"
         case "give": return "À donner"
         case "exchange": return "À échanger"
@@ -612,7 +626,7 @@ struct ClassifiedAd: Identifiable, Hashable {
     }
 
     var formattedPrice: String {
-        switch listingType {
+        switch canonicalListingType {
         case "give": return "Gratuit"
         case "exchange": return "Échange"
         case "rent":
