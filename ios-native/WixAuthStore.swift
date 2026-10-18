@@ -1635,7 +1635,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         archiveRequest.httpMethod = "POST"
         archiveRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         archiveRequest.setValue("application/json", forHTTPHeaderField: "Accept")
-        archiveRequest.httpBody = try JSONSerialization.data(withJSONObject: [
+        guard let archiveBody = try? JSONSerialization.data(withJSONObject: [
             "action": "create",
             "requestId": requestID,
             "propertyId": cleanID,
@@ -1644,7 +1644,8 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
             "senderEmail": cleanEmail,
             "senderPhone": phone.trimmingCharacters(in: .whitespacesAndNewlines),
             "message": cleanMessage,
-        ])
+        ]) else { return false }
+        archiveRequest.httpBody = archiveBody
         do {
             let (archiveData, archiveResponse) = try await URLSession.shared.data(for: archiveRequest)
             guard let archiveHTTP = archiveResponse as? HTTPURLResponse else { return false }
@@ -1937,7 +1938,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
 
         return properties
             .filter { $0.data.isPublic == true && $0.data.status == "active" }
-            .map(\.listing)
+            .map { $0.data.listing(id: $0.id) }
     }
 
     func fetchPublicProfessionals() async throws -> ProfessionalDirectoryResult {
