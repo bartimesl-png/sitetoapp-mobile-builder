@@ -131,13 +131,13 @@ workflows:
 
     max_build_duration: 120
 
-    instance_type: mac_mini_m4
+    instance_type: mac_mini_m2
 
     integrations:
       app_store_connect: partenairefoyer_app_store_connect
 
     environment:
-      xcode: latest
+      xcode: 26.5
       groups:
         - firebase_ios
 
