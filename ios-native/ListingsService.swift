@@ -9,6 +9,18 @@ final class ListingsService: ObservableObject {
     @Published private(set) var warningMessage: String?
     @Published private(set) var hasLoaded = false
 
+    private enum Source {
+        case imported
+        case privateOwner
+        case professional
+    }
+
+    private var importedSource: [Listing]?
+    private var privateOwnerSource: [Listing]?
+    private var professionalSource: [Listing]?
+    private var pendingSources = 0
+    private var sourceFailures: [String] = []
+
     private let endpoint = URL(string: "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/pf-imported-real-estate-listings-public")!
 
     func loadIfNeeded() async {
@@ -23,45 +35,61 @@ final class ListingsService: ObservableObject {
         warningMessage = nil
         defer { isLoading = false }
 
-        var successfulSources = 0
-        var failures: [String] = []
+        pendingSources = 3
+        sourceFailures = []
 
-        // Start the three independent catalogue sources together so the screen
-        // does not make visitors wait for each network request in sequence.
-        let importedTask = Task { try await loadImportedListings() }
-        let privateTask = Task { try await WixAuthStore.shared.fetchPublicPrivateListings() }
-        let professionalTask = Task { try await WixAuthStore.shared.fetchPublicProfessionalListings() }
+        // Each source publishes as soon as it completes. A slow import cannot
+        // keep the Wix property catalogue hidden behind an empty loading screen.
+        let importedTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do { self.finish(.imported, items: try await self.loadImportedListings(), failure: nil) }
+            catch { self.finish(.imported, items: nil, failure: "les annonces importées") }
+        }
+        let privateTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do { self.finish(.privateOwner, items: try await WixAuthStore.shared.fetchPublicPrivateListings(), failure: nil) }
+            catch { self.finish(.privateOwner, items: nil, failure: "les biens de particuliers") }
+        }
+        let professionalTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do { self.finish(.professional, items: try await WixAuthStore.shared.fetchPublicProfessionalListings(), failure: nil) }
+            catch { self.finish(.professional, items: nil, failure: "les biens de professionnels") }
+        }
+        await importedTask.value
+        await privateTask.value
+        await professionalTask.value
+    }
 
-        let imported: [Listing]
-        do { imported = try await importedTask.value; successfulSources += 1 }
-        catch { imported = []; failures.append("les annonces importées") }
-        let privateListings: [Listing]
-        do { privateListings = try await privateTask.value; successfulSources += 1 }
-        catch { privateListings = []; failures.append("les biens de particuliers") }
-        let professionalListings: [Listing]
-        do { professionalListings = try await professionalTask.value; successfulSources += 1 }
-        catch { professionalListings = []; failures.append("les biens de professionnels") }
+    private func finish(_ source: Source, items: [Listing]?, failure: String?) {
+        pendingSources = max(0, pendingSources - 1)
+        if let items {
+            switch source {
+            case .imported: importedSource = items
+            case .privateOwner: privateOwnerSource = items
+            case .professional: professionalSource = items
+            }
+        } else if let failure, !sourceFailures.contains(failure) {
+            sourceFailures.append(failure)
+        }
 
-        guard successfulSources > 0 else {
+        var seen = Set<String>()
+        listings = ListingCatalogOrdering.ordered(
+            (importedSource ?? []) + (privateOwnerSource ?? []) + (professionalSource ?? [])
+        ).filter { seen.insert($0.id).inserted }
+
+        let successfulSources = [importedSource, privateOwnerSource, professionalSource].compactMap { $0 }.count
+        if successfulSources > 0 {
+            hasLoaded = true
+            warningMessage = sourceFailures.isEmpty
+                ? nil
+                : "Certaines sources sont indisponibles : \(sourceFailures.joined(separator: ", "))."
+        } else if pendingSources == 0 {
             if listings.isEmpty {
                 errorMessage = "Les annonces ne sont pas disponibles pour le moment. Réessayez dans quelques instants."
             } else {
                 warningMessage = "Actualisation impossible. Les biens déjà chargés restent affichés."
             }
-            return
         }
-
-        var seen = Set<String>()
-        listings = (imported + privateListings + professionalListings)
-            .filter { seen.insert($0.id).inserted }
-            .sorted {
-                if $0.sortDateKey == $1.sortDateKey { return $0.id < $1.id }
-                return $0.sortDateKey > $1.sortDateKey
-            }
-        if !failures.isEmpty {
-            warningMessage = "Certaines sources sont indisponibles : \(failures.joined(separator: ", "))."
-        }
-        hasLoaded = true
     }
 
     private func loadImportedListings() async throws -> [Listing] {
@@ -90,6 +118,54 @@ final class ListingsService: ObservableObject {
             if page.items.count < limit || (page.total.map { offset >= $0 } ?? false) { break }
         }
         return allItems
+    }
+}
+
+/// Native equivalent of the website's property promotion cycle.
+private enum ListingCatalogOrdering {
+    static func ordered(_ listings: [Listing], now: Date = Date()) -> [Listing] {
+        listings.sorted { left, right in
+            let leftCreated = left.catalogCreatedDate
+            let rightCreated = right.catalogCreatedDate
+            let leftAge = leftCreated.map { now.timeIntervalSince($0) / 86_400 }
+            let rightAge = rightCreated.map { now.timeIntervalSince($0) / 86_400 }
+            let leftIsNew = leftAge.map { $0 < 2 } ?? false
+            let rightIsNew = rightAge.map { $0 < 2 } ?? false
+            let leftCreatedTime = leftCreated?.timeIntervalSince1970 ?? 0
+            let rightCreatedTime = rightCreated?.timeIntervalSince1970 ?? 0
+
+            if leftIsNew != rightIsNew { return leftIsNew }
+            if leftIsNew {
+                if leftCreatedTime != rightCreatedTime { return leftCreatedTime > rightCreatedTime }
+                return left.id < right.id
+            }
+
+            let leftDrop = left.catalogPriceDropDate
+            let rightDrop = right.catalogPriceDropDate
+            let leftHasRecentDrop = leftAge != nil && leftDrop.map { now.timeIntervalSince($0) / 86_400 < 2 } == true
+            let rightHasRecentDrop = rightAge != nil && rightDrop.map { now.timeIntervalSince($0) / 86_400 < 2 } == true
+            if leftHasRecentDrop != rightHasRecentDrop { return leftHasRecentDrop }
+            if leftHasRecentDrop, rightHasRecentDrop {
+                let leftDropTime = leftDrop?.timeIntervalSince1970 ?? 0
+                let rightDropTime = rightDrop?.timeIntervalSince1970 ?? 0
+                if leftDropTime != rightDropTime { return leftDropTime > rightDropTime }
+                if leftCreatedTime != rightCreatedTime { return leftCreatedTime > rightCreatedTime }
+                return left.id < right.id
+            }
+
+            let leftPromotionTime = promotionTime(created: leftCreated, ageDays: leftAge)
+            let rightPromotionTime = promotionTime(created: rightCreated, ageDays: rightAge)
+            if leftPromotionTime != rightPromotionTime { return leftPromotionTime > rightPromotionTime }
+            if leftCreatedTime != rightCreatedTime { return leftCreatedTime > rightCreatedTime }
+            return left.id < right.id
+        }
+    }
+
+    private static func promotionTime(created: Date?, ageDays: Double?) -> TimeInterval {
+        guard let created, let ageDays, ageDays >= 2 else { return 0 }
+        let cycle = floor(ageDays / 7)
+        let promoted = Calendar.current.date(byAdding: .day, value: Int(cycle) * 7, to: created) ?? created
+        return promoted.timeIntervalSince1970
     }
 }
 
@@ -281,10 +357,12 @@ final class ProfessionalsService: ObservableObject {
         warningMessage = nil
         defer { isLoading = false }
         do {
-            let result = try await WixAuthStore.shared.fetchPublicProfessionals()
-            // Keep the ordering returned by the existing Wix directory and its
-            // imported feeds. Sorting every profile by name here discarded the
-            // source's visibility/priority order.
+            let result = try await WixAuthStore.shared.fetchPublicProfessionals { [weak self] partial, warning in
+                // Show opted-in Wix professionals immediately; optional imported
+                // feeds can finish afterward and append behind registered profiles.
+                self?.professionals = partial
+                self?.warningMessage = warning
+            }
             professionals = result.professionals
             warningMessage = result.warning
             hasLoaded = true

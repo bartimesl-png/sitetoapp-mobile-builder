@@ -2822,44 +2822,81 @@ private struct HomeDashboardView: View {
     }
 
     private var matchingCard: some View {
-        VStack(alignment: .leading, spacing: 15) {
-            HStack(alignment: .top, spacing: 12) {
+        VStack(alignment: .leading, spacing: 17) {
+            HStack(spacing: 8) {
                 Image(systemName: "sparkles")
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(Color(red: 0.02, green: 0.45, blue: 0.39))
-                    .frame(width: 44, height: 44)
-                    .background(Color.teal.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("Le matching intelligent")
-                        .font(.headline)
-                        .foregroundStyle(.primary)
-                    Text("Vos critères sont rapprochés des biens et des professionnels compatibles : budget, type de projet, surface et localisation.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                Text("AU CŒUR DE PARTENAIREFOYER")
+                    .tracking(1.1)
             }
+            .font(.caption.weight(.bold))
+            .foregroundStyle(Color(red: 0.48, green: 0.95, blue: 0.73))
+
+            VStack(alignment: .leading, spacing: 7) {
+                Text("Le matching intelligent")
+                    .font(.title3.bold())
+                    .foregroundStyle(.white)
+                Text("Votre projet est rapproché des biens actifs et des professionnels qui correspondent à vos critères.")
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.78))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack(spacing: 7) {
+                matchingStep("Votre projet", symbol: "slider.horizontal.3")
+                Image(systemName: "arrow.right").font(.caption2.bold()).foregroundStyle(.white.opacity(0.55))
+                matchingStep("Les bons biens", symbol: "house")
+                Image(systemName: "arrow.right").font(.caption2.bold()).foregroundStyle(.white.opacity(0.55))
+                matchingStep("Les bons pros", symbol: "person.2")
+            }
+
             Button {
                 publicDemandType = "recherche_achat"
                 showPublicDemand = true
             } label: {
                 HStack {
-                    Text("Décrire ma recherche")
+                    Text("Décrire mon projet")
                     Spacer()
                     Image(systemName: "arrow.right")
                 }
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 15)
-                .padding(.vertical, 13)
-                .background(Color(red: 0.02, green: 0.38, blue: 0.34), in: RoundedRectangle(cornerRadius: 14))
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(Color(red: 0.02, green: 0.27, blue: 0.25))
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
+                .background(.white, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
             }
             .buttonStyle(.plain)
         }
-        .padding(17)
+        .padding(19)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.background, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(Color.teal.opacity(0.22), lineWidth: 1))
+        .background {
+            ZStack(alignment: .topTrailing) {
+                LinearGradient(
+                    colors: [Color(red: 0.035, green: 0.15, blue: 0.20), Color(red: 0.02, green: 0.38, blue: 0.32)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                Circle()
+                    .fill(.white.opacity(0.06))
+                    .frame(width: 155, height: 155)
+                    .offset(x: 42, y: -78)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 23, style: .continuous))
+        }
+        .overlay(RoundedRectangle(cornerRadius: 23, style: .continuous).stroke(.white.opacity(0.10), lineWidth: 1))
+        .shadow(color: Color.teal.opacity(0.15), radius: 18, y: 8)
+    }
+
+    private func matchingStep(_ title: String, symbol: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: symbol).font(.caption2.weight(.semibold))
+            Text(title).font(.system(size: 10, weight: .semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+        }
+        .foregroundStyle(.white.opacity(0.9))
+        .padding(.horizontal, 8)
+        .padding(.vertical, 8)
+        .background(.white.opacity(0.10), in: Capsule())
     }
 }
 
@@ -4358,6 +4395,8 @@ private struct RoleEntryView: View {
     @State private var professionalType = "mandataire"
     @State private var showLegalAcceptance = false
     @State private var showAccountRecovery = false
+    @State private var showSiteLogin = false
+    @State private var showSiteSignup = false
     @State private var isCreatingAccount = false
     let role: AccountRole
     let onSignedIn: () -> Void
@@ -4397,6 +4436,15 @@ private struct RoleEntryView: View {
                             .keyboardType(.phonePad)
                         roleRegistrationFields
                     }
+                } else if role == .professionnel {
+                    Section("Compte professionnel partagé") {
+                        Text("Utilisez votre accès PartenaireFoyer habituel. La même connexion sert sur PC et Android.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Label("Connexion sécurisée PartenaireFoyer", systemImage: "checkmark.shield.fill")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.teal)
+                    }
                 } else {
                     Section("Connexion à votre compte") {
                     TextField("Adresse e-mail", text: $email)
@@ -4429,7 +4477,10 @@ private struct RoleEntryView: View {
 
                 Section {
                     Button {
-                        if isEditing {
+                        if role == .professionnel && !isEditing {
+                            if isCreatingAccount { showSiteSignup = true }
+                            else { showSiteLogin = true }
+                        } else if isEditing {
                             Task { await updateExistingProfile() }
                         } else if isCreatingAccount {
                             showLegalAcceptance = true
@@ -4442,29 +4493,57 @@ private struct RoleEntryView: View {
                     } label: {
                         HStack {
                             Spacer()
-                                    Label(isEditing ? "Enregistrer les modifications" : (isCreatingAccount ? "Créer mon compte" : "Se connecter"),
-                                  systemImage: isEditing ? "checkmark.circle" : (isCreatingAccount ? "person.badge.plus" : "lock.shield"))
+                            Label(
+                                isEditing ? "Enregistrer les modifications" :
+                                    (role == .professionnel ? (isCreatingAccount ? "Créer mon compte professionnel" : "Accéder à mon espace") :
+                                        (isCreatingAccount ? "Créer mon compte" : "Se connecter")),
+                                systemImage: isEditing ? "checkmark.circle" : (isCreatingAccount ? "person.badge.plus" : "lock.shield")
+                            )
                                 .font(.headline)
                             Spacer()
                         }
                     }
-                    .disabled(email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (!isEditing && password.isEmpty) || auth.isSigningIn)
+                    .disabled((role != .professionnel && email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) ||
+                              (role != .professionnel && !isEditing && password.isEmpty) || auth.isSigningIn)
 
                     if !isEditing {
-                        Button {
-                            isCreatingAccount.toggle()
-                            auth.errorMessage = nil
-                        } label: {
-                            Label(isCreatingAccount ? "J’ai déjà un compte : me connecter" : "Créer un compte", systemImage: "person.crop.circle.badge.plus")
+                        if role == .professionnel {
+                            Button {
+                                showSiteSignup = true
+                            } label: {
+                                Label("Première inscription professionnelle", systemImage: "person.crop.circle.badge.plus")
+                            }
+                            .disabled(auth.isSigningIn)
+                        } else {
+                            Button {
+                                isCreatingAccount.toggle()
+                                auth.errorMessage = nil
+                            } label: {
+                                Label(isCreatingAccount ? "J’ai déjà un compte : me connecter" : "Créer un compte", systemImage: "person.crop.circle.badge.plus")
+                            }
+                            .disabled(auth.isSigningIn)
+                            Button {
+                                showSiteLogin = true
+                            } label: {
+                                Label("Utiliser la connexion complète du site", systemImage: "safari")
+                            }
+                            .disabled(auth.isSigningIn)
+                            Button {
+                                showSiteSignup = true
+                            } label: {
+                                Label("Créer un compte avec le parcours du site", systemImage: "person.crop.circle.badge.plus")
+                            }
+                            .disabled(auth.isSigningIn)
                         }
-                        .disabled(auth.isSigningIn)
                     }
                 } footer: {
                     Text(isEditing
                          ? "Les informations sont mises à jour dans la fiche Wix associée à votre espace."
+                         : (role == .professionnel
+                         ? "Votre espace professionnel utilise le parcours sécurisé du site, partagé avec vos connexions sur PC et Android."
                          : (isCreatingAccount
                          ? "Votre compte est créé par l’authentification Wix sécurisée. Le mot de passe n’est pas conservé par l’application."
-                         : "La connexion passe par l’authentification Wix sécurisée. Le mot de passe n’est pas conservé par l’application."))
+                         : "La connexion passe par l’authentification Wix sécurisée. Le mot de passe n’est pas conservé par l’application.")))
                 }
             }
             .navigationTitle("Accès à l’espace")
@@ -4488,6 +4567,14 @@ private struct RoleEntryView: View {
                             }
                         }
                 }
+            }
+            .sheet(isPresented: $showSiteLogin) {
+                InAppSafariView(url: role.loginURL)
+                    .ignoresSafeArea()
+            }
+            .sheet(isPresented: $showSiteSignup) {
+                InAppSafariView(url: role.signupURL)
+                    .ignoresSafeArea()
             }
             .onAppear {
                 guard let initialProfile else { return }

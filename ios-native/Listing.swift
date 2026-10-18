@@ -40,16 +40,36 @@ struct Listing: Decodable, Identifiable, Hashable {
     let firstSeenAt: String?
     let updatedAt: String?
     let lastSeenAt: String?
+    let previousPrice: Double?
+    let lastPriceDropDate: String?
 
     var canContactImportedProfessional: Bool {
         ownerType == "professional_imported" && importedProId?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
     }
 
-    /// ISO-8601 timestamps sort lexically when returned in the API's UTC form.
-    /// Use each source's best available publication/creation timestamp, with
-    /// deterministic ID ordering for records that have no timestamp.
-    var sortDateKey: String {
-        createdAt ?? firstSeenAt ?? updatedAt ?? lastSeenAt ?? ""
+    /// Match the website's promotion cycle: newly published listings first,
+    /// then recent price reductions, then the current seven-day rotation.
+    var catalogCreatedDate: Date? {
+        Self.catalogDate(createdAt) ?? Self.catalogDate(firstSeenAt)
+    }
+
+    var catalogPriceDropDate: Date? {
+        Self.catalogDate(lastPriceDropDate)
+    }
+
+    private static func catalogDate(_ raw: String?) -> Date? {
+        guard let raw, !raw.isEmpty else { return nil }
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractional.date(from: raw) { return date }
+        let standard = ISO8601DateFormatter()
+        standard.formatOptions = [.withInternetDateTime]
+        if let date = standard.date(from: raw) { return date }
+        let fallback = DateFormatter()
+        fallback.locale = Locale(identifier: "en_US_POSIX")
+        fallback.timeZone = TimeZone(secondsFromGMT: 0)
+        fallback.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSZ"
+        return fallback.date(from: raw)
     }
 
     var gallery: [URL] {
@@ -151,6 +171,8 @@ struct WixPublicProfessionalData: Decodable {
     let memberId: String?
     let isVisibleInDirectory: Bool?
     let isActive: Bool?
+    let activityScore: Double?
+    let profileCompleted: Bool?
     let mainPostalCode: String?
     let coveredPostalCodes: String?
     let secondaryPostalCodes: String?
@@ -161,6 +183,7 @@ struct WixPublicProfessionalData: Decodable {
         WixPublicProfessional(
             id: id,
             cmsProfileID: id,
+            memberID: memberId,
             companyName: companyName,
             firstName: firstName,
             lastName: lastName,
@@ -172,7 +195,9 @@ struct WixPublicProfessionalData: Decodable {
             logo: photo,
             website: website,
             professionalEmail: email,
-            publicPhone: phone
+            publicPhone: phone,
+            activityScore: activityScore,
+            profileCompleted: profileCompleted
         )
     }
 }
@@ -180,6 +205,7 @@ struct WixPublicProfessionalData: Decodable {
 struct WixPublicProfessional: Identifiable {
     let id: String
     var cmsProfileID: String? = nil
+    var memberID: String? = nil
     let companyName: String?
     let firstName: String?
     let lastName: String?
@@ -195,6 +221,8 @@ struct WixPublicProfessional: Identifiable {
     var experienceYears: String? = nil
     var professionalEmail: String? = nil
     var publicPhone: String? = nil
+    var activityScore: Double? = nil
+    var profileCompleted: Bool? = nil
     var dedupeEmail: String? = nil
     var dedupePhone: String? = nil
     var isLocalProsProfile: Bool = false
@@ -286,6 +314,8 @@ struct WixPublicProperty: Decodable {
     let postalCode: String?
     let sellingPrice: Double?
     let estimatedPrice: Double?
+    let previousPrice: Double?
+    let lastPriceDropDate: WixDateValue?
     let status: String?
     let surface: Double?
     let landSurface: Double?
@@ -364,7 +394,9 @@ struct WixPublicProperty: Decodable {
             createdAt: createdAt ?? _createdDate?.value,
             firstSeenAt: nil,
             updatedAt: nil,
-            lastSeenAt: nil
+            lastSeenAt: nil,
+            previousPrice: previousPrice,
+            lastPriceDropDate: lastPriceDropDate?.value
         )
     }
 }
@@ -402,9 +434,12 @@ struct WixPublicProfessionalProperty: Decodable {
     let photo4: String?
     let photo5: String?
     let createdAt: String?
+    let _createdDate: WixDateValue?
     let updatedAt: String?
     let commercialStatus: String?
     let status: String?
+    let previousPrice: Double?
+    let lastPriceDropDate: WixDateValue?
     let slug: String?
 
     func listing(id: String) -> Listing {
@@ -443,10 +478,12 @@ struct WixPublicProfessionalProperty: Decodable {
             ownerType: "professionnel",
             importedProId: nil,
             professionalID: professionalId,
-            createdAt: createdAt,
+            createdAt: createdAt ?? _createdDate?.value,
             firstSeenAt: nil,
             updatedAt: updatedAt,
-            lastSeenAt: nil
+            lastSeenAt: nil,
+            previousPrice: previousPrice,
+            lastPriceDropDate: lastPriceDropDate?.value
         )
     }
 }

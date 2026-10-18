@@ -1766,7 +1766,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         ])
         let fields = [
             "itemName", "itemDescription", "itemPrice", "category", "subcategory",
-            "itemCondition", "adListingType", "attributesJSON", "slug", "city", "postalCode", "status", "itemImage", "isImported", "bumpedAt",
+            "itemCondition", "adListingType", "attributesJSON", "slug", "city", "postalCode", "status", "itemImage", "isImported", "bumpedAt", "_createdDate",
             "photo2", "photo3", "photo4", "photo5", "photo6", "photo7", "photo8",
             "photo9", "photo10", "photo11", "photo12", "photo13", "photo14",
             "photo15", "photo16", "photo17", "photo18", "photo19", "photo20"
@@ -1917,6 +1917,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         var properties: [WixPublicPropertyItem] = []
         let fields = [
             "title", "description", "city", "postalCode", "sellingPrice", "estimatedPrice",
+            "previousPrice", "lastPriceDropDate", "_createdDate",
             "surface", "landSurface", "rooms", "bedrooms", "bathrooms", "propertyType", "transactionType", "mainImage", "isPublic", "status",
             "createdAt",
             "galleryImages", "photo1", "photo2", "photo3", "photo4", "photo5", "photo6",
@@ -1953,16 +1954,19 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
             .map { $0.data.listing(id: $0.id) }
     }
 
-    func fetchPublicProfessionals() async throws -> ProfessionalDirectoryResult {
+    func fetchPublicProfessionals(
+        onPartialUpdate: @escaping @MainActor ([WixPublicProfessional], String?) -> Void = { _, _ in }
+    ) async throws -> ProfessionalDirectoryResult {
         let visitor = try await requestToken([
             "clientId": clientID,
             "grantType": "anonymous"
         ])
         let records = try await fetchVisibleProfessionalRecords(accessToken: visitor.accessToken)
-        let registered = records.map { $0.data.professional(id: $0.id) }
+        let registered = sortedRegisteredProfessionals(records.map { $0.data.professional(id: $0.id) })
+        // The website publishes registered profiles before imported feeds load.
+        onPartialUpdate(registered, nil)
         var warnings: [String] = []
-        // These independent sources were previously fetched one after another,
-        // making a complete directory wait for every feed in sequence.
+        // Load independent feeds together while preserving the visible order.
         async let registeredLocalTask = fetchRegisteredLocalProsProfiles(accessToken: visitor.accessToken)
         async let localImportedTask = fetchImportedLocalProfessionals()
         async let brokersTask = fetchPublicBrokers(accessToken: visitor.accessToken)
@@ -1980,16 +1984,62 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         do { realEstateImported = try await realEstateImportedTask }
         catch { realEstateImported = []; warnings.append("les professionnels immobiliers importés") }
         let allRegistered = registered + registeredLocalPros + brokers
-        var seen = Set(allRegistered.map { normalizedProfessionalKey($0.resolvedName, $0.postalCode) })
-        let registeredContacts = Set(allRegistered.flatMap { [$0.professionalEmail, $0.publicPhone] }.compactMap { $0 }.map(normalizedContactKey))
+        let orderedRegistered = sortedRegisteredProfessionals(allRegistered)
+        onPartialUpdate(orderedRegistered, nil)
+        var seen = Set(orderedRegistered.map { normalizedProfessionalKey($0.resolvedName, $0.postalCode) })
+        let registeredContacts = Set(allRegistered.flatMap { [$0.professionalEmail, $0.publicPhone] }
+            .compactMap { $0 }.map(normalizedContactKey).filter { !$0.isEmpty })
         let imported = localImported + realEstateImported
-        let professionals = allRegistered + imported.filter {
-            let contacts = [$0.dedupeEmail, $0.dedupePhone].compactMap { $0 }.map(normalizedContactKey)
+        let professionals = orderedRegistered + imported.filter {
+            let contacts = [$0.dedupeEmail, $0.dedupePhone].compactMap { $0 }
+                .map(normalizedContactKey).filter { !$0.isEmpty }
             return contacts.allSatisfy { !registeredContacts.contains($0) } &&
                 seen.insert(normalizedProfessionalKey($0.resolvedName, $0.postalCode)).inserted
         }
         let warning = warnings.isEmpty ? nil : "Annuaire partiellement chargé : " + warnings.joined(separator: ", ") + ". Réessayez pour actualiser les fiches manquantes."
         return ProfessionalDirectoryResult(professionals: professionals, warning: warning)
+    }
+
+    private func sortedRegisteredProfessionals(_ professionals: [WixPublicProfessional]) -> [WixPublicProfessional] {
+        // The public site deduplicates registered profiles by email and keeps
+        // the real, complete profile with the most public fields populated.
+        var unique: [WixPublicProfessional] = []
+        var indexByEmail: [String: Int] = [:]
+        for professional in professionals {
+            let email = professional.professionalEmail?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+            guard !email.isEmpty else {
+                unique.append(professional)
+                continue
+            }
+            guard let existingIndex = indexByEmail[email] else {
+                indexByEmail[email] = unique.count
+                unique.append(professional)
+                continue
+            }
+            if profileQuality(professional) > profileQuality(unique[existingIndex]) {
+                unique[existingIndex] = professional
+            }
+        }
+        return unique.enumerated().sorted { left, right in
+            let leftScore = left.element.activityScore ?? 0
+            let rightScore = right.element.activityScore ?? 0
+            if leftScore != rightScore { return leftScore > rightScore }
+            let leftName = "\(left.element.firstName ?? "") \(left.element.lastName ?? "")"
+            let rightName = "\(right.element.firstName ?? "") \(right.element.lastName ?? "")"
+            let nameOrder = leftName.localizedCompare(rightName)
+            if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
+            return left.offset < right.offset
+        }.map(\.element)
+    }
+
+    private func profileQuality(_ professional: WixPublicProfessional) -> Int {
+        let isTest = professional.id.hasPrefix("test-pro-") || (professional.memberID?.hasPrefix("test-member-") == true)
+        let fields = [professional.firstName, professional.lastName, professional.network,
+                      professional.companyName, professional.city, professional.postalCode,
+                      professional.publicPhone, professional.logo]
+        return (isTest ? 0 : 1_000) +
+            (professional.profileCompleted == true ? 100 : 0) +
+            fields.filter { !($0?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) }.count
     }
 
     private func fetchPublicBrokers(accessToken: String) async throws -> [WixPublicProfessional] {
@@ -2283,7 +2333,8 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
             "professionalId", "title", "description", "city", "postalCode", "price", "surface", "surfaceHouse",
             "surfaceLand", "landSurface", "rooms", "bedrooms", "bathrooms", "propertyType",
             "transactionType", "mainImageUrl", "galleryImages", "photo1", "photo2", "photo3",
-            "photo4", "photo5", "createdAt", "updatedAt", "commercialStatus", "slug", "status"
+            "photo4", "photo5", "createdAt", "_createdDate", "updatedAt", "previousPrice",
+            "lastPriceDropDate", "commercialStatus", "slug", "status"
         ]
 
         // Listings are connected to Wix Members through `wixMemberId`, while
@@ -2508,7 +2559,8 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         var records: [WixPublicProfessionalItem] = []
         let fields = [
             "companyName", "firstName", "lastName", "network", "city", "postalCode",
-            "businessSector", "description", "photo", "website", "email", "phone", "memberId", "isActive", "isVisibleInDirectory"
+            "businessSector", "description", "photo", "website", "email", "phone", "memberId",
+            "isActive", "isVisibleInDirectory", "activityScore", "profileCompleted"
         ]
 
         while true {
@@ -2585,7 +2637,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         let message = error.localizedDescription
         let lowercased = message.lowercased()
         if lowercased.contains("associated domains") || lowercased.contains("webcredentials") {
-            return "Les identifiants Wix ont été acceptés, mais iOS ne peut pas encore revenir dans l’application. Le domaine www.partenairefoyer.com doit être associé à l’identifiant Apple de l’app pour le rappel sécurisé."
+            return "Wix a accepté la connexion, mais le rappel sécurisé vers l’app n’est pas encore associé au domaine. Ouvrez la connexion complète du site depuis cet écran pour accéder à votre compte sans changer de mot de passe."
         }
         return message
     }
