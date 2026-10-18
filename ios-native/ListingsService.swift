@@ -33,31 +33,27 @@ final class ListingsService: ObservableObject {
         isLoading = true
         errorMessage = nil
         warningMessage = nil
-        defer { isLoading = false }
 
         pendingSources = 3
         sourceFailures = []
 
         // Each source publishes as soon as it completes. A slow import cannot
         // keep the Wix property catalogue hidden behind an empty loading screen.
-        let importedTask = Task { @MainActor [weak self] in
+        Task { @MainActor [weak self] in
             guard let self else { return }
             do { self.finish(.imported, items: try await self.loadImportedListings(), failure: nil) }
             catch { self.finish(.imported, items: nil, failure: "les annonces importées") }
         }
-        let privateTask = Task { @MainActor [weak self] in
+        Task { @MainActor [weak self] in
             guard let self else { return }
             do { self.finish(.privateOwner, items: try await WixAuthStore.shared.fetchPublicPrivateListings(), failure: nil) }
             catch { self.finish(.privateOwner, items: nil, failure: "les biens de particuliers") }
         }
-        let professionalTask = Task { @MainActor [weak self] in
+        Task { @MainActor [weak self] in
             guard let self else { return }
             do { self.finish(.professional, items: try await WixAuthStore.shared.fetchPublicProfessionalListings(), failure: nil) }
             catch { self.finish(.professional, items: nil, failure: "les biens de professionnels") }
         }
-        await importedTask.value
-        await privateTask.value
-        await professionalTask.value
     }
 
     private func finish(_ source: Source, items: [Listing]?, failure: String?) {
@@ -78,6 +74,7 @@ final class ListingsService: ObservableObject {
         ).filter { seen.insert($0.id).inserted }
 
         let successfulSources = [importedSource, privateOwnerSource, professionalSource].compactMap { $0 }.count
+        if pendingSources == 0 { isLoading = false }
         if successfulSources > 0 {
             hasLoaded = true
             warningMessage = sourceFailures.isEmpty
