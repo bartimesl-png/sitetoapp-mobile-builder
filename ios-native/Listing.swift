@@ -137,6 +137,63 @@ struct WixRawDirectoryItem: Decodable {
     let data: [String: AnyCodableValue]
 }
 
+struct WixPublicBuyerSearch: Identifiable, Hashable {
+    let id: String
+    let searchName: String?
+    let transactionType: String?
+    let propertyTypes: [String]
+    let city: String?
+    let postalCode: String?
+    let radius: Double?
+    let minBudget: Double?
+    let maxBudget: Double?
+    let minSurface: Double?
+    let minLandSurface: Double?
+    let minRooms: Double?
+    let minBedrooms: Double?
+    let minBathrooms: Double?
+    let projectDescription: String?
+    let createdAt: String?
+
+    var title: String {
+        let labels: [String: String] = [
+            "maison": "maison", "appartement": "appartement", "terrain": "terrain",
+            "immeuble": "immeuble", "commerce": "local commercial", "fonds-commerce": "fonds de commerce",
+            "corps-ferme": "ferme / corps de ferme", "longere": "longère", "gite": "gîte",
+            "bien-saisonnier": "bien saisonnier", "garage": "garage / parking", "autre": "autre"
+        ]
+        let type = propertyTypes.isEmpty ? "bien" : propertyTypes.map {
+            let key = $0.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "fr_FR"))
+                .lowercased().replacingOccurrences(of: " ", with: "-")
+            return labels[key] ?? $0.lowercased()
+        }.joined(separator: " ou ")
+        let transaction = (transactionType ?? "").lowercased()
+        let action = transaction.contains("rent") || transaction.contains("location") ? "location" : "achat"
+        let location = city?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "région"
+        return "Recherche \(type) en \(action) à \(location)"
+    }
+
+    var locationLabel: String? {
+        [postalCode, city].compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty }
+            .joined(separator: " ").nilIfEmpty
+    }
+
+    var budgetLabel: String? {
+        let lower = minBudget.map { $0.formatted(.number.locale(Locale(identifier: "fr_FR"))) + " €" }
+        let upper = maxBudget.map { $0.formatted(.number.locale(Locale(identifier: "fr_FR"))) + " €" }
+        switch (lower, upper) {
+        case let (a?, b?): return "Budget : \(a) – \(b)"
+        case let (a?, nil): return "Budget minimum : \(a)"
+        case let (nil, b?): return "Budget maximum : \(b)"
+        default: return nil
+        }
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
+}
+
 struct AnyCodableValue: Decodable {
     let value: Any
     init(from decoder: Decoder) throws {

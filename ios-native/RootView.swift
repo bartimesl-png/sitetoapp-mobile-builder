@@ -18,6 +18,7 @@ struct RootView: View {
     @AppStorage("partenairefoyer.activeRole") private var activeRoleRaw = ""
     @StateObject private var listingsService = ListingsService()
     @StateObject private var classifiedAdsService = ClassifiedAdsService()
+    @StateObject private var buyerSearchesService = PublicBuyerSearchesService()
     @StateObject private var professionalsService = ProfessionalsService()
 
     var body: some View {
@@ -31,7 +32,7 @@ struct RootView: View {
                 .tabItem { Label("Accueil", systemImage: "house.fill") }
                 .tag(0)
 
-            NativeListingsView(service: listingsService, classifiedAds: classifiedAdsService, professionalsService: professionalsService)
+            NativeListingsView(service: listingsService, classifiedAds: classifiedAdsService, buyerSearches: buyerSearchesService, professionalsService: professionalsService)
                 .tabItem { Label("Annonces", systemImage: "magnifyingglass") }
                 .tag(1)
 
@@ -1292,6 +1293,7 @@ private struct ImportedListingContactForm: View {
 
 private enum NativeCatalogSection: String, CaseIterable, Identifiable {
     case realEstate = "Immobilier"
+    case buyerSearches = "Recherches"
     case classifiedAds = "Petites annonces"
     var id: String { rawValue }
 }
@@ -1299,6 +1301,7 @@ private enum NativeCatalogSection: String, CaseIterable, Identifiable {
 private struct NativeListingsView: View {
     @ObservedObject var service: ListingsService
     @ObservedObject var classifiedAds: ClassifiedAdsService
+    @ObservedObject var buyerSearches: PublicBuyerSearchesService
     @ObservedObject var professionalsService: ProfessionalsService
     @ObservedObject private var favorites = FavoritesStore.shared
     @State private var searchText = ""
@@ -1442,6 +1445,16 @@ private struct NativeListingsView: View {
         }
     }
 
+    private var filteredBuyerSearches: [WixPublicBuyerSearch] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return buyerSearches.searches }
+        return buyerSearches.searches.filter {
+            $0.title.localizedCaseInsensitiveContains(query) ||
+                ($0.searchName ?? "").localizedCaseInsensitiveContains(query) ||
+                ($0.projectDescription ?? "").localizedCaseInsensitiveContains(query)
+        }
+    }
+
     private var activeClassifiedFilterCount: Int {
         [classifiedCategory != "Toutes", classifiedSubcategory != "Toutes", classifiedListingType != "Tous", classifiedCondition != "Tous",
          !classifiedCity.isEmpty, !classifiedPostalCode.isEmpty, !classifiedMinPrice.isEmpty, !classifiedMaxPrice.isEmpty,
@@ -1461,16 +1474,52 @@ private struct NativeListingsView: View {
             (classifiedCategory == "Toutes" || ad.category == classifiedCategory) &&
                 (classifiedSubcategory == "Toutes" || ad.subcategory == classifiedSubcategory)
         }
-        let excluded: Set<String> = ["pfImportedVehicleListing", "importedProfessionalVehicle", "importedVehicleId", "sourceUrl", "providerProfileId", "providerSlug", "originalListingRequired", "noRepublishingConsent"]
+        let excluded: Set<String> = [
+            "pfImportedVehicleListing", "importedProfessionalVehicle", "importedVehicleId", "sourceUrl",
+            "providerProfileId", "providerSlug", "originalListingRequired", "noRepublishingConsent",
+            "catalogVersion", "externalDiscovery", "externalProfessionalName", "externalSellerName",
+            "externalSellerUrl", "externalProfessionalUrl", "sourceId", "sourceName", "feedId",
+            "feedUrl", "importedAt", "lastSyncedAt", "syncStatus", "ownerId", "accountId"
+        ]
         let keys = ads.flatMap { attributeDictionary($0).map { Array($0.keys) } ?? [] }
-            .filter { !excluded.contains($0) && !$0.hasPrefix("_") && !$0.hasPrefix("classifiedOwner") }
+            .filter {
+                let lower = $0.lowercased()
+                return !excluded.contains($0) && !$0.hasPrefix("_") && !$0.hasPrefix("classifiedOwner") &&
+                    !lower.hasPrefix("external") && !lower.hasPrefix("imported") &&
+                    !lower.hasSuffix("id") && !lower.hasSuffix("url") && !lower.hasSuffix("slug")
+            }
         return Array(Set(keys)).sorted { attributeLabel($0).localizedStandardCompare(attributeLabel($1)) == .orderedAscending }
     }
 
     private func attributeLabel(_ key: String) -> String {
-        key.replacingOccurrences(of: "([a-z0-9])([A-Z])", with: "$1 $2", options: .regularExpression)
-            .replacingOccurrences(of: "_", with: " ")
-            .capitalized
+        let normalized = key.replacingOccurrences(of: "([a-z0-9])([A-Z])", with: "$1 $2", options: .regularExpression)
+            .replacingOccurrences(of: "[_-]", with: " ", options: .regularExpression)
+            .lowercased()
+        let known: [String: String] = [
+            "brand": "Marque", "model": "Modèle", "catalog version": "Version du catalogue",
+            "color": "Couleur", "convertible": "Décapotable", "creator": "Créateur",
+            "depth": "Profondeur", "edition": "Édition", "energy": "Énergie",
+            "gearbox": "Boîte de vitesses", "height": "Hauteur", "length": "Longueur",
+            "width": "Largeur", "weight": "Poids", "material": "Matière",
+            "condition": "État", "size": "Taille", "gender": "Genre", "year": "Année",
+            "mileage": "Kilométrage", "fuel": "Carburant", "power": "Puissance",
+            "capacity": "Capacité", "style": "Style", "type": "Type", "manufacturer": "Fabricant",
+            "rental unit": "Unité de location", "number of pieces": "Nombre de pièces",
+            "external discovery": "Source de découverte", "external professional name": "Nom du professionnel",
+            "external seller name": "Nom du vendeur"
+        ]
+        if let label = known[normalized] { return label }
+        let words: [String: String] = [
+            "brand": "Marque", "model": "Modèle", "catalog": "catalogue", "version": "version",
+            "color": "Couleur", "convertible": "Décapotable", "creator": "Créateur", "depth": "Profondeur",
+            "edition": "Édition", "energy": "Énergie", "gearbox": "Boîte", "height": "Hauteur",
+            "length": "Longueur", "width": "Largeur", "weight": "Poids", "material": "Matière",
+            "condition": "État", "size": "Taille", "year": "Année", "mileage": "Kilométrage",
+            "fuel": "Carburant", "power": "Puissance", "capacity": "Capacité", "style": "Style",
+            "type": "Type", "manufacturer": "Fabricant", "rental": "location", "unit": "unité",
+            "number": "Nombre", "of": "de", "pieces": "pièces", "engine": "moteur", "doors": "portes"
+        ]
+        return normalized.split(separator: " ").map { words[String($0)] ?? String($0).capitalized }.joined(separator: " ")
     }
 
     private func attributeValue(_ key: String, ad: ClassifiedAd) -> String {
@@ -1492,7 +1541,7 @@ private struct NativeListingsView: View {
                             Text(section.rawValue).tag(section)
                         }
                     }
-                    .pickerStyle(.segmented)
+                    .pickerStyle(.menu)
                     .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
                 }
 
@@ -1609,7 +1658,7 @@ private struct NativeListingsView: View {
                             .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                         }
                     }
-                } else {
+                } else if catalogSection == .classifiedAds {
                     Section {
                         HStack(spacing: 10) {
                             Image(systemName: "tag.fill").foregroundStyle(.teal)
@@ -1671,12 +1720,45 @@ private struct NativeListingsView: View {
                             .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                         }
                     }
+                } else {
+                    Section {
+                        HStack(spacing: 10) {
+                            Image(systemName: "person.crop.circle.badge.magnifyingglass").foregroundStyle(.teal)
+                            Text("Demandes actives de particuliers qui recherchent un bien. Les coordonnées personnelles ne sont pas affichées.")
+                                .font(.footnote).foregroundStyle(.secondary)
+                        }
+                        .listRowBackground(Color.teal.opacity(0.07))
+                    }
+                    Section {
+                        Text("\(filteredBuyerSearches.count) demande\(filteredBuyerSearches.count > 1 ? "s" : "") active\(filteredBuyerSearches.count > 1 ? "s" : "")")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                    if buyerSearches.isLoading && buyerSearches.searches.isEmpty {
+                        Section { HStack { Spacer(); ProgressView("Chargement des demandes…"); Spacer() } }
+                    } else if let error = buyerSearches.errorMessage, buyerSearches.searches.isEmpty {
+                        Section("Demandes de recherche") {
+                            Label(error, systemImage: "wifi.exclamationmark").font(.footnote).foregroundStyle(.orange)
+                            Button("Réessayer") { Task { await buyerSearches.reload() } }
+                        }
+                    } else if filteredBuyerSearches.isEmpty {
+                        ContentUnavailableView {
+                            Label("Aucune demande active trouvée", systemImage: "magnifyingglass")
+                        } description: {
+                            Text(searchText.isEmpty ? "Les demandes actives publiées sur PartenaireFoyer apparaîtront ici." : "Essayez une autre recherche.")
+                        }
+                    } else {
+                        ForEach(filteredBuyerSearches) { search in
+                            BuyerSearchDirectoryRow(search: search)
+                                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                        }
+                    }
                 }
             }
             .listStyle(.plain)
             .refreshable {
                 if catalogSection == .realEstate { await service.reload() }
-                else { await classifiedAds.reload() }
+                else if catalogSection == .classifiedAds { await classifiedAds.reload() }
+                else { await buyerSearches.reload() }
             }
             .navigationDestination(for: Listing.self) { listing in
                 ListingDetailView(listing: listing, professionalsService: professionalsService)
@@ -1686,7 +1768,7 @@ private struct NativeListingsView: View {
             }
             .navigationTitle("Annonces")
             .navigationBarTitleDisplayMode(.large)
-            .searchable(text: $searchText, prompt: catalogSection == .realEstate ? "Ville, code postal, bien…" : "Article, catégorie, ville…")
+            .searchable(text: $searchText, prompt: catalogSection == .realEstate ? "Ville, code postal, bien…" : catalogSection == .classifiedAds ? "Article, catégorie, ville…" : "Ville, type de bien, demande…")
             .sheet(isPresented: $showClassifiedFilters) {
                 NavigationStack {
                     Form {
@@ -1810,9 +1892,45 @@ private struct NativeListingsView: View {
             }
             .task(id: catalogSection) {
                 if catalogSection == .realEstate { await service.loadIfNeeded() }
-                else { await classifiedAds.loadIfNeeded() }
+                else if catalogSection == .classifiedAds { await classifiedAds.loadIfNeeded() }
+                else { await buyerSearches.loadIfNeeded() }
             }
         }
+    }
+}
+
+private struct BuyerSearchDirectoryRow: View {
+    let search: WixPublicBuyerSearch
+
+    private var criteria: [String] {
+        var values: [String] = []
+        if let budget = search.budgetLabel { values.append(budget) }
+        if let area = search.minSurface, area > 0 { values.append("Surface min. : \(Int(area)) m²") }
+        if let land = search.minLandSurface, land > 0 { values.append("Terrain min. : \(Int(land)) m²") }
+        if let rooms = search.minRooms, rooms > 0 { values.append("\(Int(rooms)) pièces min.") }
+        if let bedrooms = search.minBedrooms, bedrooms > 0 { values.append("\(Int(bedrooms)) chambres min.") }
+        if let bathrooms = search.minBathrooms, bathrooms > 0 { values.append("\(Int(bathrooms)) salles de bain min.") }
+        if let radius = search.radius, radius > 0 { values.append("Rayon : \(Int(radius)) km") }
+        return values
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(search.title).font(.headline)
+            if let name = search.searchName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty, name != search.title {
+                Text(name).font(.subheadline).foregroundStyle(.secondary)
+            }
+            if let location = search.locationLabel { Label(location, systemImage: "mappin.and.ellipse").font(.caption).foregroundStyle(.secondary) }
+            if !criteria.isEmpty { Text(criteria.joined(separator: " · ")).font(.subheadline) }
+            if let description = search.projectDescription?.trimmingCharacters(in: .whitespacesAndNewlines), !description.isEmpty {
+                Text(description).font(.footnote).foregroundStyle(.secondary).lineLimit(4)
+            }
+            if let createdAt = search.createdAt, !createdAt.isEmpty {
+                Text("Demande publiée le \(createdAt.prefix(10))").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

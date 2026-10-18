@@ -111,6 +111,8 @@ assert.equal(calculateBuyerSearchScore({ ...savedSearch, singleStory: true }, {
 
 const matrix = await readFile(new URL("../ios-native/WIX_IOS_PARITY_MATRIX.md", import.meta.url), "utf8");
 const source = await readFile(new URL("../ios-native/RootView.swift", import.meta.url), "utf8");
+const listingsServiceSource = await readFile(new URL("../ios-native/ListingsService.swift", import.meta.url), "utf8");
+const wixAuthStoreSource = await readFile(new URL("../ios-native/WixAuthStore.swift", import.meta.url), "utf8");
 const favoritesSource = await readFile(new URL("../ios-native/FavoritesStore.swift", import.meta.url), "utf8");
 const appDelegateSource = await readFile(new URL("../ios-native/AppDelegate.swift", import.meta.url), "utf8");
 const accountRoleSource = source.slice(source.indexOf("private enum AccountRole"), source.indexOf("private struct RoleEntryView"));
@@ -121,6 +123,35 @@ const viewInventory = matrix.split("## Inventaire SwiftUI complet")[1] ?? "";
 const matrixViews = [...viewInventory.matchAll(/^- `([A-Za-z0-9_]+)`/gm)].map((match) => match[1]);
 assert.equal(declaredRoutes, 207, "the parity matrix must retain all inventoried Wix route declarations");
 assert.deepEqual(matrixViews, sourceViews, "the SwiftUI view list in the parity matrix must match RootView.swift");
+const orderingSource = listingsServiceSource.slice(
+  listingsServiceSource.indexOf("private enum ListingCatalogOrdering"),
+  listingsServiceSource.indexOf("@MainActor\nfinal class ClassifiedAdsService"),
+);
+assert.equal([...orderingSource.matchAll(/timeIntervalSince\(\$0\) \/ 86_400 < 7/g)].length, 2,
+  "new price drops must keep the website's seven-day ordering window");
+const publicProfessionalQuery = wixAuthStoreSource.slice(
+  wixAuthStoreSource.indexOf("private func fetchVisibleProfessionalRecords"),
+  wixAuthStoreSource.indexOf("func validAccessToken()"),
+);
+assert.ok(publicProfessionalQuery.includes("isVisibleInDirectory != false"),
+  "a Wix professional profile must stay visible unless the site explicitly hides it");
+assert.ok(!publicProfessionalQuery.includes('"isActive": ["$eq": true]') && !publicProfessionalQuery.includes("isActive == true"),
+  "public registered professionals must not be dropped by an extra active-only gate");
+const publicBuyerSearchQuery = wixAuthStoreSource.slice(
+  wixAuthStoreSource.indexOf("func fetchPublicBuyerSearches"),
+  wixAuthStoreSource.indexOf("private func fetchImportedVehicleClassifiedAds"),
+);
+assert.ok(publicBuyerSearchQuery.includes('"dataCollectionId": "particularbuyersearches"') &&
+  publicBuyerSearchQuery.includes('"paging": ["limit": pageSize, "offset": offset]') &&
+  publicBuyerSearchQuery.includes('data["isActive"] as? Bool, !active'),
+  "the public native buyer-search catalogue must page Wix and hide explicitly inactive rows");
+assert.ok(source.includes('"brand": "Marque"') && source.includes('"catalog version": "Version du catalogue"') &&
+  source.includes('!lower.hasPrefix("external")') && source.includes('!lower.hasSuffix("url")'),
+  "classified attribute filters must use French labels and omit technical source metadata");
+for (const adType of ['Text("Je vends").tag("sell")', 'Text("Je donne").tag("give")',
+  'Text("J’échange").tag("exchange")', 'Text("Je loue").tag("rent")']) {
+  assert.ok(source.includes(adType), `small-ad filters must expose ${adType}`);
+}
 assert.ok(favoritesSource.includes("partenairefoyer.favoriteAccount."),
   "signed-in listing favorites must use an account-scoped storage namespace");
 assert.ok(favoritesSource.includes("func switchToAnonymousFavorites()"),

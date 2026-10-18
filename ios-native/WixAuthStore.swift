@@ -2008,6 +2008,78 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         return (ordered, warnings.isEmpty ? nil : warnings.joined(separator: " "))
     }
 
+    func fetchPublicBuyerSearches() async throws -> [WixPublicBuyerSearch] {
+        let visitor = try await requestToken(["clientId": clientID, "grantType": "anonymous"])
+        let fields = [
+            "searchName", "transactionType", "propertyTypes", "city", "postalCode", "radius",
+            "minBudget", "maxBudget", "minSurface", "minLandSurface", "minRooms", "minBedrooms",
+            "minBathrooms", "projectDescription", "isActive", "createdAt", "_createdDate"
+        ]
+        let pageSize = 100
+        var offset = 0
+        var searches: [WixPublicBuyerSearch] = []
+        while true {
+            let response = try await post(
+                "https://www.wixapis.com/wix-data/v2/items/query",
+                bearer: visitor.accessToken,
+                body: [
+                    "dataCollectionId": "particularbuyersearches",
+                    "query": [
+                        "paging": ["limit": pageSize, "offset": offset],
+                        "fields": fields
+                    ]
+                ],
+                as: WixRawDirectoryResponse.self
+            )
+            searches.append(contentsOf: response.dataItems.compactMap { item in
+                let data = item.data.mapValues(\.value)
+                if let active = data["isActive"] as? Bool, !active { return nil }
+                func string(_ key: String) -> String? {
+                    guard let value = data[key], !(value is NSNull) else { return nil }
+                    if let value = value as? String { return value }
+                    return String(describing: value)
+                }
+                func number(_ key: String) -> Double? {
+                    guard let value = data[key], !(value is NSNull) else { return nil }
+                    if let value = value as? NSNumber { return value.doubleValue }
+                    return Double(String(describing: value))
+                }
+                let types = (string("propertyTypes") ?? "").split(separator: ",").map {
+                    $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                }.filter { !$0.isEmpty }
+                func dateString(_ key: String) -> String? {
+                    if let value = string(key) { return value }
+                    guard let object = data[key] as? [String: Any] else { return nil }
+                    return object["$date"] as? String
+                }
+                let createdAt = dateString("createdAt") ?? dateString("_createdDate")
+                return WixPublicBuyerSearch(
+                    id: item.id,
+                    searchName: string("searchName"),
+                    transactionType: string("transactionType"),
+                    propertyTypes: types,
+                    city: string("city"),
+                    postalCode: string("postalCode"),
+                    radius: number("radius"),
+                    minBudget: number("minBudget"),
+                    maxBudget: number("maxBudget"),
+                    minSurface: number("minSurface"),
+                    minLandSurface: number("minLandSurface"),
+                    minRooms: number("minRooms"),
+                    minBedrooms: number("minBedrooms"),
+                    minBathrooms: number("minBathrooms"),
+                    projectDescription: string("projectDescription"),
+                    createdAt: createdAt
+                )
+            })
+            guard response.dataItems.count == pageSize else { break }
+            let nextOffset = offset + response.dataItems.count
+            guard nextOffset > offset else { break }
+            offset = nextOffset
+        }
+        return searches
+    }
+
     private func fetchImportedVehicleClassifiedAds() async throws -> [ClassifiedAd] {
         let endpoint = URL(string: "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/pf-imported-vehicle-listings-public")!
         let pageSize = 500
@@ -2216,7 +2288,12 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
             if leftScore != rightScore { return leftScore > rightScore }
             let leftName = "\(left.element.firstName ?? "") \(left.element.lastName ?? "")"
             let rightName = "\(right.element.firstName ?? "") \(right.element.lastName ?? "")"
-            let nameOrder = leftName.localizedCompare(rightName)
+            let nameOrder = leftName.compare(
+                rightName,
+                options: [.caseInsensitive, .diacriticInsensitive],
+                range: nil,
+                locale: Locale(identifier: "fr_FR")
+            )
             if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
             return left.offset < right.offset
         }.map(\.element)
@@ -2766,10 +2843,6 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
                 body: [
                     "dataCollectionId": "professionnels",
                     "query": [
-                        "filter": [
-                            "isVisibleInDirectory": ["$eq": true],
-                            "isActive": ["$eq": true]
-                        ],
                         "paging": ["limit": pageSize, "offset": offset],
                         "fields": fields
                     ]
@@ -2777,7 +2850,14 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
                 as: WixPublicProfessionalsResponse.self
             )
             records.append(contentsOf: response.dataItems.filter {
-                $0.data.isVisibleInDirectory == true && $0.data.isActive == true
+                // Match ProfessionnelsPage.tsx: only an explicit false hides a
+                // profile; old published records may not have either flag.
+                $0.data.isVisibleInDirectory != false &&
+                    !($0.data.firstName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) &&
+                    !($0.data.lastName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) &&
+                    (!($0.data.network?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) ||
+                     !($0.data.companyName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)) &&
+                    !($0.data.email?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
             })
             guard response.dataItems.count == pageSize else { break }
             let nextOffset = offset + response.dataItems.count

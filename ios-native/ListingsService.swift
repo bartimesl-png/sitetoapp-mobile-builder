@@ -142,8 +142,8 @@ private enum ListingCatalogOrdering {
 
             let leftDrop = left.catalogPriceDropDate
             let rightDrop = right.catalogPriceDropDate
-            let leftHasRecentDrop = leftAge != nil && leftDrop.map { now.timeIntervalSince($0) / 86_400 < 2 } == true
-            let rightHasRecentDrop = rightAge != nil && rightDrop.map { now.timeIntervalSince($0) / 86_400 < 2 } == true
+            let leftHasRecentDrop = leftAge != nil && leftDrop.map { now.timeIntervalSince($0) / 86_400 < 7 } == true
+            let rightHasRecentDrop = rightAge != nil && rightDrop.map { now.timeIntervalSince($0) / 86_400 < 7 } == true
             if leftHasRecentDrop != rightHasRecentDrop { return leftHasRecentDrop }
             if leftHasRecentDrop, rightHasRecentDrop {
                 let leftDropTime = leftDrop?.timeIntervalSince1970 ?? 0
@@ -199,6 +199,32 @@ final class ClassifiedAdsService: ObservableObject {
             } else {
                 warningMessage = "Impossible d’actualiser les annonces. Les résultats déjà chargés restent affichés."
             }
+        }
+    }
+}
+
+@MainActor
+final class PublicBuyerSearchesService: ObservableObject {
+    @Published private(set) var searches: [WixPublicBuyerSearch] = []
+    @Published private(set) var isLoading = false
+    @Published private(set) var errorMessage: String?
+    @Published private(set) var hasLoaded = false
+
+    func loadIfNeeded() async {
+        guard !hasLoaded else { return }
+        await reload()
+    }
+
+    func reload() async {
+        guard !isLoading else { return }
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+        do {
+            searches = try await WixAuthStore.shared.fetchPublicBuyerSearches()
+            hasLoaded = true
+        } catch {
+            errorMessage = "Les demandes de recherche ne sont pas disponibles pour le moment. Réessayez."
         }
     }
 }

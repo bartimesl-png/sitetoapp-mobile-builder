@@ -342,7 +342,7 @@ Les trois parcours demandés sont trois flux CMS distincts dans Wix. Ils ne part
 
 ### Contrôles d’implémentation
 
-- Vérification locale ajoutée : `npm run verify:ios-matching` couvre les filtres et scores des trois parcours de matching, les équipements des recherches enregistrées, et l’accord entre les 207 routes, les 53 vues SwiftUI et `RootView.swift`. `git diff --check` passe. Le contrôle ne remplace ni la compilation iOS ni un essai authentifié.
+- Vérification locale ajoutée : `npm run verify:ios-matching` couvre les filtres et scores des trois parcours de matching, les équipements des recherches enregistrées, les invariants statiques des catalogues (7 jours de priorité pour une baisse, critères visibles de l’annuaire, recherches actives paginées et attributs français), et l’accord entre les 207 routes, les 54 vues SwiftUI et `RootView.swift`. `git diff --check` passe. Le contrôle ne remplace ni la compilation iOS ni un essai authentifié.
 - Les taps sur notification sont maintenant reçus par l’app, conservés si l’ouverture est à froid (seuls les identifiants de navigation sont stockés), puis dirigés vers l’onglet Menu et le rôle connu quand le payload le fournit. L’ouverture d’un fil précis reste dépendante du schéma Wix réel; aucun compte/appareil n’a permis de vérifier les payloads de production.
 - Les fonctions natives de conversation professionnelle et hébergeur vérifient le compte Wix et l’appartenance de la conversation avant lecture, envoi ou marquage comme lu. L’envoi natif accepte uniquement du texte (4 000 caractères maximum); pièces jointes, livraison des alertes/e-mails et parcours de messagerie voyageur restent à valider ou à compléter.
 - Les favoris de biens et petites annonces ont maintenant un cache séparé par e-mail Wix vérifié, une file locale pour les ajouts/suppressions hors ligne et une bascule vers le cache anonyme à la déconnexion. Les favoris explicitement ajoutés en mode invité dans cette version sont transférés au compte à la connexion; les favoris locaux anciens dont le compte d’origine est inconnu ne sont pas mélangés. Vérification statique seulement; les essais de changement de compte, de synchronisation multi-appareil et de reprise réseau restent nécessaires.
@@ -351,12 +351,13 @@ Les trois parcours demandés sont trois flux CMS distincts dans Wix. Ils ne part
 - L’acceptation suit l’ordre métier Wix et est tolérante aux reprises partielles : statut, collaboration, conversation, matching, puis push secondaire. Aucun e-mail n’est ajouté à ce parcours, car le `acceptOpportunity` Wix ne le fait pas.
 - Le détail d’une opportunité affiche la compatibilité, les critères acquéreur, le bien et le professionnel source; les coordonnées directes de l’autre professionnel ne sont pas exposées avant acceptation.
 - Le filtre local du matching professionnel compare désormais `transactionType`/`operationType` pour achat-location et `propertyType` pour maison/appartement. Il accepte les anciennes fiches qui encodent achat/location dans `propertyType`. Le test `npm run verify:ios-matching` vérifie ces règles, le rayon géographique, les types de biens, le score propriétaire-particulier et les compteurs de la matrice. Ce correctif concerne le port local uniquement; il n’a pas été déployé sur Supabase et n’implique aucune modification Wix.
+- Correctifs catalogue iOS (18 octobre 2026) : les baisses de prix immobilières gardent leur priorité sept jours comme sur le site; l’annuaire Wix ne demande plus les deux indicateurs `isActive` et `isVisibleInDirectory` à `true`, et conserve les profils visibles selon la règle du site; ses ex æquo utilisent un ordre français explicite. L’onglet immobilier est accompagné d’un onglet `Recherches` qui pagine `particularbuyersearches`, masque uniquement les demandes explicitement inactives et montre leurs critères publics sans coordonnées privées. Les filtres dynamiques des petites annonces traduisent les attributs courants en français et masquent les clés techniques d’import. Ces corrections locales ont des contrôles statiques; le compte personnel, les effectifs, l’ordre réel du compte, et les lectures Wix anonymes restent à contrôler sur appareil avec des données live.
 - Le scorer local de recherche enregistrée ne pénalise plus une recherche sans option d’équipement; terrasse, jardin, parking, piscine et plain-pied sont comparés à leurs champs ou caractéristiques propres. Les favoris sont isolés par e-mail de compte, Wix reste la référence lors de la synchro et les ajouts/retraits hors ligne restent en attente de reprise. La déconnexion bascule vers l’espace anonyme. Les tests locaux couvrent le matching; l’isolation SwiftUI est contrôlée statiquement en attendant compilation et essais avec deux comptes.
 - Ces modifications sont **locales et non déployées**. L’absence de compilateur Swift et Deno empêche la validation de build dans cet environnement. Un test authentifié avec deux pros différents reste nécessaire avant de qualifier le flux de prêt.
 
 ## Inventaire SwiftUI complet
 
-Les **53 déclarations `View`** de `RootView.swift` au moment de l’audit :
+Les **54 déclarations `View`** de `RootView.swift` au moment de l’audit :
 
 - `RootView`
 - `NativeSeasonalStaysView`
@@ -370,6 +371,7 @@ Les **53 déclarations `View`** de `RootView.swift` au moment de l’audit :
 - `ImportedProfessionalContactForm`
 - `ImportedListingContactForm`
 - `NativeListingsView`
+- `BuyerSearchDirectoryRow`
 - `ClassifiedAdRow`
 - `NativeClassifiedAdDetailView`
 - `NativeClassifiedReportSheet`
