@@ -171,7 +171,9 @@ workflows:
           set -o pipefail
           xcode-project build-ipa \
             --project "$CM_BUILD_DIR/$XCODE_PROJECT" \
-            --scheme "$XCODE_SCHEME" 2>&1 | tee /tmp/partenairefoyer-xcode-build.log
+            --scheme "$XCODE_SCHEME" \
+            --disable-xcpretty \
+            --verbose 2>&1 | tee /tmp/partenairefoyer-xcode-build.log
           BUILD_STATUS=${PIPESTATUS[0]}
           if [ "$BUILD_STATUS" -ne 0 ]; then
             echo "Diagnostics Xcode pertinents :"
