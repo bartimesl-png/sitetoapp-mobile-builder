@@ -1750,11 +1750,24 @@ private struct NativeCatalogContentView: View {
                             Button("Réessayer le chargement") { Task { await service.reload() } }
                         }
                     }
-                    if service.isLoading && !service.listings.isEmpty {
-                        Section { ProgressView("Chargement des autres sources immobilières…").font(.footnote) }
+                    if (service.isLoading || service.isLoadingImported) && !service.listings.isEmpty {
+                        Section {
+                            ProgressView(service.isLoading
+                                ? "Chargement des biens Wix…"
+                                : "Chargement des annonces importées…")
+                                .font(.footnote)
+                        }
                     }
-                    if service.isLoading && service.listings.isEmpty {
-                        Section { HStack { Spacer(); ProgressView("Chargement des biens…"); Spacer() } }
+                    if (service.isLoading || service.isLoadingImported) && service.listings.isEmpty {
+                        Section {
+                            HStack {
+                                Spacer()
+                                ProgressView(service.isLoading
+                                    ? "Chargement des biens Wix…"
+                                    : "Chargement des annonces importées…")
+                                Spacer()
+                            }
+                        }
                     } else if let error = service.errorMessage, service.listings.isEmpty {
                         Section("Annonces immobilières") {
                             Label(error, systemImage: "wifi.exclamationmark").font(.footnote).foregroundStyle(.orange)
@@ -1806,8 +1819,11 @@ private struct NativeCatalogContentView: View {
                                   systemImage: "slider.horizontal.3")
                         }
                     }
+                    if classifiedAds.isLoading && !classifiedAds.ads.isEmpty {
+                        Section { ProgressView("Chargement des annonces importées…").font(.footnote) }
+                    }
                     if classifiedAds.isLoading && classifiedAds.ads.isEmpty {
-                        Section { HStack { Spacer(); ProgressView("Chargement des petites annonces…"); Spacer() } }
+                        Section { HStack { Spacer(); ProgressView("Chargement des annonces Wix…"); Spacer() } }
                     } else if let error = classifiedAds.errorMessage, classifiedAds.ads.isEmpty {
                         Section("Petites annonces") {
                             Label(error, systemImage: "wifi.exclamationmark").font(.footnote).foregroundStyle(.orange)

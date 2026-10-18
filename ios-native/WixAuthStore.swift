@@ -1949,7 +1949,9 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         return usable
     }
 
-    func fetchPublicClassifiedAds() async throws -> (ads: [ClassifiedAd], warningMessage: String?) {
+    func fetchPublicClassifiedAds(
+        onPartialUpdate: @escaping @MainActor ([ClassifiedAd], String?) -> Void = { _, _ in }
+    ) async throws -> (ads: [ClassifiedAd], warningMessage: String?) {
         let visitor = try await requestToken([
             "clientId": clientID,
             "grantType": "anonymous"
@@ -1962,10 +1964,10 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
             "photo15", "photo16", "photo17", "photo18", "photo19", "photo20"
         ]
         var offset = 0
-        var ads: [ClassifiedAd] = []
+        var wixAds: [ClassifiedAd] = []
         var warnings: [String] = []
         let pageSize = 100
-        async let importedVehicleAds = fetchImportedVehicleClassifiedAds()
+
         do {
             while true {
                 let response = try await post(
@@ -1981,7 +1983,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
                     ],
                     as: WixPublicClassifiedAdsResponse.self
                 )
-                ads.append(contentsOf: response.dataItems.compactMap { $0.data.classifiedAd(id: $0.id) })
+                wixAds.append(contentsOf: response.dataItems.compactMap { $0.data.classifiedAd(id: $0.id) })
                 guard response.dataItems.count == pageSize else { break }
                 let nextOffset = offset + response.dataItems.count
                 guard nextOffset > offset else { break }
@@ -1990,22 +1992,33 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         } catch {
             warnings.append("Les petites annonces PartenaireFoyer n’ont pas pu être chargées.")
         }
+
+        func ordered(_ values: [ClassifiedAd]) -> [ClassifiedAd] {
+            var seen = Set<String>()
+            let unique = values.filter { seen.insert($0.id).inserted }
+            return unique.enumerated().sorted { left, right in
+                let lhs = left.element.catalogOrderDate
+                let rhs = right.element.catalogOrderDate
+                if lhs == rhs { return left.offset < right.offset }
+                return lhs > rhs
+            }.map(\.element)
+        }
+
+        onPartialUpdate(ordered(wixAds), warnings.isEmpty ? nil : warnings.joined(separator: " "))
+        var importedAds: [ClassifiedAd] = []
         do {
-            ads.append(contentsOf: try await importedVehicleAds)
+            let fetched = try await fetchImportedVehicleClassifiedAds { page in
+                importedAds.append(contentsOf: page)
+                onPartialUpdate(ordered(wixAds + importedAds), warnings.isEmpty ? nil : warnings.joined(separator: " "))
+            }
+            importedAds = fetched
         } catch {
             warnings.append("Les annonces de véhicules importées ne sont pas disponibles pour le moment.")
         }
-        var seen = Set<String>()
-        let unique = ads.filter { seen.insert($0.id).inserted }
-        // Wix's `bumpedAt` is the site's existing small-ad refresh order. Keep
-        // that order across Wix and imported feeds, falling back to creation time.
-        let ordered = unique.enumerated().sorted { left, right in
-            let lhs = left.element.catalogOrderDate
-            let rhs = right.element.catalogOrderDate
-            if lhs == rhs { return left.offset < right.offset }
-            return lhs > rhs
-        }.map(\.element)
-        return (ordered, warnings.isEmpty ? nil : warnings.joined(separator: " "))
+        let final = ordered(wixAds + importedAds)
+        let warning = warnings.isEmpty ? nil : warnings.joined(separator: " ")
+        onPartialUpdate(final, warning)
+        return (final, warning)
     }
 
     func fetchPublicBuyerSearches() async throws -> [WixPublicBuyerSearch] {
@@ -2080,13 +2093,14 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         return searches
     }
 
-    private func fetchImportedVehicleClassifiedAds() async throws -> [ClassifiedAd] {
+    private func fetchImportedVehicleClassifiedAds(onPage: @escaping @MainActor ([ClassifiedAd]) -> Void = { _ in }) async throws -> [ClassifiedAd] {
         let endpoint = URL(string: "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/pf-imported-vehicle-listings-public")!
-        let pageSize = 500
+        let pageSize = 50
         var offset = 0
         var results: [ClassifiedAd] = []
         var seen = Set<String>()
         while true {
+            var page: [ClassifiedAd] = []
             var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)!
             components.queryItems = [
                 URLQueryItem(name: "limit", value: String(pageSize)),
@@ -2140,7 +2154,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
                 let city = importedString(item, ["city"])
                 let postalCode = importedString(item, ["postalCode", "postal_code"])
                 let price = (item["price"] as? NSNumber)?.doubleValue
-                results.append(ClassifiedAd(
+                page.append(ClassifiedAd(
                     id: "imported-vehicle-\(rawID)",
                     title: title,
                     description: description,
@@ -2161,9 +2175,12 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
                 ))
             }
 
+            results.append(contentsOf: page)
+            if !page.isEmpty { onPage(page) }
             guard let total = payload["total"] as? Int else { break }
             offset += items.count
             if offset >= total || items.isEmpty || offset >= 10000 { break }
+            await Task.yield()
         }
         return results
     }
@@ -2228,17 +2245,13 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         ])
         let records = try await fetchVisibleProfessionalRecords(accessToken: visitor.accessToken)
         let registered = sortedRegisteredProfessionals(records.map { $0.data.professional(id: $0.id) })
-        // The website publishes registered profiles before imported feeds load.
         onPartialUpdate(registered, nil)
+
         var warnings: [String] = []
-        // Load independent feeds together while preserving the visible order.
         async let registeredLocalTask = fetchRegisteredLocalProsProfiles(accessToken: visitor.accessToken)
         async let registeredProvidersTask = fetchRegisteredServiceProviders(accessToken: visitor.accessToken)
-        async let localImportedTask = fetchImportedLocalProfessionals()
-        async let importedProvidersTask = fetchImportedLocalProfessionals(categories: ["prestataire"])
-        async let importedBrokersTask = fetchImportedLocalProfessionals(categories: ["courtier"])
         async let brokersTask = fetchPublicBrokers(accessToken: visitor.accessToken)
-        async let realEstateImportedTask = fetchImportedRealEstateProfessionals()
+
         let registeredLocalPros: [WixPublicProfessional]
         do { registeredLocalPros = try await registeredLocalTask }
         catch { registeredLocalPros = []; warnings.append("les fiches locales inscrites") }
@@ -2248,33 +2261,18 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         let brokers: [WixPublicProfessional]
         do { brokers = try await brokersTask }
         catch { brokers = []; warnings.append("l’annuaire des courtiers") }
-        // Wix exposes these as separate directories. De-duplicate within each
-        // collection family only; the same e-mail can legitimately own an
-        // immobilier profile and a broker, artisan, or service-provider profile.
+
         let registeredGroups = [
             sortedRegisteredProfessionals(registered),
             brokers,
             registeredLocalPros,
             registeredProviders
         ]
-        let allRegistered = registeredGroups.flatMap { $0 }
-        let orderedRegistered = allRegistered
+        let orderedRegistered = registeredGroups.flatMap { $0 }
         onPartialUpdate(orderedRegistered, nil)
-        let localImported: [WixPublicProfessional]
-        do { localImported = try await localImportedTask }
-        catch { localImported = []; warnings.append("les artisans et diagnostiqueurs importés") }
-        let importedBrokers: [WixPublicProfessional]
-        do { importedBrokers = try await importedBrokersTask }
-        catch { importedBrokers = []; warnings.append("les courtiers importés") }
-        let importedProviders: [WixPublicProfessional]
-        do { importedProviders = try await importedProvidersTask }
-        catch { importedProviders = []; warnings.append("les prestataires importés") }
-        let realEstateImported: [WixPublicProfessional]
-        do { realEstateImported = try await realEstateImportedTask }
-        catch { realEstateImported = []; warnings.append("les professionnels immobiliers importés") }
-        let importedGroups = [realEstateImported, importedBrokers, localImported, importedProviders]
+
         var visibleImported: [WixPublicProfessional] = []
-        for group in importedGroups {
+        func appendImportedGroup(_ group: [WixPublicProfessional]) {
             let categories = Set(group.compactMap(\.importedCategory))
             let categoryRegistered = registeredGroups.flatMap { $0 }.filter {
                 let category = $0.importedCategory ?? "immobilier"
@@ -2283,15 +2281,33 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
             let registeredContacts = Set(categoryRegistered.flatMap { [$0.professionalEmail, $0.publicPhone] }
                 .compactMap { $0 }.map(normalizedContactKey).filter { !$0.isEmpty })
             var seen = Set(categoryRegistered.map { normalizedProfessionalKey($0.resolvedName, $0.postalCode) })
+            let existingIDs = Set(visibleImported.map(\.id))
             visibleImported.append(contentsOf: group.filter { professional in
+                guard !existingIDs.contains(professional.id) else { return false }
                 let contacts = [professional.dedupeEmail, professional.dedupePhone].compactMap { $0 }
                     .map(normalizedContactKey).filter { !$0.isEmpty }
                 return contacts.allSatisfy { !registeredContacts.contains($0) } &&
                     seen.insert(normalizedProfessionalKey(professional.resolvedName, professional.postalCode)).inserted
             })
+            onPartialUpdate(orderedRegistered + visibleImported, nil)
         }
+
+        do {
+            _ = try await fetchImportedRealEstateProfessionals { page in appendImportedGroup(page) }
+        } catch { warnings.append("les professionnels immobiliers importés") }
+        do {
+            _ = try await fetchImportedLocalProfessionals(categories: ["courtier"]) { page in appendImportedGroup(page) }
+        } catch { warnings.append("les courtiers importés") }
+        do {
+            _ = try await fetchImportedLocalProfessionals { page in appendImportedGroup(page) }
+        } catch { warnings.append("les artisans et diagnostiqueurs importés") }
+        do {
+            _ = try await fetchImportedLocalProfessionals(categories: ["prestataire"]) { page in appendImportedGroup(page) }
+        } catch { warnings.append("les prestataires importés") }
+
         let professionals = orderedRegistered + visibleImported
         let warning = warnings.isEmpty ? nil : "Annuaire partiellement chargé : " + warnings.joined(separator: ", ") + ". Réessayez pour actualiser les fiches manquantes."
+        onPartialUpdate(professionals, warning)
         return ProfessionalDirectoryResult(professionals: professionals, warning: warning)
     }
 
@@ -2803,10 +2819,13 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         return (directoryCategory, rawCategory)
     }
 
-    private func fetchImportedLocalProfessionals(categories: [String] = ["artisan", "diagnostiqueur"]) async throws -> [WixPublicProfessional] {
+    private func fetchImportedLocalProfessionals(
+        categories: [String] = ["artisan", "diagnostiqueur"],
+        onPage: @escaping @MainActor ([WixPublicProfessional]) -> Void = { _ in }
+    ) async throws -> [WixPublicProfessional] {
         let endpoint = URL(string: "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/pf-imported-local-pros-public")!
         var results: [WixPublicProfessional] = []
-        let pageSize = 250
+        let pageSize = 50
 
         for category in categories {
             var offset = 0
@@ -2826,7 +2845,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
                     throw URLError(.badServerResponse)
                 }
 
-                results.append(contentsOf: items.compactMap { item in
+                let page = items.compactMap { item in
                     guard (item["claimed"] as? Bool) != true,
                           let rawID = importedString(item, ["id", "_id"]), !rawID.isEmpty else { return nil }
                     let firstName = importedString(item, ["first_name", "firstName"])
@@ -2852,22 +2871,27 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
                         dedupeEmail: importedString(item, ["email"]),
                         dedupePhone: importedString(item, ["phone"])
                     )
-                })
+                }
+                results.append(contentsOf: page)
+                if !page.isEmpty { await onPage(page) }
 
                 guard items.count == pageSize else { break }
                 let nextOffset = offset + items.count
                 guard nextOffset > offset else { break }
                 offset = nextOffset
                 if let total = payload["total"] as? Int, offset >= total { break }
+                await Task.yield()
             }
         }
         return results
     }
 
-    private func fetchImportedRealEstateProfessionals() async throws -> [WixPublicProfessional] {
+    private func fetchImportedRealEstateProfessionals(
+        onPage: @escaping @MainActor ([WixPublicProfessional]) -> Void = { _ in }
+    ) async throws -> [WixPublicProfessional] {
         let endpoint = URL(string: "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/pf-imported-real-estate-pros-public")!
         var offset = 0
-        let pageSize = 250
+        let pageSize = 50
         var results: [WixPublicProfessional] = []
         while true {
             var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)!
@@ -2883,7 +2907,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
                   payload["success"] as? Bool != false,
                   let items = payload["items"] as? [[String: Any]],
                   let total = payload["total"] as? Int else { throw URLError(.badServerResponse) }
-            results.append(contentsOf: items.compactMap { item in
+            let page = items.compactMap { item in
                 guard (item["claimed"] as? Bool) != true,
                       let id = importedString(item, ["id"]), !id.isEmpty else { return nil }
                 let first = importedString(item, ["firstName", "first_name"])
@@ -2902,12 +2926,15 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
                     website: importedString(item, ["website"]), importedID: id, importedCategory: "immobilier",
                     dedupeEmail: importedString(item, ["email"]), dedupePhone: importedString(item, ["phone"])
                 )
-            })
+            }
+            results.append(contentsOf: page)
+            if !page.isEmpty { await onPage(page) }
             guard !items.isEmpty else { break }
             let nextOffset = offset + items.count
             guard nextOffset > offset else { break }
             offset = nextOffset
             if offset >= total || items.count < pageSize { break }
+            await Task.yield()
         }
         return results
     }

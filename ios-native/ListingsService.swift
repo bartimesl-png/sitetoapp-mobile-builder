@@ -5,12 +5,12 @@ import Combine
 final class ListingsService: ObservableObject {
     @Published private(set) var listings: [Listing] = []
     @Published private(set) var isLoading = false
+    @Published private(set) var isLoadingImported = false
     @Published private(set) var errorMessage: String?
     @Published private(set) var warningMessage: String?
     @Published private(set) var hasLoaded = false
 
     private enum Source {
-        case imported
         case privateOwner
         case professional
     }
@@ -29,28 +29,14 @@ final class ListingsService: ObservableObject {
     }
 
     func reload() async {
-        guard !isLoading else { return }
+        guard !isLoading, !isLoadingImported else { return }
         isLoading = true
         errorMessage = nil
         warningMessage = nil
-
-        pendingSources = 3
+        pendingSources = 2
         sourceFailures = []
 
-        // Each source publishes as soon as it completes. A slow import cannot
-        // keep the Wix property catalogue hidden behind an empty loading screen.
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            do {
-                let items = try await self.loadImportedListings { [weak self] partialItems in
-                    self?.importedSource = partialItems
-                    self?.publishCatalog()
-                }
-                self.finish(.imported, items: items, failure: nil)
-            } catch {
-                self.finish(.imported, items: nil, failure: "les annonces importées (\(error.localizedDescription))")
-            }
-        }
+        // The Wix catalog finishes before optional imported feeds start.
         Task { @MainActor [weak self] in
             guard let self else { return }
             do { self.finish(.privateOwner, items: try await WixAuthStore.shared.fetchPublicPrivateListings(), failure: nil) }
@@ -67,30 +53,68 @@ final class ListingsService: ObservableObject {
         pendingSources = max(0, pendingSources - 1)
         if let items {
             switch source {
-            case .imported: importedSource = items
             case .privateOwner: privateOwnerSource = items
             case .professional: professionalSource = items
             }
         } else if let failure, !sourceFailures.contains(failure) {
             sourceFailures.append(failure)
         }
+        publishCatalog()
 
+        guard pendingSources == 0 else { return }
+        isLoading = false
+        hasLoaded = true
+        startImportedLoad()
+    }
+
+    private func startImportedLoad() {
+        guard !isLoadingImported else { return }
+        isLoadingImported = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            var accumulated = self.importedSource ?? []
+            var seen = Set(accumulated.map(\.id))
+            do {
+                try await self.loadImportedListings { [weak self] page in
+                    guard let self else { return }
+                    let fresh = page.filter { seen.insert($0.id).inserted }
+                    guard !fresh.isEmpty else { return }
+                    accumulated.append(contentsOf: fresh)
+                    self.importedSource = accumulated
+                    self.appendImportedPage(fresh)
+                }
+                self.finishImported(items: accumulated, failure: nil)
+            } catch {
+                self.finishImported(items: nil, failure: "les annonces importées (\(error.localizedDescription))")
+            }
+        }
+    }
+
+    private func finishImported(items: [Listing]?, failure: String?) {
+        if let items { importedSource = items }
+        if let failure, !sourceFailures.contains(failure) { sourceFailures.append(failure) }
+        isLoadingImported = false
         publishCatalog()
 
         let successfulSources = [importedSource, privateOwnerSource, professionalSource].compactMap { $0 }.count
-        if pendingSources == 0 { isLoading = false }
         if successfulSources > 0 {
             hasLoaded = true
             warningMessage = sourceFailures.isEmpty
                 ? nil
                 : "Certaines sources sont indisponibles : \(sourceFailures.joined(separator: ", "))."
-        } else if pendingSources == 0 {
-            if listings.isEmpty {
-                errorMessage = "Les annonces ne sont pas disponibles pour le moment. Réessayez dans quelques instants."
-            } else {
-                warningMessage = "Actualisation impossible. Les biens déjà chargés restent affichés."
-            }
+        } else if listings.isEmpty {
+            errorMessage = "Les annonces ne sont pas disponibles pour le moment. Réessayez dans quelques instants."
+        } else {
+            warningMessage = "Actualisation impossible. Les biens déjà chargés restent affichés."
         }
+    }
+
+    private func appendImportedPage(_ page: [Listing]) {
+        var seen = Set(listings.map(\.id))
+        let fresh = page.filter { seen.insert($0.id).inserted }
+        guard !fresh.isEmpty else { return }
+        listings.append(contentsOf: ListingCatalogOrdering.ordered(fresh))
+        hasLoaded = true
     }
 
     private func publishCatalog() {
@@ -101,10 +125,9 @@ final class ListingsService: ObservableObject {
         if !listings.isEmpty { hasLoaded = true }
     }
 
-    private func loadImportedListings(onPage: @escaping @MainActor ([Listing]) -> Void) async throws -> [Listing] {
-        let limit = 250
+    private func loadImportedListings(onPage: @escaping @MainActor ([Listing]) -> Void) async throws {
+        let limit = 50
         var offset = 0
-        var allItems: [Listing] = []
 
         while true {
             var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)!
@@ -122,15 +145,14 @@ final class ListingsService: ObservableObject {
                 throw ListingFeedError.httpStatus(http.statusCode)
             }
             let page = try JSONDecoder().decode(ListingFeedResponse.self, from: data)
-            allItems.append(contentsOf: page.items)
-            if !allItems.isEmpty { await onPage(allItems) }
+            if !page.items.isEmpty { await onPage(page.items) }
             guard !page.items.isEmpty else { break }
             let nextOffset = offset + page.items.count
             guard nextOffset > offset else { break }
             offset = nextOffset
             if page.items.count < limit || (page.total.map { offset >= $0 } ?? false) { break }
+            await Task.yield()
         }
-        return allItems
     }
 
     private enum ListingFeedError: LocalizedError {
@@ -211,7 +233,11 @@ final class ClassifiedAdsService: ObservableObject {
         warningMessage = nil
         defer { isLoading = false }
         do {
-            let result = try await WixAuthStore.shared.fetchPublicClassifiedAds()
+            let result = try await WixAuthStore.shared.fetchPublicClassifiedAds { [weak self] partialAds, warning in
+                self?.ads = partialAds
+                self?.warningMessage = warning
+                self?.hasLoaded = true
+            }
             ads = result.ads
             warningMessage = result.warningMessage
             hasLoaded = true
