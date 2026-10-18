@@ -1442,7 +1442,7 @@ private struct NativeCatalogContentView: View {
     @State private var classifiedMileageMax = ""
     @State private var classifiedEnergy = ""
     @State private var classifiedGearbox = ""
-    @State private var classifiedSort = "Ordre du catalogue"
+    @State private var classifiedSort = "Catégorie"
 
     private var filteredListings: [Listing] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1543,6 +1543,22 @@ private struct NativeCatalogContentView: View {
             (!usesVehicleFilters || (mileageMaximum.map { maximumMileage in Double(attributeValue("mileage", ad: ad)).map { $0 <= maximumMileage } ?? false } ?? true))
         }
         switch classifiedSort {
+        case "Catégorie":
+            let categoryOrder = Dictionary(uniqueKeysWithValues: ClassifiedCategoryOptions.all.enumerated().map { ($1, $0) })
+            return filtered.sorted { left, right in
+                let leftCategory = left.category ?? "Divers"
+                let rightCategory = right.category ?? "Divers"
+                let leftOrder = categoryOrder[leftCategory] ?? ClassifiedCategoryOptions.all.count
+                let rightOrder = categoryOrder[rightCategory] ?? ClassifiedCategoryOptions.all.count
+                if leftOrder != rightOrder { return leftOrder < rightOrder }
+                if leftCategory != rightCategory {
+                    return leftCategory.localizedStandardCompare(rightCategory) == .orderedAscending
+                }
+                if left.catalogOrderDate != right.catalogOrderDate {
+                    return left.catalogOrderDate > right.catalogOrderDate
+                }
+                return left.id < right.id
+            }
         case "Prix croissant": return filtered.sorted { ($0.price ?? .greatestFiniteMagnitude) < ($1.price ?? .greatestFiniteMagnitude) }
         case "Prix décroissant": return filtered.sorted { ($0.price ?? -.greatestFiniteMagnitude) > ($1.price ?? -.greatestFiniteMagnitude) }
         default: return filtered
@@ -1639,8 +1655,14 @@ private struct NativeCatalogContentView: View {
             "type": "Type", "manufacturer": "Fabricant", "rental": "location", "unit": "unité",
             "number": "Nombre", "of": "de", "pieces": "pièces", "engine": "moteur", "doors": "portes"
         ]
-        let translatedWords = normalized.split(separator: " ").compactMap { words[String($0)] }.joined(separator: " ")
-        return translatedWords.isEmpty ? "Autre caractéristique" : translatedWords
+        let tokens = normalized.split(separator: " ").map { token -> String in
+            let word = String(token)
+            return words[word] ?? word.capitalized
+        }
+        let label = tokens.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+        return words.keys.contains(where: { normalized.split(separator: " ").contains(Substring($0)) })
+            ? label
+            : "Critère : \(label)"
     }
 
     private func attributeValue(_ key: String, ad: ClassifiedAd) -> String {
@@ -1807,7 +1829,7 @@ private struct NativeCatalogContentView: View {
                                 .font(.footnote).foregroundStyle(.secondary)
                             Spacer()
                             Menu {
-                                ForEach(["Ordre du catalogue", "Prix croissant", "Prix décroissant"], id: \.self) { option in
+                                ForEach(["Catégorie", "Ordre du catalogue", "Prix croissant", "Prix décroissant"], id: \.self) { option in
                                     Button(option) { classifiedSort = option }
                                 }
                             } label: {
@@ -1917,13 +1939,15 @@ private struct NativeCatalogContentView: View {
                                     }
                                 }
                             }
-                            Picker("Type", selection: $classifiedListingType) {
-                                Text("Tous").tag("Tous")
-                                Text("Je vends").tag("sell")
-                                Text("Je donne").tag("give")
-                                Text("J’échange").tag("exchange")
-                                Text("Je loue").tag("rent")
+                            Picker("Type d’annonce", selection: $classifiedListingType) {
+                                Text("Toutes").tag("Tous")
+                                Text("Vendre").tag("sell")
+                                Text("Donner").tag("give")
+                                Text("Échanger").tag("exchange")
+                                Text("Louer").tag("rent")
                             }
+                            .pickerStyle(.segmented)
+                            .accessibilityLabel("Filtrer par type d’annonce : vendre, donner, échanger ou louer")
                             Picker("État", selection: $classifiedCondition) {
                                 Text("Tous").tag("Tous")
                                 ForEach(Array(Set(classifiedAds.ads.compactMap(\.condition))).sorted(), id: \.self) {
