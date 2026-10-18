@@ -41,18 +41,25 @@ final class ListingsService: ObservableObject {
         // keep the Wix property catalogue hidden behind an empty loading screen.
         Task { @MainActor [weak self] in
             guard let self else { return }
-            do { self.finish(.imported, items: try await self.loadImportedListings(), failure: nil) }
-            catch { self.finish(.imported, items: nil, failure: "les annonces importées") }
+            do {
+                let items = try await self.loadImportedListings { [weak self] partialItems in
+                    self?.importedSource = partialItems
+                    self?.publishCatalog()
+                }
+                self.finish(.imported, items: items, failure: nil)
+            } catch {
+                self.finish(.imported, items: nil, failure: "les annonces importées (\(error.localizedDescription))")
+            }
         }
         Task { @MainActor [weak self] in
             guard let self else { return }
             do { self.finish(.privateOwner, items: try await WixAuthStore.shared.fetchPublicPrivateListings(), failure: nil) }
-            catch { self.finish(.privateOwner, items: nil, failure: "les biens de particuliers") }
+            catch { self.finish(.privateOwner, items: nil, failure: "les biens de particuliers (\(error.localizedDescription))") }
         }
         Task { @MainActor [weak self] in
             guard let self else { return }
             do { self.finish(.professional, items: try await WixAuthStore.shared.fetchPublicProfessionalListings(), failure: nil) }
-            catch { self.finish(.professional, items: nil, failure: "les biens de professionnels") }
+            catch { self.finish(.professional, items: nil, failure: "les biens de professionnels (\(error.localizedDescription))") }
         }
     }
 
@@ -68,10 +75,7 @@ final class ListingsService: ObservableObject {
             sourceFailures.append(failure)
         }
 
-        var seen = Set<String>()
-        listings = ListingCatalogOrdering.ordered(
-            (importedSource ?? []) + (privateOwnerSource ?? []) + (professionalSource ?? [])
-        ).filter { seen.insert($0.id).inserted }
+        publishCatalog()
 
         let successfulSources = [importedSource, privateOwnerSource, professionalSource].compactMap { $0 }.count
         if pendingSources == 0 { isLoading = false }
@@ -89,7 +93,15 @@ final class ListingsService: ObservableObject {
         }
     }
 
-    private func loadImportedListings() async throws -> [Listing] {
+    private func publishCatalog() {
+        var seen = Set<String>()
+        listings = ListingCatalogOrdering.ordered(
+            (importedSource ?? []) + (privateOwnerSource ?? []) + (professionalSource ?? [])
+        ).filter { seen.insert($0.id).inserted }
+        if !listings.isEmpty { hasLoaded = true }
+    }
+
+    private func loadImportedListings(onPage: @escaping @MainActor ([Listing]) -> Void) async throws -> [Listing] {
         let limit = 250
         var offset = 0
         var allItems: [Listing] = []
@@ -103,11 +115,15 @@ final class ListingsService: ObservableObject {
             var request = URLRequest(url: components.url!, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
             request.setValue("application/json", forHTTPHeaderField: "Accept")
             let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            guard let http = response as? HTTPURLResponse else {
                 throw URLError(.badServerResponse)
+            }
+            guard (200..<300).contains(http.statusCode) else {
+                throw ListingFeedError.httpStatus(http.statusCode)
             }
             let page = try JSONDecoder().decode(ListingFeedResponse.self, from: data)
             allItems.append(contentsOf: page.items)
+            if !allItems.isEmpty { await onPage(allItems) }
             guard !page.items.isEmpty else { break }
             let nextOffset = offset + page.items.count
             guard nextOffset > offset else { break }
@@ -115,6 +131,15 @@ final class ListingsService: ObservableObject {
             if page.items.count < limit || (page.total.map { offset >= $0 } ?? false) { break }
         }
         return allItems
+    }
+
+    private enum ListingFeedError: LocalizedError {
+        case httpStatus(Int)
+        var errorDescription: String? {
+            switch self {
+            case .httpStatus(let status): "Le service des annonces a répondu (\(status))."
+            }
+        }
     }
 }
 
@@ -390,7 +415,7 @@ final class ProfessionalsService: ObservableObject {
             warningMessage = result.warning
             hasLoaded = true
         } catch {
-            errorMessage = "L’annuaire des professionnels n’est pas disponible pour le moment."
+            errorMessage = "L’annuaire n’a pas pu être chargé : \(error.localizedDescription)"
         }
     }
 }

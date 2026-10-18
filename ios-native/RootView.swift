@@ -475,10 +475,10 @@ private struct NativeProfessionalsView: View {
 
     private let directories: [(String, String, String, String)] = [
         ("Immobilier", "building.2.fill", "Professionnels de l’immobilier", "CategoryMaison"),
-        ("Courtiers", "person.text.rectangle.fill", "Courtiers", "CategoryPro"),
-        ("Artisans", "hammer.fill", "Artisans", "CategoryPro"),
-        ("Diagnostiqueurs", "checkmark.seal.fill", "Diagnostiqueurs", "CategoryPro"),
-        ("Prestataires", "wrench.and.screwdriver.fill", "Prestataires de services", "CategoryPetitesAnnonces")
+        ("Courtiers", "person.text.rectangle.fill", "Courtiers", "CategoryCourtiers"),
+        ("Artisans", "hammer.fill", "Artisans", "CategoryArtisans"),
+        ("Diagnostiqueurs", "checkmark.seal.fill", "Diagnostiqueurs", "CategoryDiagnostics"),
+        ("Prestataires", "wrench.and.screwdriver.fill", "Prestataires de services", "CategoryServices")
     ]
 
     var body: some View {
@@ -2949,12 +2949,30 @@ private struct HomeDashboardView: View {
                             .font(.title3.bold())
                             .foregroundStyle(PFTheme.deepGreen)
                         Button { showNativeEstimation = true } label: {
-                            Label("Faire estimer mon bien", systemImage: "chart.line.uptrend.xyaxis")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(PFTheme.brand)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(12)
-                                .background(PFTheme.paleMint, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            HStack(spacing: 12) {
+                                Image("CategoryEstimation")
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 58, height: 54)
+                                    .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+                                    .accessibilityHidden(true)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("Faire estimer mon bien")
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(PFTheme.deepGreen)
+                                    Text("Recevoir une estimation professionnelle")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+                                }
+                                Spacer(minLength: 4)
+                                Image(systemName: "arrow.right")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(PFTheme.brand)
+                            }
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(PFTheme.paleMint, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
                         }
                         .buttonStyle(.plain)
                         Text("Déposer une demande")
@@ -3087,16 +3105,6 @@ private struct HomeDashboardView: View {
 
     private var hero: some View {
         ZStack(alignment: .topTrailing) {
-            Image("CategoryMaison")
-                .resizable()
-                .scaledToFill()
-                .overlay {
-                    LinearGradient(
-                        colors: [PFTheme.deepGreen.opacity(0.65), PFTheme.deepGreen.opacity(0.84)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                }
             Circle()
                 .fill(.white.opacity(0.07))
                 .frame(width: 250, height: 250)
@@ -3150,7 +3158,7 @@ private struct HomeDashboardView: View {
                     Image(systemName: "sparkles")
                         .font(.caption.weight(.bold))
                         .foregroundStyle(PFTheme.deepGreen)
-                    Text("Matching particuliers · pros · pros")
+                    Text("Particuliers · professionnels · biens")
                         .font(.caption.weight(.bold))
                         .foregroundStyle(PFTheme.deepGreen)
                 }
@@ -3177,6 +3185,22 @@ private struct HomeDashboardView: View {
             .frame(maxWidth: .infinity, minHeight: 286, alignment: .leading)
         }
         .frame(maxWidth: .infinity, minHeight: 286, alignment: .leading)
+        .background {
+            GeometryReader { proxy in
+                Image("CategoryMaison")
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                    .overlay {
+                        LinearGradient(
+                            colors: [PFTheme.deepGreen.opacity(0.65), PFTheme.deepGreen.opacity(0.84)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    }
+                    .clipped()
+            }
+        }
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .shadow(color: PFTheme.deepGreen.opacity(0.22), radius: 18, y: 9)
     }
