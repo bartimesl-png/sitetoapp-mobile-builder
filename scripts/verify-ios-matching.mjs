@@ -113,6 +113,8 @@ const matrix = await readFile(new URL("../ios-native/WIX_IOS_PARITY_MATRIX.md", 
 const source = await readFile(new URL("../ios-native/RootView.swift", import.meta.url), "utf8");
 const favoritesSource = await readFile(new URL("../ios-native/FavoritesStore.swift", import.meta.url), "utf8");
 const appDelegateSource = await readFile(new URL("../ios-native/AppDelegate.swift", import.meta.url), "utf8");
+const accountRoleSource = source.slice(source.indexOf("private enum AccountRole"), source.indexOf("private struct RoleEntryView"));
+const roleEntrySource = source.slice(source.indexOf("private struct RoleEntryView"), source.indexOf("private static func primarySubcategory"));
 const declaredRoutes = [...matrix.matchAll(/^\|\s*\d+\s*\|/gm)].length;
 const sourceViews = [...source.matchAll(/^\s*(?:private\s+)?struct\s+(\w+)\s*:\s*View\b/gm)].map((match) => match[1]);
 const viewInventory = matrix.split("## Inventaire SwiftUI complet")[1] ?? "";
@@ -137,5 +139,24 @@ assert.ok(appDelegateSource.includes("allowedKeys: Set<String>"),
   "only routing identifiers, not notification message text, should be stored for cold-launch routing");
 assert.ok(source.includes("partenaireFoyerPushNotificationTapped") && source.includes("openPushDestination(fields)"),
   "a notification tap must route into the in-app account menu");
+for (const route of [
+  "/vendeur-login", "/vendeur-signup", "/vendeur-dashboard",
+  "/pro-app-login", "/broker-login", "/broker-signup", "/broker-dashboard",
+  "/artisan-login", "/artisan-signup", "/artisan-dashboard",
+  "/connexion-prestataire", "/inscription-prestataire", "/espace-prestataire",
+  "/hebergeur-connexion", "/hebergeur-inscription", "/hebergeur-dashboard",
+]) {
+  assert.ok(accountRoleSource.includes(route), `the iOS role routing must retain ${route}`);
+}
+assert.equal([...roleEntrySource.matchAll(/\.sheet\(isPresented: \$showSiteLogin\)/g)].length, 1,
+  "each role login action must present only the shared WKWebView flow");
+assert.equal([...roleEntrySource.matchAll(/\.sheet\(isPresented: \$showSiteSignup\)/g)].length, 1,
+  "each role signup action must present only the shared WKWebView flow");
+assert.ok(roleEntrySource.includes("siteFlow(url: role.loginURL") && roleEntrySource.includes("siteFlow(url: role.signupURL"),
+  "role login and signup must use the shared WKWebView session flow");
+assert.ok(source.includes("expectedDashboardRole.dashboardURL.path"),
+  "legacy role login must only hand off after the selected role dashboard route is reached");
+assert.ok(source.includes("configuration.websiteDataStore = .default()"),
+  "role dashboards and login flows must share persistent website cookies");
 
 console.log("Matching rules and parity inventory checks passed.");

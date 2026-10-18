@@ -4848,14 +4848,6 @@ private struct RoleEntryView: View {
             .sheet(isPresented: $showSiteDashboard) {
                 siteFlow(url: role.dashboardURL, title: "Mon tableau de bord")
             }
-            .sheet(isPresented: $showSiteLogin) {
-                InAppSafariView(url: role.loginURL)
-                    .ignoresSafeArea()
-            }
-            .sheet(isPresented: $showSiteSignup) {
-                InAppSafariView(url: role.signupURL)
-                    .ignoresSafeArea()
-            }
             .onAppear {
                 guard let initialProfile else { return }
                 isCreatingAccount = isEditing

@@ -8,6 +8,38 @@ L’entrée « Explorer toutes les pages du site » ouvre la WKWebView persistan
 
 Routes trouvées : **207 déclarations**. Cela comprend les motifs avec paramètres et les trois routes de ville construites depuis des listes.
 
+## Vérification directe des routes publiques — 18 octobre 2026
+
+Contrôle visuel en lecture seule du site public dans un navigateur, sans connexion ni soumission de formulaire. Cela vérifie que les routes d’exemple ouvrent une page visible sur le site; ce n’est ni un essai de l’application iOS ni une preuve de parité fonctionnelle pour toutes les routes.
+
+| Route contrôlée | Résultat observé sur le site | Portée / limite |
+|---|---|---|
+| `/` | Accueil rendu; navigation vers les annonces, professionnels, services, comptes et pages d’information visible. | La source iOS ouvre cette origine dans le composant WKWebView commun. Le rendu dans l’application et sur appareil n’a pas été observé pendant ce contrôle. |
+| `/annonces` | Catalogue immobilier rendu avec carte, filtres, types de vendeurs et action de recherche. | Contrôle de chargement et d’interface; les filtres n’ont pas été soumis. |
+| `/petites-annonces` | Page publique rendue avec actions de recherche et de dépôt et catégories vente/don/échange/location. | Contrôle de chargement; dépôt, paiement et contact non exécutés. |
+| `/professionnels` | Annuaire rendu avec recherche et fiches de professionnels. | Contrôle de chargement; favoris et contact nécessitent des essais séparés. |
+| `/locations-saisonnieres` | Page de séjours rendue avec destination, dates, voyageurs et recherche. | Contrôle de chargement; aucune recherche ni réservation n’a été soumise. |
+| `/matching-immobilier` | Page explicative du matching rendue. | Cette route est informative; elle ne constitue pas, à elle seule, le parcours opérationnel de matching qui se trouve dans les espaces connectés. |
+| `/pro-app-login` | Formulaire professionnel rendu avec connexion, compte déjà inscrit et inscription. | Aucun identifiant n’a été saisi; le succès de connexion et la redirection ne sont pas vérifiés. |
+| `/vendeur-dashboard` | Le site montre un formulaire « Connexion Vendeur » à l’accès non connecté. | Confirme la protection de cet espace; aucun compte n’a été utilisé pour vérifier le dashboard après connexion. |
+| `/pro/dashboard` | Le site affiche « Sign In Required » et une action de connexion à l’accès non connecté. | Confirme la protection de cet espace; les données et actions du dashboard restent non vérifiées. |
+| `/broker-dashboard` | Le site montre le formulaire de connexion Courtier. | Page d’entrée vérifiée sans soumission de compte. |
+| `/artisan-dashboard` | Le site montre le formulaire de connexion Artisan. | La route sert aussi à l’entrée diagnostiqueur dans le mapping iOS; l’identité métier n’est pas distinguable par l’URL seule. |
+| `/espace-prestataire` | Le site montre le formulaire de connexion Prestataire. | Page d’entrée vérifiée sans soumission de compte. |
+| `/hebergeur-dashboard` | Le site affiche la connexion Hébergeur. | Page d’entrée vérifiée sans soumission de compte. |
+| `/vacancier-connexion` | Redirection observée vers `/vendeur-login`, qui affiche « Connexion Vendeur ». | Le parcours voyageur doit être validé avec un vrai compte : le libellé et la destination observés sont ceux du vendeur. |
+| `/vendeur-reservations-saisonnieres` | La page affiche une demande de connexion dans le formulaire vendeur. | Les réservations sont protégées; la connexion voyageur et le retour à cette page ne sont pas validés. |
+
+**Conclusion de ce contrôle :** les quinze routes énumérées ont été ouvertes directement; les catalogues publics affichent leur contenu, les dashboards contrôlés présentent leur écran d’accès, et l’entrée voyageur redirige actuellement vers la connexion vendeur. Les 207 déclarations n’ont pas été exécutées une par une : plusieurs sont des motifs avec paramètres (identifiants, villes, catégories), des routes d’administration, de paiement ou des parcours nécessitant un compte. Le routeur iOS permet le chargement HTTP(S) et les liens ouvrant une nouvelle fenêtre sont repris dans la même WKWebView (voir `ProfessionalPortalWebViewRepresentable` dans `RootView.swift`); ce constat de code ne démontre pas que chaque interaction Wix fonctionne dans WKWebView. La compilation CodeMagic #57 valide l’archive, pas les comportements métier. Une comparaison exacte des 207 parcours demande des essais sur l’app iOS avec des comptes de chaque rôle et des données contrôlées.
+
+### Contrôle des bascules après connexion par rôle
+
+- Les rôles particulier, courtier, artisan/diagnostiqueur, prestataire et hébergeur ouvrent maintenant leurs routes de connexion et d’inscription via le composant WKWebView commun, qui partage le magasin de cookies et renvoie vers l’écran d’app après détection du chemin de dashboard attendu. Le pro immobilier suit `/api/pro-app-login` et transmet son jeton à la même WKWebView.
+- Correction locale du 18 octobre 2026 : deux anciens modificateurs `.sheet` pour connexion/inscription ouvraient une vue Safari concurrente. Ils ont été retirés pour ne laisser que le flux WKWebView qui conserve la session et reçoit la redirection. Vérification statique ajoutée au script `verify:ios-matching`; compilation iOS de cette dernière modification non lancée.
+- Pour artisan et diagnostiqueur, les URL de connexion, inscription et dashboard sont identiques. Le code conserve le rôle choisi par l’utilisateur; le chemin `/artisan-dashboard` ne permet pas de confirmer le rôle effectif retourné par le compte. L’identité métier doit être vérifiée par le site ou lors d’un essai avec chaque compte.
+- Le voyageur est ouvert dans la WKWebView sur `/vacancier-connexion`, mais le site a redirigé ce chemin vers `/vendeur-login` lors du contrôle public. Les favoris saisonniers, réservations et messages du voyageur ne sont pas reproduits nativement et leur parcours authentifié reste non vérifié. Il s’agit d’un écart à clarifier côté site; aucune modification Wix n’a été effectuée.
+- Les actions Messages et Parrainage sont adaptées au rôle dans le dashboard natif lorsque celui-ci est utilisé : la section native expose messages aux rôles pris en charge et le parrainage natif particulier/pro immobilier. Pour les autres comptes à session Wix personnalisée, le dashboard est rendu par le site dans la WKWebView; la présence et le comportement de chaque bouton sur compte connecté n’ont pas été testés. Le port natif n’est donc pas complet pour tous les rôles.
+
 ## Accès aux comptes par rôle
 
 | Espace | Connexion Wix | Inscription Wix | Mot de passe oublié | Tableau de bord Wix | État côté iOS |
