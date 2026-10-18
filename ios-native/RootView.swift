@@ -8557,3 +8557,5 @@ private struct DashboardItemDetailView: View {
             }
         }
     }
+
+}
