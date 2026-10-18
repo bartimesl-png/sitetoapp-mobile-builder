@@ -2980,19 +2980,19 @@ private struct HomeDashboardView: View {
                         projectCard(
                             title: "Je recherche un bien à acheter",
                             subtitle: "Envoyez une demande aux professionnels de votre secteur",
-                            symbol: "house.and.flag",
+                            image: "ProjectBuy",
                             type: "recherche_achat"
                         )
                         projectCard(
                             title: "Je recherche une location",
                             subtitle: "Transmettez vos critères de recherche locative",
-                            symbol: "key.horizontal",
+                            image: "ProjectRentSearch",
                             type: "recherche_location"
                         )
                         projectCard(
                             title: "Je mets un bien en location",
                             subtitle: "Proposez votre logement aux professionnels concernés",
-                            symbol: "house.badge.plus",
+                            image: "ProjectRentListing",
                             type: "mise_en_location"
                         )
                         Text("Ces demandes publiques sont enregistrées dans le parcours Wix des particuliers et transmises aux professionnels selon le matching du site.")
@@ -3079,17 +3079,18 @@ private struct HomeDashboardView: View {
         .buttonStyle(.plain)
     }
 
-    private func projectCard(title: String, subtitle: String, symbol: String, type: String) -> some View {
+    private func projectCard(title: String, subtitle: String, image: String, type: String) -> some View {
         Button {
             publicDemandType = type
             showPublicDemand = true
         } label: {
             HStack(spacing: 14) {
-                Image(systemName: symbol)
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(.teal)
-                    .frame(width: 46, height: 46)
-                    .background(Color.teal.opacity(0.11), in: RoundedRectangle(cornerRadius: 14))
+                Image(image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 58, height: 54)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title).font(.headline).foregroundStyle(.primary)
                     Text(subtitle).font(.subheadline).foregroundStyle(.secondary)
