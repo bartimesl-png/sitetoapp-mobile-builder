@@ -170,8 +170,11 @@ assert.ok(wixAuthStoreSource.includes('categories: ["prestataire"]') &&
   wixAuthStoreSource.includes('"courtier", "prestataire", "immobilier"') &&
   wixAuthStoreSource.includes('PublicProfessionalAccessResponse.self') &&
   source.includes('case "Prestataires"') &&
-  source.includes('case "Artisans et diagnostiqueurs"'),
-  "the directory must expose imported providers and separate local-pro categories");
+  source.includes('case "Artisans"') &&
+  source.includes('case "Diagnostiqueurs"') &&
+  source.includes('("Immobilier", "building.2.fill"') &&
+  source.includes('("Courtiers", "person.text.rectangle.fill"'),
+  "the directory must expose separate immobilier, broker, artisan, diagnostics and service-provider pages");
 const publicLocalProsAccess = wixAuthStoreSource.slice(
   wixAuthStoreSource.indexOf("private func hasPublicLocalProfessionalAccess"),
   wixAuthStoreSource.indexOf("private func fetchVisibleProfessionalRecords"),
