@@ -192,6 +192,9 @@
 				IPHONEOS_DEPLOYMENT_TARGET = 17.4;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
+				SWIFT_COMPILATION_MODE = incremental;
+				SWIFT_ENABLE_EXPLICIT_MODULES = NO;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
 			name = Release;
 		};
@@ -230,6 +233,9 @@
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
+				SWIFT_COMPILATION_MODE = incremental;
+				SWIFT_ENABLE_EXPLICIT_MODULES = NO;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
 			name = Release;
 		};
