@@ -4,6 +4,7 @@ const CORS = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 const WIX = "https://www.wixapis.com";
+import { calculateBuyerSearchScore, normalizeTransactionType } from "./matching-scoring.ts";
 
 type WixItem = { id?: string; data?: Record<string, unknown>; [key: string]: unknown };
 const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
@@ -68,94 +69,6 @@ function numeric(value: unknown): number | undefined {
   return Number.isFinite(parsed) ? parsed : NaN;
 }
 
-function normalizePropertyType(value: unknown): string {
-  const normalized = text(value, 100).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-    .replace(/\s+/g, "-").replace(/_/g, "-").replace(/-+/g, "-");
-  const aliases: Record<string, string> = {
-    house: "maison", home: "maison", apartment: "appartement", flat: "appartement", land: "terrain", plot: "terrain",
-    building: "immeuble", commercial: "commerce", "commercial-property": "commerce", office: "bureau",
-    "local-commercial": "commerce", parking: "garage", "garage-parking": "garage", "place-parking": "place-parking",
-    mobilehome: "mobile-home", "holiday-home": "maison-vacances", "secondary-residence": "residence-secondaire",
-    secondaryresidence: "residence-secondaire", castle: "chateau", chateaux: "chateau", farmhouse: "corps-ferme",
-    "farm-house": "corps-ferme", farm: "corps-ferme", barn: "grange", outbuilding: "dependance", workshop: "atelier",
-    warehouse: "hangar", "professional-premises": "local-professionnel", business: "fonds-commerce",
-    "fonds-de-commerce": "fonds-commerce", room: "chambre", gite: "gite", seasonal: "bien-saisonnier",
-    "terrain-de-loisirs": "terrain-loisirs",
-  };
-  return aliases[normalized] ?? normalized;
-}
-
-function distanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const radians = (value: number) => value * Math.PI / 180;
-  const dLat = radians(lat2 - lat1), dLon = radians(lon2 - lon1);
-  const h = Math.sin(dLat / 2) ** 2 + Math.cos(radians(lat1)) * Math.cos(radians(lat2)) * Math.sin(dLon / 2) ** 2;
-  return 6371 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
-}
-
-// Mirrors calculateMatchingScore in Wix's particularSearchMatchingService.
-function matchingScore(search: Record<string, unknown>, property: Record<string, unknown>): number {
-  let score = 0, totalWeight = 0;
-  const value = (key: string) => numeric(property[key]);
-  const latitude = numeric(search.latitude), longitude = numeric(search.longitude);
-  const propertyLatitude = value("latitude"), propertyLongitude = value("longitude");
-  const radius = numeric(search.radius) ?? 50;
-  if (propertyLatitude && propertyLongitude && latitude !== undefined && longitude !== undefined) {
-    const distance = distanceKm(latitude, longitude, propertyLatitude, propertyLongitude);
-    score += distance <= radius ? 30 : Math.max(0, 30 - ((distance - radius) / radius) * 30);
-  }
-  totalWeight += 30;
-  const price = value("price");
-  if (price) {
-    const min = numeric(search.minBudget) ?? 0, max = numeric(search.maxBudget) || Infinity;
-    if (price >= min && price <= max) score += 25;
-    else if (price < min) score += Math.max(0, 25 - ((min - price) / min) * 25);
-    else score += Math.max(0, 25 - ((price - max) / max) * 25);
-  }
-  totalWeight += 25;
-  const surface = value("surface"), minSurface = numeric(search.minSurface), maxSurface = numeric(search.maxSurface);
-  if (minSurface && surface) {
-    score += surface >= minSurface ? 15 : Math.max(0, 15 - ((minSurface - surface) / minSurface) * 15);
-    totalWeight += 15;
-  }
-  if (maxSurface && surface) {
-    score += surface <= maxSurface ? 15 : Math.max(0, 15 - ((surface - maxSurface) / maxSurface) * 15);
-    totalWeight += 15;
-  }
-  const land = value("landSurface"), minLand = numeric(search.minLandSurface), maxLand = numeric(search.maxLandSurface);
-  if (minLand && land) {
-    score += land >= minLand ? 10 : Math.max(0, 10 - ((minLand - land) / minLand) * 10);
-    totalWeight += 10;
-  }
-  if (maxLand && land) {
-    score += land <= maxLand ? 10 : Math.max(0, 10 - ((land - maxLand) / maxLand) * 10);
-    totalWeight += 10;
-  }
-  const types = typeof search.propertyTypes === "string" ? search.propertyTypes.split(",").map((item) => item.trim()) : [];
-  const propertyType = text(property.propertyType, 100);
-  if (types.length && propertyType) {
-    if (types.some((item) => normalizePropertyType(item) === normalizePropertyType(propertyType))) score += 10;
-    totalWeight += 10;
-  }
-  let roomScore = 0, roomWeight = 0;
-  for (const [criteria, field, weight] of [["minRooms", "rooms", 3], ["minBedrooms", "bedrooms", 3], ["minBathrooms", "bathrooms", 4]] as const) {
-    const wanted = numeric(search[criteria]), actual = value(field);
-    if (wanted && actual) {
-      if (actual >= wanted) roomScore += weight;
-      roomWeight += weight;
-    }
-  }
-  if (roomWeight > 0) { score += (roomScore / roomWeight) * 10; totalWeight += 10; }
-  let featureScore = 0;
-  if (search.singleStory && property.hasGroundFloorBedroom) featureScore += 2;
-  if (search.garage && property.hasGarage) featureScore += 2;
-  if (search.garden && property.isLandFenced) featureScore += 2;
-  if (search.terrace && property.hasAnnexe) featureScore += 2;
-  if (search.pool && property.hasPiscine) featureScore += 2;
-  score += featureScore;
-  totalWeight += 10;
-  return totalWeight > 0 ? Math.round(score / totalWeight * 100) : 0;
-}
-
 async function sendMatchingEmails(
   matchingId: string,
   matching: Record<string, unknown>,
@@ -210,9 +123,10 @@ async function sendMatchingEmails(
 async function processSearchMatching(search: Record<string, unknown>, token: string): Promise<number> {
   const searchId = String(search._id ?? "");
   const latitude = numeric(search.latitude), longitude = numeric(search.longitude);
-  if (!searchId || !latitude || !longitude || !numeric(search.radius)) return 0;
+  if (!searchId || search.isActive === false || latitude === undefined || longitude === undefined ||
+      Number.isNaN(latitude) || Number.isNaN(longitude) || !numeric(search.radius)) return 0;
   const [properties, existingMatches, professionals] = await Promise.all([
-    queryAll("biensprofessionnels", {}, ["title", "city", "postalCode", "price", "surface", "landSurface", "propertyType", "transactionType", "latitude", "longitude", "status", "listingUrl", "professionalId", "wixMemberId", "owner", "email", "phone", "companyName", "hasGroundFloorBedroom", "hasGarage", "isLandFenced", "hasAnnexe", "hasPiscine", "mainImageUrl", "galleryImages"], token),
+    queryAll("biensprofessionnels", {}, ["title", "city", "postalCode", "price", "surface", "landSurface", "propertyType", "transactionType", "latitude", "longitude", "status", "listingUrl", "professionalId", "wixMemberId", "owner", "email", "phone", "companyName", "hasGroundFloorBedroom", "hasGroundFloorBathroom", "hasGarage", "hasParking", "hasGarden", "hasTerrace", "hasSwimmingPool", "isLandFenced", "hasAnnexe", "hasPiscine", "features", "mainImageUrl", "galleryImages"], token),
     queryAll("particularsearchmatchings", { searchId: { $eq: searchId } }, [], token),
     queryAll("professionnels", {}, ["memberId", "firstName", "lastName", "companyName", "email", "phone", "slug", "network", "agency", "company", "enseigne", "reseau", "profilePhoto", "photo", "image"], token),
   ]);
@@ -225,8 +139,11 @@ async function processSearchMatching(search: Record<string, unknown>, token: str
   }
   const candidates = properties.filter((property) => {
     const status = String(property.status ?? "").toLowerCase();
-    return status === "active" || status === "published" || !status;
-  }).filter((property) => String(property._id ?? "") && matchingScore(search, property) >= 80);
+    const propertyTransaction = normalizeTransactionType(property.transactionType);
+    const requestedTransaction = normalizeTransactionType(search.transactionType);
+    return (status === "active" || status === "published" || !status) &&
+      propertyTransaction === requestedTransaction;
+  }).filter((property) => String(property._id ?? "") && calculateBuyerSearchScore(search, property) >= 80);
   let created = 0;
   for (const property of candidates) {
     const propertyId = String(property._id);
@@ -263,7 +180,7 @@ async function processSearchMatching(search: Record<string, unknown>, token: str
       professionalPhoto: professional.profilePhoto ?? professional.photo ?? professional.image ?? "",
       professionalEmail: professional.email ?? property.email ?? "", professionalPhone: professional.phone ?? property.phone ?? "",
       professionalCity: property.city ?? "", professionalSlug: professional.slug ?? "",
-      matchingScore: matchingScore(search, property), status: "new", emailSentToBuyer: false,
+      matchingScore: calculateBuyerSearchScore(search, property), status: "new", emailSentToBuyer: false,
       emailSentToProfessional: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     };
     const inserted = await wix<{ dataItem?: { id?: string } }>("/wix-data/v2/items", token, "POST", {
@@ -446,7 +363,7 @@ Deno.serve(async (req: Request) => {
       if (!searchId) return response({ error: "Recherche introuvable." }, 400);
       const owned = (await query("particularbuyersearches", {
         _id: { $eq: searchId }, accountId: { $eq: account.id },
-      }, ["accountId", "isActive"], token, 2)).find((item) => item._id === searchId);
+      }, [], token, 2)).find((item) => item._id === searchId);
       if (!owned) return response({ error: "Cette recherche n’appartient pas à votre espace." }, 403);
       if (action === "delete") {
         await wix(`/wix-data/v2/items/${encodeURIComponent(searchId)}?dataCollectionId=particularbuyersearches`, token, "DELETE");
@@ -465,6 +382,10 @@ Deno.serve(async (req: Request) => {
           }],
         },
       });
+      if (action === "activate") {
+        const matchingCount = await processSearchMatching({ ...owned, isActive: true }, token);
+        return response({ success: true, searchId, [fieldPath]: true, matchingCount });
+      }
       return response({ success: true, searchId, [fieldPath]: fieldValue });
     }
     return response({ error: "Action inconnue." }, 400);

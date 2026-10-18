@@ -53,6 +53,30 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     ) {
         NSLog("Notifications iOS: enregistrement APNs impossible: %@", error.localizedDescription)
     }
+
+    static let pendingPushTapKey = "partenairefoyer.pendingPushTap.v1"
+
+    static func stringFields(from userInfo: [AnyHashable: Any]) -> [String: String] {
+        let allowedKeys: Set<String> = [
+            "role", "accountType", "recipientRole", "eventType", "entityId",
+            "conversationId", "matchingId", "opportunityId",
+        ]
+        var fields: [String: String] = [:]
+        for (rawKey, value) in userInfo {
+            guard let key = rawKey as? String else { continue }
+            if allowedKeys.contains(key), let string = value as? String {
+                fields[key] = string
+            } else if key == "data", let nested = value as? [AnyHashable: Any] {
+                for (nestedKey, nestedValue) in nested {
+                    if let nestedKey = nestedKey as? String,
+                       allowedKeys.contains(nestedKey), let nestedValue = nestedValue as? String {
+                        fields[nestedKey] = nestedValue
+                    }
+                }
+            }
+        }
+        return fields
+    }
 }
 
 extension AppDelegate: UNUserNotificationCenterDelegate {
@@ -62,6 +86,17 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
         completionHandler([.banner, .badge, .sound])
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        let fields = AppDelegate.stringFields(from: response.notification.request.content.userInfo)
+        UserDefaults.standard.set(fields, forKey: AppDelegate.pendingPushTapKey)
+        NotificationCenter.default.post(name: .partenaireFoyerPushNotificationTapped, object: fields)
+        completionHandler()
     }
 }
 
@@ -81,4 +116,6 @@ extension AppDelegate: MessagingDelegate {
 extension Notification.Name {
     static let partenaireFoyerFCMTokenDidChange =
         Notification.Name("partenairefoyer.fcmRegistrationTokenDidChange")
+    static let partenaireFoyerPushNotificationTapped =
+        Notification.Name("partenairefoyer.pushNotificationTapped")
 }

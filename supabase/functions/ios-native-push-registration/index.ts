@@ -7,6 +7,7 @@ const CORS = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 type WixItem = { id?: string; data?: Record<string, unknown>; [key: string]: unknown };
+type ProAppIdentity = { ownerId: string; accountId: string; email: string };
 
 const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
   status,
@@ -33,6 +34,39 @@ async function wixRequest<T>(path: string, token: string, init: RequestInit = {}
   const raw = await result.text();
   if (!result.ok) throw new Error(`Wix API (${result.status})`);
   return (raw ? JSON.parse(raw) : {}) as T;
+}
+
+async function verifyProAppSession(token: string): Promise<ProAppIdentity | null> {
+  try {
+    const result = await fetch("https://www.partenairefoyer.com/api/pro-app-verify-session", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "X-Pro-App-Session": token,
+        "User-Agent": "PartenaireFoyer-iOS-Push/1.0",
+      },
+      body: JSON.stringify({}),
+      signal: AbortSignal.timeout(12_000),
+    });
+    if (!result.ok) return null;
+    const payload = await result.json().catch(() => null) as {
+      success?: boolean;
+      authenticated?: boolean;
+      professional?: { _id?: unknown; memberId?: unknown; email?: unknown; isActive?: unknown };
+    } | null;
+    const professional = payload?.professional;
+    const ownerId = clean(professional?._id);
+    const accountId = clean(professional?.memberId);
+    const email = clean(professional?.email).toLowerCase();
+    if (
+      payload?.success !== true || payload.authenticated !== true ||
+      professional?.isActive === false || !ownerId || !accountId || !email.includes("@")
+    ) return null;
+    return { ownerId, accountId, email };
+  } catch {
+    return null;
+  }
 }
 
 async function query(
@@ -88,9 +122,13 @@ async function ownerForRole(role: string, email: string, token: string): Promise
     };
   }
   if (role === "prestataire") {
-    // Service-provider signup still uses its independent legacy Wix collections.
-    const accountCollection = "serviceprovideraccounts";
-    const account = (await query(accountCollection, emailFilter(email), ["email", "isActive"], token))[0];
+    // Keep registration, dashboard, and push ownership on the same Wix account
+    // collection. New native signups write the suffixed collection; the older
+    // unsuffixed collection remains a compatibility fallback for existing users.
+    let account = (await query("serviceprovideraccounts-1", emailFilter(email), ["email", "isActive"], token))[0];
+    if (!account) {
+      account = (await query("serviceprovideraccounts", emailFilter(email), ["email", "isActive"], token))[0];
+    }
     if (!account || account.isActive === false) return null;
     const providers = await query("serviceproviders-1", { accountId: { $eq: String(account._id ?? "") } }, ["accountId", "category", "subcategory"], token);
     const profile = providers.find((item) => !/artisan|diagnostiqueur/i.test(`${String(item.category ?? "")} ${String(item.subcategory ?? "")}`));
@@ -121,18 +159,29 @@ Deno.serve(async (req: Request) => {
     if (action === "disable" && !/^[0-9a-f-]{36}$/i.test(installationId)) return response({ error: "Appareil invalide." }, 400);
     if (!SUPABASE_URL || !SERVICE_ROLE) throw new Error("Configuration Supabase serveur manquante.");
 
-    const memberResponse = await wixRequest<{ member?: { id?: string; loginEmail?: string; loginEmailVerified?: boolean } }>(
-      "/members/v1/members/my?fieldSet=FULL", token,
-    );
-    const member = memberResponse.member;
-    const email = clean(member?.loginEmail).toLowerCase();
-    if (!member?.id || !email || member.loginEmailVerified === false) return response({ error: "Compte Wix non vérifié." }, 403);
+    // Le compte Pro App est un compte métier Wix séparé de Wix Members.
+    // Son jeton opaque est validé par l’API Wix existante avant d’utiliser
+    // l’identifiant de fiche professionnel comme sur le flux Android/site.
+    const proIdentity = await verifyProAppSession(token);
+    let member: { id?: string; loginEmail?: string; loginEmailVerified?: boolean } | undefined;
+    let email = proIdentity?.email ?? "";
+    if (!proIdentity) {
+      const memberResponse = await wixRequest<{ member?: { id?: string; loginEmail?: string; loginEmailVerified?: boolean } }>(
+        "/members/v1/members/my?fieldSet=FULL", token,
+      );
+      member = memberResponse.member;
+      email = clean(member?.loginEmail).toLowerCase();
+      if (!member?.id || !email || member.loginEmailVerified === false) return response({ error: "Compte Wix non vérifié." }, 403);
+    }
 
     if (action === "disable") {
       const ownerIDs = new Set<string>();
-      for (const supportedRole of ["particulier", "professionnel", "courtier", "artisan", "diagnostiqueur", "prestataire"]) {
-        const owner = await ownerForRole(supportedRole, email, token);
-        if (owner?.ownerId) ownerIDs.add(owner.ownerId);
+      if (proIdentity?.ownerId) ownerIDs.add(proIdentity.ownerId);
+      if (member) {
+        for (const supportedRole of ["particulier", "professionnel", "courtier", "artisan", "diagnostiqueur", "prestataire"]) {
+          const owner = await ownerForRole(supportedRole, email, token);
+          if (owner?.ownerId) ownerIDs.add(owner.ownerId);
+        }
       }
       let disabled = 0;
       for (const ownerId of ownerIDs) {
@@ -157,7 +206,9 @@ Deno.serve(async (req: Request) => {
       return response({ success: true, disabled });
     }
 
-    const owner = await ownerForRole(role, email, token);
+    const owner = role === "professionnel" && proIdentity
+      ? { ownerId: proIdentity.ownerId, accountType: "real_estate_agent" }
+      : await ownerForRole(role, email, token);
     if (!owner?.ownerId) return response({ error: "Aucun espace actif associé à ce compte." }, 403);
     const now = new Date().toISOString();
     const url = new URL("/rest/v1/push_devices", SUPABASE_URL);
@@ -189,6 +240,10 @@ Deno.serve(async (req: Request) => {
     return response({ success: true, registered: true, platform: "ios", ownerType: owner.accountType, device: Array.isArray(rows) ? rows[0] ?? null : null });
   } catch (error) {
     console.error("[ios-native-push-registration]", error);
-    return response({ error: error instanceof Error ? error.message : "Enregistrement des notifications impossible." }, 502);
+    const message = error instanceof Error ? error.message : "Enregistrement des notifications impossible.";
+    if (/Wix API \((401|403)\)/.test(message)) {
+      return response({ error: "Session invalide ou expirée." }, 403);
+    }
+    return response({ error: message }, 502);
   }
 });

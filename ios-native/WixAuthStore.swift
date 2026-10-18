@@ -20,6 +20,8 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
     static let shared = WixAuthStore()
 
     @Published private(set) var member: WixMember?
+    @Published private(set) var professionalPortalToken: String?
+    @Published private(set) var professionalPortalEmail: String?
     @Published private(set) var isSigningIn = false
     @Published var errorMessage: String?
     @Published private(set) var infoMessage: String?
@@ -30,8 +32,10 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
     private let clientID = "694d7a57-f31a-4a5d-9bdd-8829f8f89b4e"
     private let redirectURI = "https://www.partenairefoyer.com/api/auth/callback"
     private let keychainService = "com.partenairefoyer.app.wix-session"
+    private let professionalPortalKeychainService = "com.partenairefoyer.app.pro-session"
     private var authSession: ASWebAuthenticationSession?
     private var dashboardRequestID = UUID()
+    private var postalCommunesCache: [String: [PostalCommune]] = [:]
 
     private struct StoredSession: Codable {
         let accessToken: String
@@ -55,6 +59,19 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         let state: String?
         let sessionToken: String?
         let message: String?
+    }
+
+    private struct ProfessionalPortalLoginResponse: Decodable {
+        struct Profile: Decodable {
+            let email: String?
+            let loginEmail: String?
+        }
+        let success: Bool?
+        let sessionToken: String?
+        let member: Profile?
+        let error: String?
+        let message: String?
+        let code: String?
     }
 
     private struct RegistrationResponse: Decodable {
@@ -104,6 +121,89 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
     override private init() {
         super.init()
         restoreMember()
+        restoreProfessionalPortalSession()
+    }
+
+    func signInProfessionalPortal(email: String, password: String) async -> Bool {
+        guard !isSigningIn else { return false }
+        isSigningIn = true
+        errorMessage = nil
+        infoMessage = nil
+        defer { isSigningIn = false }
+
+        let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard normalizedEmail.contains("@"), !password.isEmpty else {
+            errorMessage = "Saisissez l’adresse e-mail et le mot de passe de votre espace professionnel."
+            return false
+        }
+
+        do {
+            var request = URLRequest(url: URL(string: "https://www.partenairefoyer.com/api/pro-app-login")!, timeoutInterval: 30)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            request.httpBody = try JSONSerialization.data(withJSONObject: ["email": normalizedEmail, "password": password])
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else { throw AuthError.invalidResponse }
+            let payload = try? JSONDecoder().decode(ProfessionalPortalLoginResponse.self, from: data)
+            guard (200..<300).contains(http.statusCode), payload?.success == true,
+                  let token = payload?.sessionToken, !token.isEmpty else {
+                if payload?.code?.uppercased() == "ACTIVATION_REQUIRED" {
+                    infoMessage = payload?.message ?? "Votre espace professionnel doit être activé avant la première connexion. Utilisez le parcours d’activation."
+                }
+                throw AuthError.api(payload?.error ?? payload?.message ?? "La connexion à l’espace professionnel a été refusée.")
+            }
+            try saveProfessionalPortalSession(token: token, email: payload?.member?.email ?? payload?.member?.loginEmail ?? normalizedEmail)
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    func adoptProfessionalPortalSession(token: String, email: String? = nil) {
+        guard !token.isEmpty else {
+            deleteProfessionalPortalSession()
+            professionalPortalToken = nil
+            professionalPortalEmail = nil
+            return
+        }
+        do {
+            try saveProfessionalPortalSession(token: token, email: email ?? professionalPortalEmail ?? "")
+            errorMessage = nil
+            infoMessage = nil
+        } catch {
+            errorMessage = "La session professionnelle n’a pas pu être enregistrée sur cet appareil. Réessayez la connexion."
+        }
+    }
+
+    private func saveProfessionalPortalSession(token: String, email: String) throws {
+        let data = try JSONEncoder().encode(["token": token, "email": email])
+        let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                                   kSecAttrService as String: professionalPortalKeychainService,
+                                   kSecAttrAccount as String: "professional-portal-session"]
+        SecItemDelete(base as CFDictionary)
+        var query = base
+        query[kSecValueData as String] = data
+        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        guard SecItemAdd(query as CFDictionary, nil) == errSecSuccess else { throw AuthError.invalidResponse }
+        professionalPortalToken = token
+        professionalPortalEmail = email
+    }
+
+    private func restoreProfessionalPortalSession() {
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                                    kSecAttrService as String: professionalPortalKeychainService,
+                                    kSecAttrAccount as String: "professional-portal-session",
+                                    kSecReturnData as String: true,
+                                    kSecMatchLimit as String: kSecMatchLimitOne]
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+              let data = item as? Data,
+              let session = try? JSONDecoder().decode([String: String].self, from: data),
+              let token = session["token"], !token.isEmpty else { return }
+        professionalPortalToken = token
+        professionalPortalEmail = session["email"]
     }
 
     func signIn(email: String, password: String) async {
@@ -353,16 +453,26 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
     }
 
     func signOut() {
-        if let session = readStoredSession(),
-           let installationID = UserDefaults.standard.string(forKey: "partenairefoyer.pushDeviceID.v1"),
+        if let installationID = UserDefaults.standard.string(forKey: "partenairefoyer.pushDeviceID.v1"),
            !installationID.isEmpty {
-            // Capture the current Wix bearer before removing the local session;
-            // cleanup runs best-effort and never delays the visible sign-out.
-            Task { await disablePushDevices(installationID: installationID, accessToken: session.accessToken) }
+            // Capture available credentials before clearing Keychain; cleanup is
+            // best effort and never delays the visible sign-out.
+            let wixToken = readStoredSession()?.accessToken
+            let proToken = professionalPortalToken
+            if let proToken {
+                Task { await disablePushDevices(installationID: installationID, accessToken: proToken) }
+            }
+            if let wixToken, wixToken != proToken {
+                Task { await disablePushDevices(installationID: installationID, accessToken: wixToken) }
+            }
         }
+        FavoritesStore.shared.switchToAnonymousFavorites()
         resetDashboard()
         deleteStoredSession()
+        deleteProfessionalPortalSession()
         member = nil
+        professionalPortalToken = nil
+        professionalPortalEmail = nil
         errorMessage = nil
         infoMessage = nil
     }
@@ -445,9 +555,14 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         rooms: Int,
         bedrooms: Int,
         bathrooms: Int,
+        hasGarage: Bool,
+        hasSwimmingPool: Bool,
+        hasAnnex: Bool,
         address: String,
         city: String,
         postalCode: String,
+        latitude: Double?,
+        longitude: Double?,
         photos: [String],
         publishImmediately: Bool
     ) async throws {
@@ -470,6 +585,9 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
             "rooms": rooms,
             "bedrooms": bedrooms,
             "bathrooms": bathrooms,
+            "hasGarage": hasGarage,
+            "hasSwimmingPool": hasSwimmingPool,
+            "hasAnnex": hasAnnex,
             "address": address,
             "city": city,
             "postalCode": postalCode,
@@ -477,6 +595,8 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
             "publishImmediately": publishImmediately
         ]
         if let landSurface { payload["landSurface"] = landSurface }
+        if let latitude { payload["latitude"] = latitude }
+        if let longitude { payload["longitude"] = longitude }
         request.httpBody = try JSONSerialization.data(withJSONObject: payload)
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw AuthError.invalidResponse }
@@ -497,8 +617,13 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         rooms: Int,
         bedrooms: Int,
         bathrooms: Int,
+        hasGarage: Bool,
+        hasSwimmingPool: Bool,
+        hasAnnex: Bool,
         city: String,
         postalCode: String,
+        latitude: Double?,
+        longitude: Double?,
         photos: [String],
         publishImmediately: Bool
     ) async throws {
@@ -507,10 +632,13 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
             "title": title, "description": description, "propertyType": propertyType,
             "transactionType": transactionType, "price": price, "surface": surface,
             "rooms": rooms, "bedrooms": bedrooms, "bathrooms": bathrooms,
+            "hasGarage": hasGarage, "hasPiscine": hasSwimmingPool, "hasAnnexe": hasAnnex,
             "city": city, "postalCode": postalCode, "publishImmediately": publishImmediately,
             "photos": photos,
         ]
         if let landSurface { payload["landSurface"] = landSurface }
+        if let latitude { payload["latitude"] = latitude }
+        if let longitude { payload["longitude"] = longitude }
         try await sendDashboardAction(payload, fallback: "Impossible d’enregistrer le bien dans votre espace Wix.")
     }
 
@@ -788,6 +916,59 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         }
     }
 
+    func acceptNetworkOpportunity(opportunityID: String) async {
+        errorMessage = nil
+        let cleanID = opportunityID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanID.isEmpty else { return }
+        do {
+            try await sendDashboardAction([
+                "action": "accept_matching_opportunity",
+                "role": "professionnel",
+                "opportunityId": cleanID,
+            ], fallback: "Impossible d’accepter cette opportunité réseau.")
+            await loadDashboard(role: "professionnel")
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func hidePrivatePropertyMatching(role: String, matchingID: String) async {
+        errorMessage = nil
+        let cleanID = matchingID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard ["particulier", "professionnel"].contains(role), !cleanID.isEmpty else { return }
+        let list = role == "particulier" ? "vendorMatchings" : "privatePropertyMatchings"
+        do {
+            try await sendDashboardAction([
+                "action": "hide_private_property_matching",
+                "role": role,
+                "matchingId": cleanID,
+            ], fallback: "Impossible de masquer ce matching.")
+            guard var dashboard = dashboardData, let items = dashboard[list] as? [[String: Any]] else { return }
+            dashboard[list] = items.filter { ($0["_id"] as? String ?? $0["id"] as? String) != cleanID }
+            dashboardData = dashboard
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func deleteProfessionalMatching(matchingID: String) async {
+        errorMessage = nil
+        let cleanID = matchingID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanID.isEmpty else { return }
+        do {
+            try await sendDashboardAction([
+                "action": "delete_professional_matching",
+                "role": "professionnel",
+                "matchingId": cleanID,
+            ], fallback: "Impossible de supprimer ce matching.")
+            guard var dashboard = dashboardData, let items = dashboard["matchings"] as? [[String: Any]] else { return }
+            dashboard["matchings"] = items.filter { ($0["_id"] as? String ?? $0["id"] as? String) != cleanID }
+            dashboardData = dashboard
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func claimDemand(demandID: String) async {
         errorMessage = nil
         let cleanID = demandID.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -959,7 +1140,12 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         }
 
         do {
-            let token = try await validAccessToken()
+            let token: String
+            if role == "professionnel", let portalToken = professionalPortalToken, !portalToken.isEmpty {
+                token = portalToken
+            } else {
+                token = try await validAccessToken()
+            }
             let endpoint = URL(string: "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/ios-native-push-registration")!
             var request = URLRequest(url: endpoint, timeoutInterval: 25)
             request.httpMethod = "POST"
@@ -1743,11 +1929,13 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
     }
 
     private func loadPostalCommunes(postalCode: String) async -> [PostalCommune] {
-        guard postalCode.count == 5,
-              postalCode.allSatisfy(\.isNumber),
+        let normalizedPostalCode = postalCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let cached = postalCommunesCache[normalizedPostalCode] { return cached }
+        guard normalizedPostalCode.count == 5,
+              normalizedPostalCode.allSatisfy(\.isNumber),
               var components = URLComponents(string: "https://geo.api.gouv.fr/communes") else { return [] }
         components.queryItems = [
-            URLQueryItem(name: "codePostal", value: postalCode),
+            URLQueryItem(name: "codePostal", value: normalizedPostalCode),
             URLQueryItem(name: "fields", value: "nom,centre"),
             URLQueryItem(name: "format", value: "json"),
         ]
@@ -1756,7 +1944,9 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
               let http = response as? HTTPURLResponse,
               (200..<300).contains(http.statusCode),
               let communes = try? JSONDecoder().decode([PostalCommune].self, from: data) else { return [] }
-        return communes.filter { !$0.nom.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        let usable = communes.filter { !$0.nom.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        if !usable.isEmpty { postalCommunesCache[normalizedPostalCode] = usable }
+        return usable
     }
 
     func fetchPublicClassifiedAds() async throws -> (ads: [ClassifiedAd], warningMessage: String?) {
@@ -2522,7 +2712,9 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
                 as: WixRawDirectoryResponse.self
             )
             let now = Date()
-            let freeAccessEnd = ISO8601DateFormatter().date(from: "2026-12-31T23:59:59Z")!
+            // Keep the website's Paris-time boundary: free through 31 Dec 2026,
+            // with the paid/trial rules starting at 00:00 on 1 Jan 2027.
+            let freeAccessEnd = ISO8601DateFormatter().date(from: "2027-01-01T00:00:00+01:00")!
             results.append(contentsOf: response.dataItems.compactMap { item in
                 let data = item.data.mapValues(\.value)
                 guard data["isActive"] as? Bool == true,
@@ -2536,12 +2728,16 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
                     guard data["hasActiveSubscription"] as? Bool == true || status == "active" || status == "trialing" else { return nil }
                 }
                 let activity = importedString(data, ["category", "professionalType"]) ?? "Professionnel"
+                let profileType = (importedString(data, ["professionalType"]) ?? activity)
+                    .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "fr_FR"))
+                let favoriteCategory = profileType.contains("diagnost") ? "diagnostiqueur" : "artisan"
                 return WixPublicProfessional(
                     id: "prosprofile-\(item.id)", cmsProfileID: item.id, companyName: company, firstName: contactName,
                     lastName: nil, network: activity, city: importedString(data, ["city"]),
                     postalCode: importedString(data, ["postalCode"]), businessSector: activity,
                     description: importedString(data, ["description"]),
                     logo: importedString(data, ["logo", "photo"]), website: importedString(data, ["website"]),
+                    importedCategory: favoriteCategory,
                     professionalEmail: email, publicPhone: phone, isLocalProsProfile: true
                 )
             })
@@ -2763,6 +2959,13 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                                     kSecAttrService as String: keychainService,
                                     kSecAttrAccount as String: "member-session"]
+        SecItemDelete(query as CFDictionary)
+    }
+
+    private func deleteProfessionalPortalSession() {
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                                    kSecAttrService as String: professionalPortalKeychainService,
+                                    kSecAttrAccount as String: "professional-portal-session"]
         SecItemDelete(query as CFDictionary)
     }
 }

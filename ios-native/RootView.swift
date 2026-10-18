@@ -4,16 +4,30 @@ import CoreFoundation
 import PhotosUI
 import UIKit
 import SafariServices
+import WebKit
+
+private enum PFTheme {
+    static let brand = Color(red: 0.02, green: 0.43, blue: 0.34)
+    static let deepGreen = Color(red: 0.04, green: 0.23, blue: 0.19)
+    static let mint = Color(red: 0.10, green: 0.76, blue: 0.55)
+    static let paleMint = Color(red: 0.91, green: 0.98, blue: 0.95)
+}
 
 struct RootView: View {
     @State private var selectedTab = 0
+    @AppStorage("partenairefoyer.activeRole") private var activeRoleRaw = ""
     @StateObject private var listingsService = ListingsService()
     @StateObject private var classifiedAdsService = ClassifiedAdsService()
     @StateObject private var professionalsService = ProfessionalsService()
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            HomeDashboardView(selectedTab: $selectedTab)
+            HomeDashboardView(
+                selectedTab: $selectedTab,
+                listingsService: listingsService,
+                classifiedAdsService: classifiedAdsService,
+                professionalsService: professionalsService
+            )
                 .tabItem { Label("Accueil", systemImage: "house.fill") }
                 .tag(0)
 
@@ -29,15 +43,37 @@ struct RootView: View {
                 .tabItem { Label("Professionnels", systemImage: "person.2") }
                 .tag(3)
 
-            NativeFavoritesView(service: listingsService, classifiedAds: classifiedAdsService, professionalsService: professionalsService)
-                .tabItem { Label("Favoris", systemImage: "heart.fill") }
-                .tag(4)
-
             NativeSpacePickerView()
                 .tabItem { Label("Menu", systemImage: "line.3.horizontal") }
-                .tag(5)
+                .tag(4)
         }
-        .tint(Color(red: 0.02, green: 0.38, blue: 0.34))
+        .tint(PFTheme.brand)
+        .preferredColorScheme(.light)
+        .onReceive(NotificationCenter.default.publisher(for: .partenaireFoyerPushNotificationTapped)) { notification in
+            guard let fields = notification.object as? [String: String] else { return }
+            openPushDestination(fields)
+        }
+        .onAppear {
+            if let fields = UserDefaults.standard.dictionary(forKey: "partenairefoyer.pendingPushTap.v1") as? [String: String] {
+                openPushDestination(fields)
+            }
+        }
+    }
+
+    private func openPushDestination(_ fields: [String: String]) {
+        selectedTab = 4
+        let rawRole = (fields["role"] ?? fields["accountType"] ?? fields["recipientRole"] ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let roleByPushType: [String: String] = [
+            "particulier": "particulier", "private_vendor": "particulier", "private-vendor": "particulier",
+            "professionnel": "professionnel", "real_estate_agent": "professionnel", "real-estate-agent": "professionnel",
+            "courtier": "courtier", "broker": "courtier",
+            "artisan": "artisan", "diagnostiqueur": "diagnostiqueur", "diagnostician": "diagnostiqueur",
+            "prestataire": "prestataire", "service_provider": "prestataire", "service-provider": "prestataire",
+            "hebergeur": "hebergeur", "host": "hebergeur", "seasonal_host": "hebergeur",
+        ]
+        if let role = roleByPushType[rawRole] { activeRoleRaw = role }
+        UserDefaults.standard.removeObject(forKey: "partenairefoyer.pendingPushTap.v1")
     }
 }
 
@@ -418,8 +454,7 @@ private struct NativeSeasonalAccommodationDetail: View {
                     }
                     .buttonStyle(.borderedProminent).tint(.teal)
                     .sheet(isPresented: $showHostedBooking) {
-                        NavigationStack { InAppSafariView(url: bookingURL) }
-                            .ignoresSafeArea(edges: .bottom)
+                        ProfessionalPortalWebView(url: bookingURL, initialToken: nil, title: "Réservation") { _ in }
                     }
                 }
                 Text("La vérification des dates et l’envoi de la demande s’effectuent sur le parcours sécurisé du site, dans cette fenêtre.")
@@ -585,8 +620,7 @@ private struct ProfessionalDetailView: View {
     @State private var favoriteError: String?
 
     private var favoriteRecordID: String? {
-        guard !professional.isLocalProsProfile,
-              professional.importedID == nil,
+        guard professional.importedID == nil,
               professional.importedCategory != "courtier" else { return nil }
         return professional.cmsProfileID
     }
@@ -1987,7 +2021,7 @@ private struct NativeClassifiedAdDetailView: View {
                 }
                 if let wixDetailURL = ad.wixDetailURL {
                     Button {
-                        activeSheet = .web(InAppSafariPage(url: wixDetailURL))
+                        activeSheet = .site(InAppSafariPage(url: wixDetailURL))
                     } label: {
                         Label("Contacter le vendeur sur PartenaireFoyer", systemImage: "message")
                             .font(.headline)
@@ -2032,6 +2066,14 @@ private struct NativeClassifiedAdDetailView: View {
             case .web(let page):
                 InAppSafariView(url: page.url)
                     .ignoresSafeArea()
+            case .site(let page):
+                ProfessionalPortalWebView(
+                    url: page.url,
+                    initialToken: auth.professionalPortalToken,
+                    title: "Contacter le vendeur"
+                ) { token in
+                    auth.adoptProfessionalPortalSession(token: token, email: auth.professionalPortalEmail)
+                }
             }
         }
     }
@@ -2040,11 +2082,13 @@ private struct NativeClassifiedAdDetailView: View {
 private enum ClassifiedDetailSheet: Identifiable {
     case report(ClassifiedAd)
     case web(InAppSafariPage)
+    case site(InAppSafariPage)
 
     var id: String {
         switch self {
         case .report(let ad): return "report-\(ad.id)"
         case .web(let page): return "web-\(page.id.uuidString)"
+        case .site(let page): return "site-\(page.id.uuidString)"
         }
     }
 }
@@ -2593,8 +2637,14 @@ private struct ListingFact: View {
 
 private struct HomeDashboardView: View {
     @Binding var selectedTab: Int
+    @ObservedObject var listingsService: ListingsService
+    @ObservedObject var classifiedAdsService: ClassifiedAdsService
+    @ObservedObject var professionalsService: ProfessionalsService
+    @StateObject private var auth = WixAuthStore.shared
     @State private var showNativeEstimation = false
     @State private var showPublicDemand = false
+    @State private var showFavorites = false
+    @State private var showFullSite = false
     @State private var publicDemandType = "recherche_achat"
 
     var body: some View {
@@ -2603,6 +2653,42 @@ private struct HomeDashboardView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     hero
                     matchingCard
+                    Button { showFullSite = true } label: {
+                        HStack(spacing: 13) {
+                            Image(systemName: "safari")
+                                .font(.title3.weight(.semibold))
+                                .foregroundStyle(PFTheme.brand)
+                                .frame(width: 46, height: 46)
+                                .background(PFTheme.paleMint, in: RoundedRectangle(cornerRadius: 14))
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Explorer toutes les pages du site")
+                                    .font(.headline)
+                                    .foregroundStyle(PFTheme.deepGreen)
+                                Text("Petites annonces, services, actualités et espaces de compte")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                    .multilineTextAlignment(.leading)
+                            }
+                            Spacer(minLength: 4)
+                            Image(systemName: "arrow.right")
+                                .foregroundStyle(PFTheme.brand)
+                        }
+                        .padding(16)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(.background, in: RoundedRectangle(cornerRadius: 20))
+                        .overlay(RoundedRectangle(cornerRadius: 20).stroke(PFTheme.brand.opacity(0.22), lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Ouvre le site complet dans l’application avec sa navigation et sa session partagée.")
+                    Button { showFavorites = true } label: {
+                        Label("Mes favoris", systemImage: "heart.fill")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(PFTheme.brand)
+                            .padding(.horizontal, 15)
+                            .padding(.vertical, 11)
+                            .background(PFTheme.paleMint, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
                     Button { selectedTab = 1 } label: {
                         HStack(spacing: 14) {
                             Image(systemName: "magnifyingglass")
@@ -2715,7 +2801,7 @@ private struct HomeDashboardView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Votre projet immobilier, au même endroit")
                             .font(.title3.bold())
-                        Text("Consultez les biens, enregistrez vos favoris et choisissez votre espace depuis le menu.")
+                        Text("Le site rassemble aussi les petites annonces, courtiers, artisans, diagnostiqueurs, actualités et services du quotidien.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
@@ -2724,7 +2810,7 @@ private struct HomeDashboardView: View {
                     .background(.background, in: RoundedRectangle(cornerRadius: 20))
                     .overlay(RoundedRectangle(cornerRadius: 20).stroke(.quaternary, lineWidth: 1))
 
-                    Button { selectedTab = 5 } label: {
+                    Button { selectedTab = 4 } label: {
                         Label("Vous êtes… ? Choisir mon espace", systemImage: "person.crop.circle.badge.questionmark")
                             .font(.headline)
                             .frame(maxWidth: .infinity)
@@ -2749,6 +2835,22 @@ private struct HomeDashboardView: View {
             NavigationStack { NativePublicDemandForm(demandType: publicDemandType) }
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showFavorites) {
+            NativeFavoritesView(
+                service: listingsService,
+                classifiedAds: classifiedAdsService,
+                professionalsService: professionalsService
+            )
+        }
+        .sheet(isPresented: $showFullSite) {
+            ProfessionalPortalWebView(
+                url: URL(string: "https://www.partenairefoyer.com/")!,
+                initialToken: auth.professionalPortalToken,
+                title: "PartenaireFoyer"
+            ) { token in
+                auth.adoptProfessionalPortalSession(token: token)
+            }
         }
     }
 
@@ -2777,29 +2879,34 @@ private struct HomeDashboardView: View {
     }
 
     private var hero: some View {
-        ZStack(alignment: .bottomLeading) {
+        ZStack(alignment: .topTrailing) {
             LinearGradient(
-                colors: [Color(red: 0.035, green: 0.12, blue: 0.19), Color(red: 0.02, green: 0.39, blue: 0.32)],
+                colors: [PFTheme.deepGreen, PFTheme.brand, Color(red: 0.02, green: 0.56, blue: 0.43)],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
             Circle()
                 .fill(.white.opacity(0.07))
-                .frame(width: 230, height: 230)
-                .offset(x: 245, y: -85)
+                .frame(width: 250, height: 250)
+                .offset(x: 115, y: -120)
             Circle()
-                .stroke(.white.opacity(0.10), lineWidth: 1)
-                .frame(width: 180, height: 180)
-                .offset(x: 260, y: -72)
+                .stroke(.white.opacity(0.16), lineWidth: 1)
+                .frame(width: 195, height: 195)
+                .offset(x: 82, y: -92)
+            Image(systemName: "point.3.connected.trianglepath.dotted")
+                .font(.system(size: 92, weight: .ultraLight))
+                .foregroundStyle(.white.opacity(0.12))
+                .offset(x: -16, y: 91)
 
             VStack(alignment: .leading, spacing: 19) {
                 HStack(spacing: 11) {
                     Image("BrandLogo")
                         .resizable()
-                        .scaledToFill()
-                        .frame(width: 58, height: 58)
+                        .scaledToFit()
+                        .frame(width: 52, height: 52)
+                        .padding(5)
+                        .background(.white, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                         .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).stroke(.white.opacity(0.28), lineWidth: 1))
                         .accessibilityHidden(true)
 
                     VStack(alignment: .leading, spacing: 2) {
@@ -2807,20 +2914,56 @@ private struct HomeDashboardView: View {
                             Text("Partenaire")
                                 .foregroundStyle(.white)
                             Text("Foyer")
-                                .foregroundStyle(Color(red: 0.35, green: 0.91, blue: 0.62))
+                                .foregroundStyle(PFTheme.mint)
                         }
-                        .font(.system(size: 17, weight: .bold, design: .rounded))
+                        .font(.system(size: 20, weight: .bold, design: .rounded))
+                        Text("IMMOBILIER · SERVICES · RENCONTRES")
+                            .font(.system(size: 9, weight: .bold, design: .rounded))
+                            .tracking(1.15)
+                            .foregroundStyle(.white.opacity(0.75))
                     }
                     Spacer(minLength: 0)
                 }
-                Text("Votre projet immobilier, accompagné de la bonne rencontre.")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.white.opacity(0.88))
+                VStack(alignment: .leading, spacing: 9) {
+                    Text("Annonces immobilières & matching intelligent")
+                        .font(.system(size: 29, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("Les bons biens, les bons projets et les bons professionnels se rencontrent.")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.84))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                HStack(spacing: 8) {
+                    Image(systemName: "sparkles")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(PFTheme.deepGreen)
+                    Text("Matching particuliers · pros · pros")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(PFTheme.deepGreen)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+                .background(PFTheme.mint, in: Capsule())
+                Button { selectedTab = 1 } label: {
+                    HStack(spacing: 9) {
+                        Text("Découvrir les annonces")
+                        Image(systemName: "arrow.right")
+                    }
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(PFTheme.deepGreen)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(.white, in: Capsule())
+                }
+                .buttonStyle(.plain)
             }
             .padding(22)
+            .frame(maxWidth: .infinity, minHeight: 286, alignment: .leading)
         }
-        .frame(maxWidth: .infinity, minHeight: 190, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 286, alignment: .leading)
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .shadow(color: PFTheme.deepGreen.opacity(0.22), radius: 18, y: 9)
     }
 
     private var matchingCard: some View {
@@ -2831,23 +2974,23 @@ private struct HomeDashboardView: View {
                     .tracking(1.1)
             }
             .font(.caption.weight(.bold))
-            .foregroundStyle(Color(red: 0.48, green: 0.95, blue: 0.73))
+            .foregroundStyle(PFTheme.brand)
 
             VStack(alignment: .leading, spacing: 7) {
                 Text("Le matching intelligent")
                     .font(.title3.bold())
-                    .foregroundStyle(.white)
-                Text("Votre projet est rapproché des biens actifs et des professionnels qui correspondent à vos critères.")
+                    .foregroundStyle(PFTheme.deepGreen)
+                Text("Particuliers et professionnels sont rapprochés des biens et demandes compatibles. Les professionnels peuvent aussi être mis en relation entre eux.")
                     .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.78))
+                    .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
             HStack(spacing: 7) {
                 matchingStep("Votre projet", symbol: "slider.horizontal.3")
-                Image(systemName: "arrow.right").font(.caption2.bold()).foregroundStyle(.white.opacity(0.55))
+                Image(systemName: "arrow.right").font(.caption2.bold()).foregroundStyle(PFTheme.brand.opacity(0.5))
                 matchingStep("Les bons biens", symbol: "house")
-                Image(systemName: "arrow.right").font(.caption2.bold()).foregroundStyle(.white.opacity(0.55))
+                Image(systemName: "arrow.right").font(.caption2.bold()).foregroundStyle(PFTheme.brand.opacity(0.5))
                 matchingStep("Les bons pros", symbol: "person.2")
             }
 
@@ -2861,31 +3004,18 @@ private struct HomeDashboardView: View {
                     Image(systemName: "arrow.right")
                 }
                 .font(.subheadline.weight(.bold))
-                .foregroundStyle(Color(red: 0.02, green: 0.27, blue: 0.25))
+                .foregroundStyle(.white)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 14)
-                .background(.white, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+                .background(PFTheme.brand, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
             }
             .buttonStyle(.plain)
         }
         .padding(19)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            ZStack(alignment: .topTrailing) {
-                LinearGradient(
-                    colors: [Color(red: 0.035, green: 0.15, blue: 0.20), Color(red: 0.02, green: 0.38, blue: 0.32)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                Circle()
-                    .fill(.white.opacity(0.06))
-                    .frame(width: 155, height: 155)
-                    .offset(x: 42, y: -78)
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 23, style: .continuous))
-        }
-        .overlay(RoundedRectangle(cornerRadius: 23, style: .continuous).stroke(.white.opacity(0.10), lineWidth: 1))
-        .shadow(color: Color.teal.opacity(0.15), radius: 18, y: 8)
+        .background(.background, in: RoundedRectangle(cornerRadius: 23, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 23, style: .continuous).stroke(PFTheme.brand.opacity(0.12), lineWidth: 1))
+        .shadow(color: PFTheme.brand.opacity(0.08), radius: 14, y: 6)
     }
 
     private func matchingStep(_ title: String, symbol: String) -> some View {
@@ -2895,10 +3025,10 @@ private struct HomeDashboardView: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
         }
-        .foregroundStyle(.white.opacity(0.9))
+        .foregroundStyle(PFTheme.deepGreen)
         .padding(.horizontal, 8)
         .padding(.vertical, 8)
-        .background(.white.opacity(0.10), in: Capsule())
+        .background(PFTheme.paleMint, in: Capsule())
     }
 }
 
@@ -3613,6 +3743,9 @@ private struct NativePrivatePropertyForm: View {
     @State private var rooms = 3
     @State private var bedrooms = 2
     @State private var bathrooms = 1
+    @State private var hasGarage = false
+    @State private var hasSwimmingPool = false
+    @State private var hasAnnex = false
     @State private var city = ""
     @State private var postalCode = ""
     @State private var publishImmediately = false
@@ -3653,12 +3786,14 @@ private struct NativePrivatePropertyForm: View {
                 Stepper("Chambres : \(bedrooms)", value: $bedrooms, in: 0...20)
                 Stepper("Salles de bain : \(bathrooms)", value: $bathrooms, in: 0...20)
             }
+            Section("Équipements") {
+                Toggle("Garage ou parking", isOn: $hasGarage)
+                Toggle("Piscine", isOn: $hasSwimmingPool)
+                Toggle("Annexe", isOn: $hasAnnex)
+            }
             Section("Localisation") {
                 TextField("Ville", text: $city).textContentType(.addressCity)
                 TextField("Code postal", text: $postalCode).keyboardType(.numberPad)
-                    .onChange(of: postalCode) { _, value in
-                        postalCode = String(value.filter(\.isNumber).prefix(10))
-                    }
                     .onChange(of: postalCode) { _, value in postalCode = String(value.filter(\.isNumber).prefix(10)) }
             }
             Section("Photos") { NativeListingPhotoPicker(photos: $photos) }
@@ -3702,12 +3837,15 @@ private struct NativePrivatePropertyForm: View {
         errorMessage = nil
         defer { isSaving = false }
         do {
+            let coordinates = await auth.coordinates(city: city, postalCode: postalCode)
             let imageURLs = try await auth.uploadListingPhotos(photos, role: "particulier")
             try await auth.createPrivateProperty(
                 title: title, description: description, propertyType: propertyType,
                 transactionType: transactionType, price: number(price), surface: number(surface),
                 landSurface: optionalNumber(landSurface), rooms: rooms, bedrooms: bedrooms,
-                bathrooms: bathrooms, city: city, postalCode: postalCode, photos: imageURLs,
+                bathrooms: bathrooms, city: city, postalCode: postalCode,
+                hasGarage: hasGarage, hasSwimmingPool: hasSwimmingPool, hasAnnex: hasAnnex,
+                latitude: coordinates?.latitude, longitude: coordinates?.longitude, photos: imageURLs,
                 publishImmediately: publishImmediately
             )
             onCreated()
@@ -3942,6 +4080,9 @@ private struct NativeProfessionalPropertyForm: View {
     @State private var rooms = 3
     @State private var bedrooms = 2
     @State private var bathrooms = 1
+    @State private var hasGarage = false
+    @State private var hasSwimmingPool = false
+    @State private var hasAnnex = false
     @State private var address = ""
     @State private var city = ""
     @State private var postalCode = ""
@@ -3995,6 +4136,13 @@ private struct NativeProfessionalPropertyForm: View {
                 Stepper("Chambres : \(bedrooms)", value: $bedrooms, in: 0...20)
                 Stepper("Salles de bain : \(bathrooms)", value: $bathrooms, in: 0...20)
             }
+            Section("Équipements pour le matching") {
+                Toggle("Garage ou parking", isOn: $hasGarage)
+                Toggle("Piscine", isOn: $hasSwimmingPool)
+                Toggle("Annexe", isOn: $hasAnnex)
+                Text("Ces critères sont enregistrés avec le bien et utilisés pour rapprocher les recherches compatibles.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
             Section("Adresse") {
                 TextField("Adresse", text: $address).textContentType(.streetAddressLine1)
                 TextField("Ville", text: $city).textContentType(.addressCity)
@@ -4045,6 +4193,7 @@ private struct NativeProfessionalPropertyForm: View {
         errorMessage = nil
         defer { isSaving = false }
         do {
+            let coordinates = await auth.coordinates(city: city, postalCode: postalCode)
             try await auth.createProfessionalProperty(
                 title: title,
                 description: description,
@@ -4056,9 +4205,14 @@ private struct NativeProfessionalPropertyForm: View {
                 rooms: rooms,
                 bedrooms: bedrooms,
                 bathrooms: bathrooms,
+                hasGarage: hasGarage,
+                hasSwimmingPool: hasSwimmingPool,
+                hasAnnex: hasAnnex,
                 address: address,
                 city: city,
                 postalCode: postalCode,
+                latitude: coordinates?.latitude,
+                longitude: coordinates?.longitude,
                 photos: try await auth.uploadListingPhotos(photos, role: "professionnel"),
                 publishImmediately: publishImmediately
             )
@@ -4210,16 +4364,27 @@ private struct NativeSeasonalRateForm: View {
 
 private struct NativeSpacePickerView: View {
     @State private var selectedRole: AccountRole?
+    @State private var showTravelerPortal = false
+    @State private var showFullSite = false
     @StateObject private var auth = WixAuthStore.shared
     @AppStorage("partenairefoyer.activeRole") private var activeRoleRaw = ""
 
     var body: some View {
         NavigationStack {
             Group {
-                if let member = auth.member, let role = AccountRole(rawValue: activeRoleRaw) {
+                if activeRoleRaw == AccountRole.professionnel.rawValue,
+                   let token = auth.professionalPortalToken {
+                    ProfessionalPortalDashboardView(token: token) {
+                        signOutEverywhere()
+                    }
+                } else if let role = AccountRole(rawValue: activeRoleRaw), role != .professionnel,
+                          auth.member == nil {
+                    WebsiteRoleDashboardView(role: role) {
+                        signOutEverywhere()
+                    }
+                } else if let member = auth.member, let role = AccountRole(rawValue: activeRoleRaw) {
                     NativeRoleDashboardView(role: role, member: member) {
-                        auth.signOut()
-                        activeRoleRaw = ""
+                        signOutEverywhere()
                     } onSwitchSpace: {
                         auth.resetDashboard()
                         activeRoleRaw = ""
@@ -4243,6 +4408,22 @@ private struct NativeSpacePickerView: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
             }
+            .sheet(isPresented: $showTravelerPortal) {
+                ProfessionalPortalWebView(
+                    url: URL(string: "https://www.partenairefoyer.com/vacancier-connexion")!,
+                    initialToken: nil,
+                    title: "Espace voyageur"
+                ) { _ in }
+            }
+            .sheet(isPresented: $showFullSite) {
+                ProfessionalPortalWebView(
+                    url: URL(string: "https://www.partenairefoyer.com/")!,
+                    initialToken: auth.professionalPortalToken,
+                    title: "PartenaireFoyer"
+                ) { token in
+                    auth.adoptProfessionalPortalSession(token: token)
+                }
+            }
         }
     }
 
@@ -4252,15 +4433,16 @@ private struct NativeSpacePickerView: View {
                     VStack(alignment: .leading, spacing: 7) {
                         Text("Vous êtes… ?")
                             .font(.largeTitle.bold())
+                            .foregroundStyle(.white)
                         Text("Choisissez votre profil. Chaque espace reste séparé ; les fonctions d’un compte ne s’affichent qu’après connexion à cet espace.")
                             .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.white.opacity(0.82))
                     }
                     .padding(.vertical, 8)
                     .listRowBackground(Color.clear)
                 }
 
-                Section("Choisir un espace") {
+                Section {
                     ForEach(AccountRole.allCases) { role in
                         Button { select(role) } label: {
                             HStack(spacing: 13) {
@@ -4282,9 +4464,48 @@ private struct NativeSpacePickerView: View {
                         }
                         .buttonStyle(.plain)
                     }
+                } header: {
+                    Text("Choisir un espace").foregroundStyle(PFTheme.mint)
+                }
+                Section {
+                    Button { showTravelerPortal = true } label: {
+                        HStack(spacing: 13) {
+                            Image(systemName: "airplane")
+                                .font(.title3)
+                                .foregroundStyle(PFTheme.brand)
+                                .frame(width: 42, height: 42)
+                                .background(PFTheme.paleMint, in: RoundedRectangle(cornerRadius: 13))
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Voyageur / vacancier").font(.headline).foregroundStyle(PFTheme.deepGreen)
+                                Text("Connexion, réservations, favoris et messages").font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.bold)).foregroundStyle(.tertiary)
+                        }
+                        .padding(.vertical, 5)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                } header: {
+                    Text("Voyageurs").foregroundStyle(PFTheme.mint)
+                }
+                Section {
+                    Button { showFullSite = true } label: {
+                        Label("Parcourir tout PartenaireFoyer", systemImage: "safari")
+                            .font(.headline)
+                            .foregroundStyle(PFTheme.brand)
+                    }
+                    Text("Retrouvez les pages, démarches et services du site dans l’app.")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.82))
+                } header: {
+                    Text("Accès complet").foregroundStyle(PFTheme.mint)
                 }
         }
         .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(PFTheme.deepGreen)
         .overlay {
             if auth.isSigningIn {
                 ProgressView("Connexion sécurisée Wix…")
@@ -4297,12 +4518,25 @@ private struct NativeSpacePickerView: View {
     private func select(_ role: AccountRole) {
         // Keep the role spaces distinct while allowing a signed-in Wix member to
         // move between their own linked spaces without entering their password again.
-        if auth.member != nil {
+        if role == .professionnel, auth.professionalPortalToken != nil {
+            auth.resetDashboard()
+            activeRoleRaw = role.rawValue
+            selectedRole = nil
+        } else if auth.member != nil {
             auth.resetDashboard()
             activeRoleRaw = role.rawValue
             selectedRole = nil
         } else {
             selectedRole = role
+        }
+    }
+
+    private func signOutEverywhere() {
+        ProfessionalPortalWebView.clearStoredWebsiteSession {
+            DispatchQueue.main.async {
+                auth.signOut()
+                activeRoleRaw = ""
+            }
         }
     }
 }
@@ -4349,6 +4583,15 @@ private enum AccountRole: String, CaseIterable, Identifiable {
     var signupURL: URL {
         URL(string: "https://www.partenairefoyer.com\(signupPath)")!
     }
+    var recoveryURL: URL {
+        URL(string: "https://www.partenairefoyer.com\(recoveryPath)")!
+    }
+    var activationURL: URL {
+        URL(string: "https://www.partenairefoyer.com\(activationPath)")!
+    }
+    var dashboardURL: URL {
+        URL(string: "https://www.partenairefoyer.com\(dashboardPath)")!
+    }
     var dashboardQueryRole: String {
         rawValue
     }
@@ -4366,12 +4609,40 @@ private enum AccountRole: String, CaseIterable, Identifiable {
     private var signupPath: String {
         switch self {
         case .particulier: "/vendeur-signup"
-        case .professionnel: "/inscription-pro"
+        case .professionnel: "/pro-app-login?mode=signup"
         case .courtier: "/broker-signup"
         case .artisan: "/artisan-signup"
         case .diagnostiqueur: "/artisan-signup"
         case .prestataire: "/inscription-prestataire"
         case .hebergeur: "/hebergeur-inscription"
+        }
+    }
+    private var recoveryPath: String {
+        switch self {
+        case .particulier: "/vendeur-forgot-password"
+        // Password recovery is currently offered by the professional portal's
+        // login screen; activation remains its own explicit route.
+        case .professionnel: "/pro-app-login"
+        case .courtier: "/broker-forgot-password"
+        case .artisan, .diagnostiqueur: "/artisan-forgot-password"
+        case .prestataire: "/mot-de-passe-oublie-prestataire"
+        case .hebergeur: "/hebergeur-mot-de-passe-oublie"
+        }
+    }
+    private var activationPath: String {
+        switch self {
+        case .professionnel: "/pro-app-login?mode=activate"
+        default: loginPath
+        }
+    }
+    private var dashboardPath: String {
+        switch self {
+        case .particulier: "/vendeur-dashboard"
+        case .professionnel: "/pro/dashboard"
+        case .courtier: "/broker-dashboard"
+        case .artisan, .diagnostiqueur: "/artisan-dashboard"
+        case .prestataire: "/espace-prestataire"
+        case .hebergeur: "/hebergeur-dashboard"
         }
     }
 }
@@ -4399,6 +4670,8 @@ private struct RoleEntryView: View {
     @State private var showAccountRecovery = false
     @State private var showSiteLogin = false
     @State private var showSiteSignup = false
+    @State private var showSiteActivation = false
+    @State private var showSiteDashboard = false
     @State private var isCreatingAccount = false
     let role: AccountRole
     let onSignedIn: () -> Void
@@ -4448,19 +4721,35 @@ private struct RoleEntryView: View {
                             .foregroundStyle(.teal)
                     }
                 } else {
-                    Section("Connexion à votre compte") {
-                    TextField("Adresse e-mail", text: $email)
-                        .textContentType(.username)
-                        .keyboardType(.emailAddress)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    SecureField("Mot de passe", text: $password)
-                        .textContentType(.password)
-                    Button("Mot de passe oublié ?") {
-                        auth.errorMessage = nil
-                        showAccountRecovery = true
-                    }
-                    .font(.subheadline)
+                    Section("Compte PartenaireFoyer") {
+                        if role == .professionnel {
+                            TextField("Adresse e-mail professionnelle", text: $email)
+                                .textContentType(.username)
+                                .keyboardType(.emailAddress)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                            SecureField("Mot de passe", text: $password)
+                                .textContentType(.password)
+                                .onSubmit { Task { await signInProfessionalPortal() } }
+                            Text("Utilisez les mêmes identifiants que sur le portail professionnel PartenaireFoyer.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("La connexion, la création de compte et la récupération du mot de passe passent par le parcours officiel de votre espace. Vos identifiants et vos données restent ceux utilisés sur le site.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        Label("Même compte et mêmes données que sur le site", systemImage: "checkmark.shield.fill")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.teal)
+                        Text("Sur chaque appareil, reconnectez-vous avec les identifiants de ce compte. Les données sont rattachées au compte ; le jeton de session reste propre à l’appareil utilisé.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        Button("Mot de passe oublié ?") {
+                            auth.errorMessage = nil
+                            showAccountRecovery = true
+                        }
+                        .font(.subheadline)
                     }
                 }
 
@@ -4485,67 +4774,52 @@ private struct RoleEntryView: View {
                         } else if isEditing {
                             Task { await updateExistingProfile() }
                         } else if isCreatingAccount {
-                            showLegalAcceptance = true
+                            showSiteSignup = true
+                        } else if role == .professionnel {
+                            Task { await signInProfessionalPortal() }
                         } else {
-                            Task {
-                                await auth.signIn(email: email, password: password)
-                                if auth.member != nil { onSignedIn() }
-                            }
+                            showSiteLogin = true
                         }
                     } label: {
                         HStack {
                             Spacer()
                             Label(
                                 isEditing ? "Enregistrer les modifications" :
-                                    (role == .professionnel ? (isCreatingAccount ? "Créer mon compte professionnel" : "Accéder à mon espace") :
-                                        (isCreatingAccount ? "Créer mon compte" : "Se connecter")),
+                                    (isCreatingAccount ? "Continuer l’inscription PartenaireFoyer" : "Se connecter à mon espace PartenaireFoyer"),
                                 systemImage: isEditing ? "checkmark.circle" : (isCreatingAccount ? "person.badge.plus" : "lock.shield")
                             )
                                 .font(.headline)
                             Spacer()
                         }
                     }
-                    .disabled((role != .professionnel && email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) ||
-                              (role != .professionnel && !isEditing && password.isEmpty) || auth.isSigningIn)
+                    .disabled(auth.isSigningIn)
 
                     if !isEditing {
+                        Button {
+                            auth.errorMessage = nil
+                            showSiteSignup = true
+                        } label: {
+                            Label("Créer un compte PartenaireFoyer", systemImage: "person.crop.circle.badge.plus")
+                        }
+                        .disabled(auth.isSigningIn)
                         if role == .professionnel {
                             Button {
-                                showSiteSignup = true
+                                showSiteActivation = true
                             } label: {
-                                Label("Première inscription professionnelle", systemImage: "person.crop.circle.badge.plus")
+                                Label("Activer mon accès professionnel existant", systemImage: "key.horizontal")
                             }
                             .disabled(auth.isSigningIn)
-                        } else {
-                            Button {
-                                isCreatingAccount.toggle()
-                                auth.errorMessage = nil
-                            } label: {
-                                Label(isCreatingAccount ? "J’ai déjà un compte : me connecter" : "Créer un compte", systemImage: "person.crop.circle.badge.plus")
-                            }
-                            .disabled(auth.isSigningIn)
-                            Button {
-                                showSiteLogin = true
-                            } label: {
-                                Label("Utiliser la connexion complète du site", systemImage: "safari")
-                            }
-                            .disabled(auth.isSigningIn)
-                            Button {
-                                showSiteSignup = true
-                            } label: {
-                                Label("Créer un compte avec le parcours du site", systemImage: "person.crop.circle.badge.plus")
-                            }
-                            .disabled(auth.isSigningIn)
+                        }
+                        Button {
+                            showSiteDashboard = true
+                        } label: {
+                            Label("Ouvrir mon tableau de bord sur le site", systemImage: "rectangle.portrait.and.arrow.forward")
                         }
                     }
                 } footer: {
                     Text(isEditing
                          ? "Les informations sont mises à jour dans la fiche Wix associée à votre espace."
-                         : (role == .professionnel
-                         ? "Votre espace professionnel utilise le parcours sécurisé du site, partagé avec vos connexions sur PC et Android."
-                         : (isCreatingAccount
-                         ? "Votre compte est créé par l’authentification Wix sécurisée. Le mot de passe n’est pas conservé par l’application."
-                         : "La connexion passe par l’authentification Wix sécurisée. Le mot de passe n’est pas conservé par l’application.")))
+                         : "Les identifiants et l’espace métier sont gérés par le parcours officiel PartenaireFoyer, comme sur PC et Android.")
                 }
             }
             .navigationTitle("Accès à l’espace")
@@ -4560,15 +4834,19 @@ private struct RoleEntryView: View {
                 }
             }
             .sheet(isPresented: $showAccountRecovery) {
-                NavigationStack {
-                    InAppSafariView(url: role.loginURL)
-                        .ignoresSafeArea()
-                        .toolbar {
-                            ToolbarItem(placement: .topBarTrailing) {
-                                Button("Fermer") { showAccountRecovery = false }
-                            }
-                        }
-                }
+                siteFlow(url: role.recoveryURL, title: "Récupérer mon accès")
+            }
+            .sheet(isPresented: $showSiteLogin) {
+                siteFlow(url: role.loginURL, title: "Connexion à mon espace")
+            }
+            .sheet(isPresented: $showSiteSignup) {
+                siteFlow(url: role.signupURL, title: "Créer mon compte")
+            }
+            .sheet(isPresented: $showSiteActivation) {
+                siteFlow(url: role.activationURL, title: "Activer mon accès")
+            }
+            .sheet(isPresented: $showSiteDashboard) {
+                siteFlow(url: role.dashboardURL, title: "Mon tableau de bord")
             }
             .sheet(isPresented: $showSiteLogin) {
                 InAppSafariView(url: role.loginURL)
@@ -4655,6 +4933,42 @@ private struct RoleEntryView: View {
             acceptedCGV: true
         )
         if didComplete { onSignedIn() }
+    }
+
+    private func siteFlow(url: URL, title: String) -> some View {
+        ProfessionalPortalWebView(
+            url: url,
+            initialToken: role == .professionnel ? auth.professionalPortalToken : nil,
+            title: title,
+            expectedDashboardRole: role,
+            onDashboardReached: { reachedRole in
+                guard reachedRole == role else { return }
+                onSignedIn()
+            }
+        ) { token in
+            guard role == .professionnel else { return }
+            handleProfessionalPortalSession(token)
+        }
+    }
+
+    @MainActor
+    private func signInProfessionalPortal() async {
+        guard await auth.signInProfessionalPortal(email: email, password: password) else { return }
+        password = ""
+        onSignedIn()
+    }
+
+    @MainActor
+    private func handleProfessionalPortalSession(_ token: String) {
+        auth.adoptProfessionalPortalSession(token: token, email: email)
+        guard !token.isEmpty else { return }
+        password = ""
+        showAccountRecovery = false
+        showSiteLogin = false
+        showSiteSignup = false
+        showSiteActivation = false
+        showSiteDashboard = false
+        onSignedIn()
     }
 
     @MainActor
@@ -4882,6 +5196,289 @@ private struct InAppSafariView: UIViewControllerRepresentable {
     func updateUIViewController(_ controller: SFSafariViewController, context: Context) {}
 }
 
+private struct ProfessionalPortalDashboardView: View {
+    let token: String
+    let onSignOut: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            ProfessionalPortalWebViewRepresentable(
+                url: URL(string: "https://www.partenairefoyer.com/pro/dashboard")!,
+                initialToken: token,
+                onSessionToken: { _ in }
+            )
+                .ignoresSafeArea(edges: .bottom)
+                .task(id: token) {
+                    await WixAuthStore.shared.registerPushDevice(role: "professionnel")
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .partenaireFoyerFCMTokenDidChange)) { _ in
+                    Task { await WixAuthStore.shared.registerPushDevice(role: "professionnel") }
+                }
+                .toolbar {
+                    ToolbarItem(placement: .principal) { Text("Espace professionnel").font(.headline) }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Déconnexion", systemImage: "rectangle.portrait.and.arrow.right") {
+                            onSignOut()
+                        }
+                    }
+                }
+        }
+    }
+}
+
+/// Keeps non-real-estate Wix role sessions in the same persistent website store
+/// used for login, signup and password recovery. This is the session authority
+/// for these legacy role portals until their Wix authentication is bridged to
+/// the native APIs.
+private struct WebsiteRoleDashboardView: View {
+    @State private var isLoading = true
+    let role: AccountRole
+    let onSignOut: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            ProfessionalPortalWebViewRepresentable(
+                url: role.dashboardURL,
+                initialToken: nil,
+                onSessionToken: { _ in },
+                onDashboardReached: nil,
+                onLoadingChanged: { isLoading = $0 }
+            )
+                .ignoresSafeArea(edges: .bottom)
+                .overlay(alignment: .top) {
+                    if isLoading {
+                        ProgressView("Chargement de votre espace…")
+                            .font(.footnote.weight(.semibold))
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .background(.regularMaterial, in: Capsule())
+                            .padding(.top, 8)
+                    }
+                }
+                .toolbar {
+                    ToolbarItem(placement: .principal) { Text(role.title).font(.headline) }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Déconnexion", systemImage: "rectangle.portrait.and.arrow.right", action: onSignOut)
+                    }
+                }
+        }
+    }
+}
+
+private struct ProfessionalPortalWebView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var portalWebView: WKWebView?
+    @State private var isLoading = true
+    let url: URL
+    let initialToken: String?
+    var title = "Accès au portail"
+    var expectedDashboardRole: AccountRole? = nil
+    var onDashboardReached: ((AccountRole) -> Void)? = nil
+    let onSessionToken: (String) -> Void
+
+    var body: some View {
+        NavigationStack {
+            ProfessionalPortalWebViewRepresentable(
+                url: url,
+                initialToken: initialToken,
+                onSessionToken: onSessionToken,
+                expectedDashboardRole: expectedDashboardRole,
+                onDashboardReached: onDashboardReached,
+                onLoadingChanged: { isLoading = $0 },
+                onWebViewCreated: { portalWebView = $0 }
+            )
+                .ignoresSafeArea(edges: .bottom)
+                .overlay(alignment: .top) {
+                    if isLoading {
+                        ProgressView("Chargement sécurisé…")
+                            .font(.footnote.weight(.semibold))
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .background(.regularMaterial, in: Capsule())
+                            .padding(.top, 8)
+                    }
+                }
+                .navigationTitle(title)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button { portalWebView?.goBack() } label: {
+                            Image(systemName: "chevron.left").accessibilityLabel("Retour")
+                        }
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        HStack {
+                            Button { portalWebView?.reload() } label: {
+                                Image(systemName: "arrow.clockwise").accessibilityLabel("Actualiser")
+                            }
+                            Button("Fermer") { dismiss() }
+                        }
+                    }
+                }
+        }
+    }
+
+    static func clearStoredWebsiteSession(completion: @escaping () -> Void) {
+        let store = WKWebsiteDataStore.default()
+        store.fetchDataRecords(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes()) { records in
+            let websiteRecords = records.filter { $0.displayName.contains("partenairefoyer.com") }
+            guard !websiteRecords.isEmpty else { completion(); return }
+            store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), for: websiteRecords, completionHandler: completion)
+        }
+    }
+}
+
+private struct ProfessionalPortalWebViewRepresentable: UIViewRepresentable {
+    let url: URL
+    let initialToken: String?
+    let onSessionToken: (String) -> Void
+    var expectedDashboardRole: AccountRole? = nil
+    var onDashboardReached: ((AccountRole) -> Void)? = nil
+    var onLoadingChanged: ((Bool) -> Void)? = nil
+    var onWebViewCreated: (WKWebView) -> Void = { _ in }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onSessionToken: onSessionToken, expectedDashboardRole: expectedDashboardRole,
+                    onDashboardReached: onDashboardReached, onLoadingChanged: onLoadingChanged)
+    }
+
+    func makeUIView(context: Context) -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .default()
+        configuration.userContentController.add(context.coordinator, name: "pfProSession")
+        let injectedToken: String
+        if let initialToken, !initialToken.isEmpty,
+           let encoded = try? JSONEncoder().encode(initialToken),
+           let jsonToken = String(data: encoded, encoding: .utf8) {
+            injectedToken = "localStorage.setItem('pf_pro_app_session_token', \(jsonToken));"
+        } else {
+            injectedToken = ""
+        }
+        let sessionBridge = """
+        if (location.hostname === 'www.partenairefoyer.com' || location.hostname === 'partenairefoyer.com') {
+          \(injectedToken)
+          (function () {
+            const key = 'pf_pro_app_session_token';
+            const originalSetItem = Storage.prototype.setItem;
+            Storage.prototype.setItem = function (name, value) {
+              originalSetItem.call(this, name, value);
+              if (name === key && this === localStorage) window.webkit.messageHandlers.pfProSession.postMessage('set:' + String(value));
+            };
+            const originalRemoveItem = Storage.prototype.removeItem;
+            Storage.prototype.removeItem = function (name) {
+              originalRemoveItem.call(this, name);
+              if (name === key && this === localStorage) window.webkit.messageHandlers.pfProSession.postMessage('clear');
+            };
+            const originalClear = Storage.prototype.clear;
+            Storage.prototype.clear = function () {
+              originalClear.call(this);
+              if (this === localStorage) window.webkit.messageHandlers.pfProSession.postMessage('clear');
+            };
+          })();
+        }
+        """
+        configuration.userContentController.addUserScript(WKUserScript(source: sessionBridge, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        let webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.navigationDelegate = context.coordinator
+        webView.uiDelegate = context.coordinator
+        webView.allowsBackForwardNavigationGestures = true
+        DispatchQueue.main.async { onWebViewCreated(webView) }
+        webView.load(URLRequest(url: url, cachePolicy: .useProtocolCachePolicy, timeoutInterval: 30))
+        return webView
+    }
+
+    func updateUIView(_ webView: WKWebView, context: Context) {}
+
+    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
+        private let onSessionToken: (String) -> Void
+        private let expectedDashboardRole: AccountRole?
+        private let onDashboardReached: ((AccountRole) -> Void)?
+        private let onLoadingChanged: ((Bool) -> Void)?
+        private var lastCapturedToken: String?
+        private var didReportDashboard = false
+
+        init(onSessionToken: @escaping (String) -> Void, expectedDashboardRole: AccountRole?,
+             onDashboardReached: ((AccountRole) -> Void)?, onLoadingChanged: ((Bool) -> Void)?) {
+            self.onSessionToken = onSessionToken
+            self.expectedDashboardRole = expectedDashboardRole
+            self.onDashboardReached = onDashboardReached
+            self.onLoadingChanged = onLoadingChanged
+        }
+
+        func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+            DispatchQueue.main.async { self.onLoadingChanged?(true) }
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            DispatchQueue.main.async { self.onLoadingChanged?(false) }
+            reportDashboardIfReached(in: webView)
+        }
+
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            DispatchQueue.main.async { self.onLoadingChanged?(false) }
+        }
+
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            DispatchQueue.main.async { self.onLoadingChanged?(false) }
+        }
+
+        private func reportDashboardIfReached(in webView: WKWebView) {
+            guard !didReportDashboard, let expectedDashboardRole,
+                  let url = webView.url,
+                  let host = url.host?.lowercased(),
+                  host == "www.partenairefoyer.com" || host == "partenairefoyer.com",
+                  expectedDashboardRole != .professionnel,
+                  url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")).lowercased()
+                    == expectedDashboardRole.dashboardURL.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")).lowercased()
+            else { return }
+            didReportDashboard = true
+            DispatchQueue.main.async { self.onDashboardReached?(expectedDashboardRole) }
+        }
+
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            guard message.name == "pfProSession", let value = message.body as? String else { return }
+            if value == "clear" {
+                lastCapturedToken = nil
+                DispatchQueue.main.async { self.onSessionToken("") }
+                return
+            }
+            guard value.hasPrefix("set:") else { return }
+            let token = String(value.dropFirst(4))
+            guard !token.isEmpty, token != lastCapturedToken else { return }
+            lastCapturedToken = token
+            DispatchQueue.main.async { self.onSessionToken(token) }
+        }
+
+        func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+            guard let destination = navigationAction.request.url,
+                  let scheme = destination.scheme?.lowercased() else { decisionHandler(.cancel); return }
+            if scheme == "https" || scheme == "http" {
+                decisionHandler(.allow)
+            } else {
+                openExternalAction(destination, scheme: scheme)
+                decisionHandler(.cancel)
+            }
+        }
+
+        func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+            guard navigationAction.targetFrame == nil,
+                  let destination = navigationAction.request.url,
+                  let scheme = destination.scheme?.lowercased() else { return nil }
+            if scheme == "https" || scheme == "http" {
+                webView.load(navigationAction.request)
+            } else {
+                openExternalAction(destination, scheme: scheme)
+            }
+            return nil
+        }
+
+        private func openExternalAction(_ url: URL, scheme: String) {
+            guard ["mailto", "tel", "sms"].contains(scheme) else { return }
+            UIApplication.shared.open(url)
+        }
+    }
+}
+
 private struct NativeRoleDashboardView: View {
     @StateObject private var auth = WixAuthStore.shared
     @StateObject private var referralService = ReferralService()
@@ -4908,11 +5505,17 @@ private struct NativeRoleDashboardView: View {
     @State private var showSeasonalRateDeletionConfirmation = false
     @State private var showProfileEditor = false
     @State private var showMiniSitePreview = false
+    @State private var showWebsiteDashboard = false
+    @State private var websitePageURL: URL?
+    @State private var websitePageTitle = "Mon espace"
+    @State private var selectedBillingPage: InAppSafariPage?
     @State private var editingBuyerSearch: [String: Any]?
     @State private var pendingBuyerSearchDeletion: String?
     @State private var showBuyerSearchDeletionConfirmation = false
     @State private var pendingMinisiteDeletion: String?
     @State private var showMinisiteDeletionConfirmation = false
+    @State private var pendingProfessionalMatchingDeletion: String?
+    @State private var showProfessionalMatchingDeletionConfirmation = false
     @State private var pendingHostBookingRequest: String?
     @State private var showHostBookingHideConfirmation = false
     let role: AccountRole
@@ -4930,12 +5533,17 @@ private struct NativeRoleDashboardView: View {
                 ("Mes petites annonces", "tag", "classifieds"),
                 ("Mes favoris", "heart", "favorites"),
                 ("Mes recherches", "magnifyingglass", "savedSearches"),
-                ("Matchings reçus", "sparkles", "buyerMatchings")
+                ("Matchings reçus", "sparkles", "buyerMatchings"),
+                ("Professionnels intéressés par mes biens", "person.2", "vendorMatchings")
             ]
         case .professionnel:
             keys = [
                 ("Mes biens", "house", "properties"),
-                ("Mes matchings", "sparkles", "matchings"),
+                ("Opportunités réseau", "sparkles.rectangle.stack", "opportunities"),
+                ("Mes matchings", "sparkles", "matchingsMy"),
+                ("Matchings réseau", "person.2", "matchingsNetwork"),
+                ("Biens de particuliers correspondants", "house", "privatePropertyMatchings"),
+                ("Conversations réseau", "bubble.left.and.bubble.right", "conversations"),
                 ("Demandes disponibles", "bolt.horizontal.circle", "availableDemands"),
                 ("Demandes acceptées", "person.2", "demands"),
                 ("Demandes du mini-site", "globe", "minisiteRequests"),
@@ -4964,12 +5572,25 @@ private struct NativeRoleDashboardView: View {
             ]
         }
         return keys.compactMap { title, icon, key in
+            if key == "matchingsMy" || key == "matchingsNetwork" {
+                let allMatchings = data["matchings"] as? [[String: Any]] ?? []
+                let expectedType = key == "matchingsNetwork" ? "reseau" : "my"
+                let items = allMatchings.filter { ($0["matchingType"] as? String)?.lowercased() == expectedType }
+                return (title, icon, items)
+            }
             guard let items = data[key] as? [[String: Any]] else { return nil }
             return (title, icon, items)
         }
     }
 
     private var profile: [String: Any]? { auth.dashboardData?["profile"] as? [String: Any] }
+
+    private func openWebsiteRoute(_ route: String, title: String) {
+        guard let url = URL(string: "https://www.partenairefoyer.com\(route)") else { return }
+        websitePageURL = url
+        websitePageTitle = title
+        showWebsiteDashboard = true
+    }
 
     private func artisanPaymentURL(plan: String) -> URL? {
         guard let profile,
@@ -5009,6 +5630,13 @@ private struct NativeRoleDashboardView: View {
                         .font(.subheadline)
                         .foregroundStyle(.orange)
                     Button("Réessayer") { Task { await auth.loadDashboard(role: role.dashboardQueryRole) } }
+                    Button {
+                        websitePageURL = role.dashboardURL
+                        websitePageTitle = "Mon tableau de bord"
+                        showWebsiteDashboard = true
+                    } label: {
+                        Label("Ouvrir mon espace complet sur le site", systemImage: "safari")
+                    }
                 }
             } else if let data = auth.dashboardData {
                 if let error = auth.errorMessage {
@@ -5049,9 +5677,15 @@ private struct NativeRoleDashboardView: View {
                     }
                     Section("Abonnement professionnel") {
                         let active = (profile["hasActiveSubscription"] as? Bool) == true
-                        Label(active ? "Abonnement actif" : display(profile["subscriptionStatus"]),
-                              systemImage: active ? "checkmark.seal.fill" : "creditcard")
-                            .foregroundStyle(active ? Color.green : Color.secondary)
+                        let subscriptionStatus = (profile["subscriptionStatus"] as? String ?? "").lowercased()
+                        let freeAccessEnd = ISO8601DateFormatter().date(from: "2027-01-01T00:00:00+01:00")!
+                        let freeAccessActive = Date() < freeAccessEnd
+                        let statusLabel = freeAccessActive
+                            ? "Accès gratuit jusqu’au 31 décembre 2026"
+                            : (subscriptionStatus == "trialing" ? "Essai gratuit en cours" : (active ? "Abonnement actif" : display(profile["subscriptionStatus"])))
+                        Label(statusLabel,
+                              systemImage: freeAccessActive ? "gift.fill" : (active ? "checkmark.seal.fill" : "creditcard"))
+                            .foregroundStyle(freeAccessActive || active || subscriptionStatus == "trialing" ? Color.green : Color.secondary)
                         if profile["subscriptionStartDate"] != nil {
                             LabeledContent("Début", value: display(profile["subscriptionStartDate"]))
                         }
@@ -5060,8 +5694,12 @@ private struct NativeRoleDashboardView: View {
                         }
                         Text("Le statut affiché est synchronisé avec votre espace PartenaireFoyer. La gestion des paiements reste sécurisée par le service de paiement existant.")
                             .font(.footnote).foregroundStyle(.secondary)
-                        Link(destination: URL(string: "https://www.partenairefoyer.com/pro/abonnement")!) {
-                            Label("Gérer mon abonnement et mes paiements", systemImage: "creditcard")
+                        Button {
+                            websitePageURL = URL(string: "https://www.partenairefoyer.com/pro/abonnement")
+                            websitePageTitle = "Abonnement professionnel"
+                            showWebsiteDashboard = true
+                        } label: {
+                            Label("Voir mon offre et gérer l’abonnement", systemImage: "creditcard")
                         }
                     }
                 }
@@ -5069,7 +5707,7 @@ private struct NativeRoleDashboardView: View {
                     let subscription = data["subscription"] as? [String: Any] ?? [:]
                     let status = (subscription["subscriptionStatus"] as? String ?? "").lowercased()
                     let hasPaidAccess = subscription["accessEnabled"] as? Bool == true && ["active", "trialing"].contains(status)
-                    let freeAccessEnd = Calendar.current.date(from: DateComponents(year: 2027, month: 1, day: 1)) ?? Date()
+                    let freeAccessEnd = ISO8601DateFormatter().date(from: "2027-01-01T00:00:00+01:00")!
                     Section("Activité de ma fiche") {
                         LabeledContent("Vues du profil", value: display(profile["profileViews"] ?? 0))
                         LabeledContent("Demandes de contact", value: display(profile["contactRequestsCount"] ?? 0))
@@ -5087,12 +5725,22 @@ private struct NativeRoleDashboardView: View {
                             LabeledContent("Échéance", value: display(end))
                         }
                         if let monthly = artisanPaymentURL(plan: "monthly") {
-                            Link(destination: monthly) { Label("Choisir la formule mensuelle", systemImage: "creditcard") }
+                            Button {
+                                selectedBillingPage = InAppSafariPage(url: monthly)
+                            } label: {
+                                Label("Choisir la formule mensuelle", systemImage: "creditcard")
+                            }
                         }
                         if let annual = artisanPaymentURL(plan: "annual") {
-                            Link(destination: annual) { Label("Choisir la formule annuelle", systemImage: "calendar") }
+                            Button {
+                                selectedBillingPage = InAppSafariPage(url: annual)
+                            } label: {
+                                Label("Choisir la formule annuelle", systemImage: "calendar")
+                            }
                         }
-                        Link(destination: URL(string: "https://billing.stripe.com/p/login/7sY4gAenV3X95k32BF6Vq00")!) {
+                        Button {
+                            selectedBillingPage = InAppSafariPage(url: URL(string: "https://billing.stripe.com/p/login/7sY4gAenV3X95k32BF6Vq00")!)
+                        } label: {
                             Label("Gérer mon abonnement Stripe", systemImage: "arrow.up.right.square")
                         }
                         Text("Le paiement et le statut d’abonnement restent gérés par les services Stripe et Wix du site.")
@@ -5121,7 +5769,9 @@ private struct NativeRoleDashboardView: View {
                             Button { showClassifiedAdForm = true } label: {
                                 Label("Déposer une petite annonce", systemImage: "tag.badge.plus").font(.headline)
                             }
-                            Link(destination: URL(string: "https://www.partenairefoyer.com/vendeur-petites-annonces")!) {
+                            Button {
+                                openWebsiteRoute("/vendeur-petites-annonces", title: "Mes annonces et ventes")
+                            } label: {
                                 Label("Gérer mes annonces, ventes et paiements", systemImage: "shippingbox")
                             }
                             Text("La gestion des ventes et des paiements s’ouvre dans votre espace sécurisé PartenaireFoyer.")
@@ -5178,6 +5828,10 @@ private struct NativeRoleDashboardView: View {
                                            let conversationID = item["conversationId"] as? String,
                                            !conversationID.isEmpty {
                                             selectedConversation = DashboardConversationSelection(id: conversationID, preview: item)
+                                        } else if role == .professionnel, section.0 == "Conversations réseau",
+                                                  let conversationID = (item["conversationId"] as? String) ?? (item["_id"] as? String),
+                                                  !conversationID.isEmpty {
+                                            selectedConversation = DashboardConversationSelection(id: conversationID, preview: item)
                                         } else if role == .hebergeur, section.0 == "Conversations",
                                                   let conversationID = (item["_id"] as? String) ?? (item["id"] as? String),
                                                   !conversationID.isEmpty {
@@ -5202,6 +5856,10 @@ private struct NativeRoleDashboardView: View {
                                 }, onClaim: role == .professionnel && section.0 == "Demandes disponibles" ? {
                                     if let demandID = item["_id"] as? String {
                                         await auth.claimDemand(demandID: demandID)
+                                    }
+                                } : nil, onOpportunityAccept: role == .professionnel && section.0 == "Opportunités réseau" && String(describing: item["status"] ?? "").lowercased() == "pending" ? {
+                                    if let opportunityID = (item["_id"] as? String) ?? (item["id"] as? String) {
+                                        await auth.acceptNetworkOpportunity(opportunityID: opportunityID)
                                     }
                                 } : nil, onHostBookingTransition: role == .hebergeur && section.0 == "Demandes de réservation" ? { status in
                                     guard let requestID = (item["_id"] as? String) ?? (item["id"] as? String) else { return }
@@ -5251,14 +5909,34 @@ private struct NativeRoleDashboardView: View {
                                             Task { _ = await buyerSearchService.dismissMatching(matchingID: matchingID) }
                                         }
                                     }
+                                    if role == .particulier, section.0 == "Professionnels intéressés par mes biens",
+                                       let matchingID = (item["_id"] as? String) ?? (item["id"] as? String) {
+                                        Button("Retirer le rapprochement", systemImage: "eye.slash", role: .destructive) {
+                                            Task { await auth.hidePrivatePropertyMatching(role: role.rawValue, matchingID: matchingID) }
+                                        }
+                                    }
+                                    if role == .professionnel, section.0 == "Biens de particuliers correspondants",
+                                       let matchingID = (item["_id"] as? String) ?? (item["id"] as? String) {
+                                        Button("Retirer le rapprochement", systemImage: "eye.slash", role: .destructive) {
+                                            Task { await auth.hidePrivatePropertyMatching(role: role.rawValue, matchingID: matchingID) }
+                                        }
+                                    }
                                     if role == .professionnel,
-                                       section.0 == "Mes matchings" || section.0 == "Demandes acceptées",
+                                       ["Mes matchings", "Matchings réseau"].contains(section.0),
+                                       let matchingID = (item["_id"] as? String) ?? (item["id"] as? String) {
+                                        Button("Supprimer le matching", systemImage: "trash", role: .destructive) {
+                                            pendingProfessionalMatchingDeletion = matchingID
+                                            showProfessionalMatchingDeletionConfirmation = true
+                                        }
+                                    }
+                                    if role == .professionnel,
+                                       ["Mes matchings", "Matchings réseau", "Demandes acceptées"].contains(section.0),
                                        let itemID = (item["_id"] as? String) ?? (item["id"] as? String),
                                        item["seen"] as? Bool != true || (section.0 == "Demandes acceptées" && item["isViewed"] as? Bool != true) {
                                         Button("Marquer comme vu", systemImage: "eye") {
                                             Task {
                                                 await auth.markMatchingSeen(
-                                                    list: section.0 == "Mes matchings" ? "matchings" : "demands",
+                                                    list: ["Mes matchings", "Matchings réseau"].contains(section.0) ? "matchings" : "demands",
                                                     itemID: itemID
                                                 )
                                             }
@@ -5356,7 +6034,9 @@ private struct NativeRoleDashboardView: View {
                         }
                         Text("Consultez les candidatures, attribuez un contact ou recommandez un futur mandataire.")
                             .font(.footnote).foregroundStyle(.secondary)
-                        Link(destination: URL(string: "https://www.partenairefoyer.com/pro/parrainage")!) {
+                        Button {
+                            openWebsiteRoute("/pro/parrainage", title: "Programme Ambassadeurs")
+                        } label: {
                             Label("Programme Ambassadeurs et commissions", systemImage: "gift")
                         }
                     }
@@ -5365,7 +6045,9 @@ private struct NativeRoleDashboardView: View {
                     Section("Parrainage et récompenses") {
                         Text("Retrouvez votre code, vos parrainages, vos points et les campagnes du programme sur votre compte PartenaireFoyer.")
                             .font(.footnote).foregroundStyle(.secondary)
-                        Link(destination: URL(string: "https://www.partenairefoyer.com/parrainage")!) {
+                        Button {
+                            openWebsiteRoute("/parrainage", title: "Parrainage et récompenses")
+                        } label: {
                             Label("Ouvrir mon programme de parrainage", systemImage: "person.2.badge.plus")
                         }
                     }
@@ -5387,7 +6069,11 @@ private struct NativeRoleDashboardView: View {
                             Label("Aucun abonnement saisonnier associé à ce profil.", systemImage: "info.circle")
                                 .font(.footnote).foregroundStyle(.secondary)
                         }
-                        Link(destination: URL(string: "https://www.partenairefoyer.com/hebergeur-abonnement")!) {
+                        Button {
+                            websitePageURL = URL(string: "https://www.partenairefoyer.com/hebergeur-abonnement")
+                            websitePageTitle = "Abonnement hébergeur"
+                            showWebsiteDashboard = true
+                        } label: {
                             Label("Gérer l’abonnement et le paiement", systemImage: "creditcard")
                         }
                     }
@@ -5423,6 +6109,20 @@ private struct NativeRoleDashboardView: View {
             Button("Annuler", role: .cancel) { pendingMinisiteDeletion = nil }
         } message: {
             Text("La demande sera supprimée du CMS Wix et ne pourra pas être restaurée.")
+        }
+        .confirmationDialog(
+            "Supprimer ce matching professionnel ?",
+            isPresented: $showProfessionalMatchingDeletionConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Supprimer définitivement", role: .destructive) {
+                guard let matchingID = pendingProfessionalMatchingDeletion else { return }
+                Task { await auth.deleteProfessionalMatching(matchingID: matchingID) }
+                pendingProfessionalMatchingDeletion = nil
+            }
+            Button("Annuler", role: .cancel) { pendingProfessionalMatchingDeletion = nil }
+        } message: {
+            Text("Le matching sera supprimé de Wix, comme dans votre espace professionnel sur le site.")
         }
         .confirmationDialog(
             "Supprimer cette recherche ?",
@@ -5519,7 +6219,7 @@ private struct NativeRoleDashboardView: View {
                         NativeProfessionalConversationView(
                             conversationID: selection.id,
                             preview: selection.preview,
-                            professionalID: (auth.dashboardData?["profile"] as? [String: Any])?["_id"] as? String ?? ""
+                            professionalID: member.id
                         )
                     }
                 }
@@ -5528,6 +6228,28 @@ private struct NativeRoleDashboardView: View {
                         Button("Fermer") { selectedConversation = nil }
                     }
                 }
+            }
+        }
+        .sheet(isPresented: $showWebsiteDashboard) {
+            ProfessionalPortalWebView(
+                url: websitePageURL ?? role.dashboardURL,
+                initialToken: auth.professionalPortalToken,
+                title: websitePageTitle
+            ) { token in
+                if role == .professionnel {
+                    auth.adoptProfessionalPortalSession(token: token)
+                }
+            }
+        }
+        .sheet(item: $selectedBillingPage) { page in
+            NavigationStack {
+                InAppSafariView(url: page.url)
+                    .ignoresSafeArea()
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Fermer") { selectedBillingPage = nil }
+                        }
+                    }
             }
         }
         .sheet(isPresented: $showReferralCenter) {
@@ -6675,8 +7397,10 @@ private struct WixDashboardItem: View {
     let fallbackTitle: String
     let onOpen: () -> Void
     var onClaim: (() async -> Void)? = nil
+    var onOpportunityAccept: (() async -> Void)? = nil
     var onHostBookingTransition: ((String) async -> Void)? = nil
     @State private var isClaiming = false
+    @State private var isAcceptingOpportunity = false
     @State private var isTransitioningBooking = false
     @State private var confirmBookingRejection = false
 
@@ -6692,8 +7416,15 @@ private struct WixDashboardItem: View {
     }
 
     private var title: String {
+        if let label = item["matchingLabel"] as? String, !label.isEmpty {
+            if let score = item["matchingScore"] {
+                return "\(label) · \(String(describing: score)) %"
+            }
+            return label
+        }
         if let score = item["matchingScore"] {
-            return "Matching immobilier · \(String(describing: score)) %"
+            let isNetwork = (item["matchingType"] as? String)?.lowercased() == "reseau"
+            return "Matching \(isNetwork ? "réseau" : "immobilier") · \(String(describing: score)) %"
         }
         if let demand = item["demandType"] as? String, !demand.isEmpty {
             return "Demande · \(demand)"
@@ -6702,10 +7433,38 @@ private struct WixDashboardItem: View {
             .compactMap { item[$0] as? String }.first ?? fallbackTitle
     }
     private var subtitle: String {
-        ["propertyCity", "propertyPostalCode", "propertyType", "transactionType", "professionalName", "city", "postalCode", "category", "status", "matchingType", "demandType"].compactMap { item[$0] as? String }.filter { !$0.isEmpty }.joined(separator: " · ")
+        var values = ["propertyCity", "propertyPostalCode", "propertyType", "transactionType", "propertyReferenceCode", "buyerCity", "buyerReferenceCode", "otherProfessionalName", "otherProfessionalCompany", "otherProfessionalCity", "professionalName", "city", "postalCode", "category", "matchingType", "demandType"].compactMap { item[$0] as? String }.filter { !$0.isEmpty }
+        if let status = item["status"] as? String {
+            switch status.lowercased() {
+            case "pending": values.append("À examiner")
+            case "accepted": values.append("Acceptée")
+            case "converted": values.append("Sélectionnée")
+            default: break
+            }
+        }
+        return values.joined(separator: " · ")
     }
     private var detail: String? {
-        ["description", "itemDescription", "message", "messageContent", "content"].compactMap { item[$0] as? String }.first
+        let text = ["description", "itemDescription", "message", "messageContent", "content"].compactMap { item[$0] as? String }.first
+        var criteria: [String] = []
+        if let reference = item["buyerReferenceCode"] as? String, !reference.isEmpty {
+            criteria.append("Acquéreur · réf. \(reference)")
+        }
+        if let value = item["buyerBudgetMin"] { criteria.append("Budget dès \(value) €") }
+        if let value = item["buyerBudgetMax"] { criteria.append("Budget jusqu’à \(value) €") }
+        if let value = item["buyerMinRooms"] { criteria.append("\(value) pièces min.") }
+        if let value = item["buyerSurfaceMin"] { criteria.append("\(value) m² min.") }
+        if let value = item["buyerSearchRadiusKm"] { criteria.append("Rayon \(value) km") }
+        if let features = item["buyerMandatoryFeatures"] as? String, !features.isEmpty {
+            criteria.append("Critères : \(features.replacingOccurrences(of: ",", with: " · "))")
+        }
+        if let style = item["buyerPropertyStylePreferences"] as? String, !style.isEmpty {
+            criteria.append("Style : \(style.replacingOccurrences(of: ",", with: " · "))")
+        }
+        if let value = item["propertyRooms"] { criteria.append("\(value) pièces") }
+        if let value = item["propertyBedrooms"] { criteria.append("\(value) chambres") }
+        if let value = item["propertyBathrooms"] { criteria.append("\(value) salles de bain") }
+        return ([text].compactMap { $0 } + criteria).joined(separator: " · ")
     }
     private var imageURL: URL? {
         ["propertyImage", "mainImageUrl", "mainImage", "itemImage", "photo"].compactMap { item[$0] as? String }.compactMap(WixImageSource.url).first
@@ -6717,7 +7476,7 @@ private struct WixDashboardItem: View {
         return URL(string: "https://www.partenairefoyer.com\(path)")
     }
     private var contactEmailURL: URL? {
-        let candidate = ["professionalEmail", "senderEmail", "vacationerEmail", "email"]
+        let candidate = ["otherProfessionalEmail", "professionalEmail", "senderEmail", "vacationerEmail", "email"]
             .compactMap { item[$0] as? String }
             .first { value in
                 let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -6735,7 +7494,7 @@ private struct WixDashboardItem: View {
         return components.url
     }
     private var contactPhoneURL: URL? {
-        guard let phone = ["professionalPhone", "senderPhone", "vacationerPhone", "phone", "phoneNumber"]
+        guard let phone = ["otherProfessionalPhone", "professionalPhone", "senderPhone", "vacationerPhone", "phone", "phoneNumber"]
             .compactMap({ item[$0] as? String })
             .first(where: { $0.filter { $0.isNumber }.count >= 6 }) else { return nil }
         let dialable = phone.filter { $0.isNumber || $0 == "+" }
@@ -6791,6 +7550,21 @@ private struct WixDashboardItem: View {
                 .buttonStyle(.borderedProminent)
                 .tint(.teal)
                 .disabled(isClaiming)
+            }
+            if let onOpportunityAccept {
+                Button {
+                    Task {
+                        isAcceptingOpportunity = true
+                        await onOpportunityAccept()
+                        isAcceptingOpportunity = false
+                    }
+                } label: {
+                    Label(isAcceptingOpportunity ? "Création de la collaboration…" : "Accepter cette opportunité", systemImage: "checkmark.circle.fill")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.teal)
+                .disabled(isAcceptingOpportunity)
             }
             if let onHostBookingTransition, String(describing: item["status"] ?? "pending").lowercased() == "pending" {
                 HStack {

@@ -1,9 +1,18 @@
+import {
+  calculateWixMatchingScore,
+  calculateWixPrivatePropertyBuyerScore,
+  passesWixStrictMatchingFilters,
+} from "./wix-matching-engine.ts";
+
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, content-type",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 };
 const WIX = "https://www.wixapis.com";
+const WIX_SAVED_SEARCH_EMAIL_ENDPOINT = "https://www.partenairefoyer.com/api/send-saved-search-new-listing-email";
+const WIX_PUSH_EVENT_ENDPOINT = "https://www.partenairefoyer.com/api/push-notify-event";
+const PF_BREVO_EMAIL_ENDPOINT = "https://krvwwavxmuwieemubhdj.supabase.co/functions/v1/pf-brevo-email";
 const ALLOWED_CLASSIFIED_ATTRIBUTES = new Set([
   "brand", "model", "year", "mileage", "energy", "gearbox", "bodyType", "engineCapacity",
   "fiscalPower", "powerHp", "doors", "seats", "color", "size", "material", "dimensions",
@@ -40,6 +49,355 @@ async function wixRequest<T>(path: string, token: string, init: RequestInit = {}
   const raw = await result.text();
   if (!result.ok) throw new Error(`Wix API (${result.status})`);
   return (raw ? JSON.parse(raw) : {}) as T;
+}
+
+// Wix's Template 23 route has no persistent delivery marker; call it only once
+// for each newly published listing and never retry a failed/ambiguous response.
+function scheduleSavedSearchNewListingEmail(property: Record<string, unknown>, sourceCollection: string): void {
+  const propertyID = String(property._id ?? "").trim();
+  if (!propertyID) return;
+  const task = fetch(WIX_SAVED_SEARCH_EMAIL_ENDPOINT, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      Origin: "https://www.partenairefoyer.com",
+    },
+    body: JSON.stringify({
+      propertyId: propertyID,
+      propertyTitle: property.title,
+      propertyCity: property.city,
+      propertyPostalCode: property.postalCode,
+      propertyPrice: property.price ?? property.sellingPrice ?? property.estimatedPrice,
+      propertySlug: property.slug ?? propertyID,
+      sourceCollection,
+    }),
+    signal: AbortSignal.timeout(120_000),
+  }).then(async (result) => {
+    if (!result.ok) throw new Error(`Wix saved-search email API (${result.status})`);
+    const payload = await result.json().catch(() => ({}));
+    console.info("[ios-native-dashboard] Wix saved-search email completed", propertyID, payload);
+  }).catch((error) => {
+    console.error("[ios-native-dashboard] Wix saved-search email failed", propertyID, error);
+  });
+  const runtime = (globalThis as typeof globalThis & {
+    EdgeRuntime?: { waitUntil?: (promise: Promise<unknown>) => void };
+  }).EdgeRuntime;
+  if (runtime?.waitUntil) runtime.waitUntil(task);
+  else void task;
+}
+
+async function sendMatchingEmail(templateId: number, email: string, params: Record<string, unknown>, name?: string): Promise<void> {
+  try {
+    const result = await fetch(PF_BREVO_EMAIL_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        to: [{ email, ...(name ? { name } : {}) }],
+        sender: { name: "PartenaireFoyer", email: "contact@partenairefoyer.com" },
+        templateId,
+        params,
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!result.ok) console.warn("[ios-native-dashboard] Matching email rejected", templateId, result.status);
+  } catch (error) {
+    console.warn("[ios-native-dashboard] Matching email failed", templateId, error);
+  }
+}
+
+async function notifyMatchingEvent(eventType: "matching" | "opportunity", entityId: string): Promise<void> {
+  try {
+    const result = await fetch(WIX_PUSH_EVENT_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ eventType, entityId }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!result.ok) console.warn("[ios-native-dashboard] Matching push rejected", eventType, result.status);
+  } catch (error) {
+    console.warn("[ios-native-dashboard] Matching push failed", eventType, error);
+  }
+}
+
+async function runWixProfessionalMatching(propertyId: string, token: string): Promise<void> {
+  const property = first(await queryAll("biensprofessionnels", { _id: { $eq: propertyId } }, [], token));
+  if (!property || String(property.status ?? "").toLowerCase() !== "active") return;
+
+  const buyers = await queryAll("acquereurs", {}, [], token);
+  const candidates: { buyer: Record<string, unknown>; matchingScore: number }[] = [];
+  for (const buyer of buyers) {
+    try {
+      if (
+        property.latitude !== undefined && property.longitude !== undefined &&
+        buyer.latitude !== undefined && buyer.longitude !== undefined && buyer.searchRadiusKm
+      ) {
+        const distance = wixMatchingDistance(
+          Number(property.latitude), Number(property.longitude), Number(buyer.latitude), Number(buyer.longitude),
+        );
+        if (distance > Number(buyer.searchRadiusKm) * 1.5) continue;
+      }
+      if (!passesWixStrictMatchingFilters(property, buyer)) continue;
+      const matchingScore = calculateWixMatchingScore(property, buyer);
+      if (matchingScore > 0) candidates.push({ buyer, matchingScore });
+    } catch (error) {
+      console.warn("[ios-native-dashboard] Pro matching comparison failed", propertyId, buyer._id, error);
+    }
+  }
+
+  const professionalMemberIds = [...new Set(candidates.flatMap(({ buyer }) => [
+    String(buyer.wixMemberId ?? ""), String(property.wixMemberId ?? ""),
+  ]).filter(Boolean))];
+  const [existingOpportunities, existingMatchings, professionals] = await Promise.all([
+    queryAll("opportunitesprov2", { propertyId: { $eq: propertyId } }, [], token),
+    queryAll("matchings", { propertyId: { $eq: propertyId } }, [], token),
+    Promise.all(Array.from({ length: Math.ceil(professionalMemberIds.length / 100) }, (_, index) =>
+      queryAll("professionnels", {
+        memberId: { $in: professionalMemberIds.slice(index * 100, (index + 1) * 100) },
+      }, [], token)
+    )).then((pages) => pages.flat()),
+  ]);
+  const professionalByMemberId = new Map(professionals.map((item) => [String(item.memberId ?? ""), item]));
+  const now = new Date().toISOString();
+
+  for (const { buyer, matchingScore } of candidates) {
+    try {
+      const propertyMemberId = String(property.wixMemberId ?? "");
+      const buyerMemberId = String(buyer.wixMemberId ?? "");
+      if (!propertyMemberId || !buyerMemberId) continue;
+
+      if (propertyMemberId === buyerMemberId) {
+        const matchingKey = `${property._id}_${buyer._id}`;
+        const exists = existingMatchings.some((item) => item.matchingKey === matchingKey && item.matchingType === "my");
+        if (exists) continue;
+        const created = await wixRequest<{ dataItem?: { id?: string } }>("/wix-data/v2/items", token, {
+          method: "POST",
+          body: JSON.stringify({ dataCollectionId: "matchings", dataItem: { data: {
+            propertyId: property._id,
+            acquereurId: buyer._id,
+            buyerId: buyer._id,
+            propertyProfessionalId: propertyMemberId,
+            buyerProfessionalId: propertyMemberId,
+            propertyProfessionalMemberId: propertyMemberId,
+            buyerProfessionalMemberId: propertyMemberId,
+            matchingScore,
+            matchingType: "my",
+            type: "my",
+            status: "new",
+            matchingKey,
+            createdAt: now,
+            updatedAt: now,
+          } } }),
+        });
+        const matchingId = String(created.dataItem?.id ?? "");
+        if (!matchingId) continue;
+        await notifyMatchingEvent("matching", matchingId);
+        if (matchingScore >= 80) {
+          const professional = professionalByMemberId.get(propertyMemberId);
+          const email = String(professional?.email ?? professional?.contactEmail ?? professional?.emailAddress ?? "").trim();
+          if (email) {
+            const professionalName = `${String(professional?.firstName ?? "")} ${String(professional?.lastName ?? "")}`.trim();
+            const buyerInfo = `${String(buyer.firstName ?? "")} ${String(buyer.lastName ?? "")}`.trim();
+            await sendMatchingEmail(10, email, {
+              matchingId,
+              matchingScore,
+              propertyInfo: `${String(property.title ?? "Bien")} - €${String(property.price ?? "")}`,
+              buyerInfo: buyerInfo || "Acquéreur",
+              matchingType: "my",
+            }, professionalName || undefined);
+          }
+        }
+        continue;
+      }
+
+      const existing = existingOpportunities.find((item) =>
+        String(item.propertyId ?? "") === String(property._id ?? "") &&
+        String(item.buyerProfileId ?? "") === String(buyer._id ?? "")
+      );
+      if (existing?.status === "converted") continue;
+      if (existing) {
+        await wixRequest(`/wix-data/v2/items/${encodeURIComponent(String(existing._id))}`, token, {
+          method: "PATCH",
+          body: JSON.stringify({ dataCollectionId: "opportunitesprov2", patch: { dataItemId: String(existing._id), fieldModifications: [
+            { fieldPath: "matchingScore", action: "SET_FIELD", setFieldOptions: { value: matchingScore } },
+            { fieldPath: "updatedAt", action: "SET_FIELD", setFieldOptions: { value: now } },
+          ] } }),
+        });
+        continue;
+      }
+
+      const created = await wixRequest<{ dataItem?: { id?: string } }>("/wix-data/v2/items", token, {
+        method: "POST",
+        body: JSON.stringify({ dataCollectionId: "opportunitesprov2", dataItem: { data: {
+          propertyId: property._id,
+          buyerProfileId: buyer._id,
+          acquereurId: buyer._id,
+          professionalId: buyerMemberId,
+          otherProfessionalId: propertyMemberId,
+          status: "pending",
+          type: "reseau",
+          matchingScore,
+          createdAt: now,
+          updatedAt: now,
+        } } }),
+      });
+      const opportunityId = String(created.dataItem?.id ?? "");
+      if (!opportunityId) continue;
+      await notifyMatchingEvent("opportunity", opportunityId);
+
+      if (matchingScore >= 80) {
+        const recipients = [professionalByMemberId.get(buyerMemberId), professionalByMemberId.get(propertyMemberId)]
+          .map((item) => String(item?.email ?? item?.contactEmail ?? item?.emailAddress ?? item?.userEmail ?? "").trim())
+          .filter((email, index, values) => Boolean(email) && values.indexOf(email) === index);
+        const propertyInfo = `${String(property.title ?? "Bien")} in ${String(property.city ?? "Unknown location")}`;
+        const buyerInfo = `${String(buyer.firstName ?? "")} ${String(buyer.lastName ?? "")}`.trim();
+        await Promise.all(recipients.map((email) => sendMatchingEmail(9, email, {
+            opportunityId,
+            propertyInfo,
+            buyerInfo: buyerInfo || "New buyer",
+            status: "pending",
+          })));
+      }
+    } catch (error) {
+      console.warn("[ios-native-dashboard] Pro matching write failed", propertyId, buyer._id, error);
+    }
+  }
+}
+
+function wixMatchingDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const toRad = (degrees: number) => (degrees * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1), dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return Math.round(6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)) * 10) / 10;
+}
+
+function scheduleWixProfessionalMatching(propertyId: string, token: string): void {
+  const task = runWixProfessionalMatching(propertyId, token).catch((error) => {
+    console.error("[ios-native-dashboard] Pro matching run failed", propertyId, error);
+  });
+  const runtime = (globalThis as typeof globalThis & {
+    EdgeRuntime?: { waitUntil?: (promise: Promise<unknown>) => void };
+  }).EdgeRuntime;
+  if (runtime?.waitUntil) runtime.waitUntil(task);
+  else void task;
+}
+
+async function runWixPrivatePropertyMatching(propertyId: string, token: string): Promise<void> {
+  const property = first(await queryAll("privateproperties", {
+    _id: { $eq: propertyId }, isPublic: { $eq: true }, isDeleted: { $ne: true },
+  }, [], token));
+  if (!property) return;
+
+  const buyers = await queryAll("acquereurs", {}, [], token);
+  const candidates = buyers.flatMap((buyer) => {
+    if (buyer.isActive === false || !buyer.professionalId) return [];
+    const score = calculateWixPrivatePropertyBuyerScore(property, buyer);
+    return score >= 60 ? [{ buyer, score, professionalId: String(buyer.professionalId) }] : [];
+  });
+  if (candidates.length === 0) return;
+
+  const professionalIds = [...new Set(candidates.map((candidate) => candidate.professionalId))];
+  const [professionals, matchings] = await Promise.all([
+    Promise.all(Array.from({ length: Math.ceil(professionalIds.length / 100) }, (_, index) =>
+      queryAll("professionnels", {
+        _id: { $in: professionalIds.slice(index * 100, (index + 1) * 100) },
+      }, [], token)
+    )).then((pages) => pages.flat()),
+    queryAll("privateprofessionalmatchings", { propertyId: { $eq: propertyId } }, [], token),
+  ]);
+  const professionalById = new Map(professionals.map((item) => [String(item._id ?? ""), item]));
+  const emailKeys = new Set<string>();
+  const now = new Date().toISOString();
+  const vendorProfileId = String(property.vendorProfileId ?? property.ownerId ?? "");
+  let vendorProfile = vendorProfileId
+    ? first(await queryAll("privatevendorprofiles", { ownerId: { $eq: vendorProfileId } }, [], token))
+    : null;
+  if (!vendorProfile && vendorProfileId) {
+    vendorProfile = first(await queryAll("privateprofiles", { _id: { $eq: vendorProfileId } }, [], token));
+  }
+
+  for (const { buyer, score, professionalId } of candidates) {
+    try {
+      const professional = professionalById.get(professionalId);
+      if (!professional) continue;
+      const matchingType = "property_to_buyer";
+      const existing = matchings.find((item) =>
+        String(item.buyerId ?? "") === String(buyer._id ?? "") &&
+        String(item.professionalId ?? "") === professionalId &&
+        String(item.matchingType ?? "") === matchingType
+      );
+      let matchingId = String(existing?._id ?? "");
+      if (existing) {
+        await wixRequest(`/wix-data/v2/items/${encodeURIComponent(matchingId)}`, token, {
+          method: "PATCH",
+          body: JSON.stringify({ dataCollectionId: "privateprofessionalmatchings", patch: {
+            dataItemId: matchingId,
+            fieldModifications: [
+              { fieldPath: "matchingScore", action: "SET_FIELD", setFieldOptions: { value: score } },
+              { fieldPath: "updatedAt", action: "SET_FIELD", setFieldOptions: { value: now } },
+            ],
+          } }),
+        });
+      } else {
+        const created = await wixRequest<{ dataItem?: { id?: string } }>("/wix-data/v2/items", token, {
+          method: "POST",
+          body: JSON.stringify({ dataCollectionId: "privateprofessionalmatchings", dataItem: { data: {
+            propertyId,
+            buyerId: String(buyer._id ?? ""),
+            professionalId,
+            matchingScore: score,
+            matchingType,
+            status: "pending",
+            createdAt: now,
+            updatedAt: now,
+          } } }),
+        });
+        matchingId = String(created.dataItem?.id ?? "");
+        if (!matchingId) continue;
+      }
+
+      if (score < 60 || !vendorProfile) continue;
+      const vendorEmail = String(vendorProfile.email ?? "").trim();
+      const professionalEmail = String(professional.Email ?? professional.email ?? "").trim();
+      if (!vendorEmail || !professionalEmail) continue;
+      const professionalName = `${String(professional.firstName ?? "")} ${String(professional.lastName ?? "")}`.trim() || "Professionnel";
+      const vendorFirstName = String(vendorProfile.firstName ?? "Vendeur");
+      const vendorLastName = String(vendorProfile.lastName ?? "");
+      const propertyTitle = String(property.title ?? "Bien");
+      const matchingEmailKey = `${propertyId}-${professionalId}`;
+      if (emailKeys.has(matchingEmailKey)) continue;
+      emailKeys.add(matchingEmailKey);
+      const scoreParams = Math.round(score);
+      await Promise.all([
+        sendMatchingEmail(19, vendorEmail, {
+          vendorFirstName: vendorFirstName || "Vendeur",
+          professionalName,
+          propertyTitle,
+          matchingScore: scoreParams,
+        }, `${vendorFirstName} ${vendorLastName}`.trim()),
+        sendMatchingEmail(19, professionalEmail, {
+          vendorFirstName: `${String(buyer.firstName ?? "")} ${String(buyer.lastName ?? "")}`.trim() || "Acquéreur",
+          professionalName,
+          propertyTitle,
+          matchingScore: scoreParams,
+        }, professionalName),
+      ]);
+      console.info("[ios-native-dashboard] Private property match created/updated", matchingId, scoreParams);
+    } catch (error) {
+      console.warn("[ios-native-dashboard] Private property matching write failed", propertyId, buyer._id, error);
+    }
+  }
+}
+
+function scheduleWixPrivatePropertyMatching(propertyId: string, token: string): void {
+  const task = runWixPrivatePropertyMatching(propertyId, token).catch((error) => {
+    console.error("[ios-native-dashboard] Private property matching run failed", propertyId, error);
+  });
+  const runtime = (globalThis as typeof globalThis & {
+    EdgeRuntime?: { waitUntil?: (promise: Promise<unknown>) => void };
+  }).EdgeRuntime;
+  if (runtime?.waitUntil) runtime.waitUntil(task);
+  else void task;
 }
 
 async function query(
@@ -220,9 +578,16 @@ async function loadDashboard(role: string, email: string, memberID: string, toke
     const account = first(await query("privateaccounts", emailFilter(email), ["email", "accountType", "isActive"], token, 2));
     if (!account || account.isActive === false) return null;
     const accountId = String(account._id ?? "");
-    const [profiles, properties, classifieds, favorites, savedSearches, buyerMatchings] = await Promise.all([
-      query("privateprofiles", { ownerId: { $eq: accountId } }, ["ownerId", "firstName", "lastName", "email", "phone", "city", "postalCode", "isProfileComplete"], token, 2),
-      query("privateproperties", { ownerId: { $eq: accountId } }, ["ownerId", "title", "description", "propertyType", "transactionType", "sellingPrice", "estimatedPrice", "surface", "landSurface", "rooms", "bedrooms", "bathrooms", "city", "postalCode", "mainImage", "photo1", "photo2", "photo3", "photo4", "photo5", "photo6", "photo7", "photo8", "photo9", "photo10", "photo11", "photo12", "photo13", "photo14", "photo15", "photo16", "photo17", "photo18", "photo19", "photo20", "galleryImages", "isPublic", "status", "createdAt", "slug"], token),
+    const profiles = await query("privateprofiles", { ownerId: { $eq: accountId } }, ["ownerId", "firstName", "lastName", "email", "phone", "city", "postalCode", "isProfileComplete"], token, 2);
+    const profile = first(profiles);
+    const profileId = String(profile?._id ?? "");
+    // Wix's seller dashboard links privateproperties to the profile ID. Keep
+    // reading the older account-ID form so existing app-created records remain
+    // visible during the ownership-key transition.
+    const propertyFields = ["ownerId", "isDeleted", "title", "description", "propertyType", "transactionType", "sellingPrice", "estimatedPrice", "surface", "landSurface", "rooms", "bedrooms", "bathrooms", "city", "postalCode", "mainImage", "photo1", "photo2", "photo3", "photo4", "photo5", "photo6", "photo7", "photo8", "photo9", "photo10", "photo11", "photo12", "photo13", "photo14", "photo15", "photo16", "photo17", "photo18", "photo19", "photo20", "galleryImages", "isPublic", "status", "createdAt", "slug"];
+    const [profileOwnedProperties, legacyAccountOwnedProperties, classifieds, favorites, savedSearches, buyerMatchings] = await Promise.all([
+      profileId ? query("privateproperties", { ownerId: { $eq: profileId } }, propertyFields, token) : Promise.resolve([]),
+      query("privateproperties", { ownerId: { $eq: accountId } }, propertyFields, token),
       query("classifiedads-1", { ownerId: { $eq: accountId } }, [
         "ownerId", "itemName", "itemPrice", "itemDescription", "itemImage",
         "photo2", "photo3", "photo4", "photo5", "photo6", "photo7", "photo8", "photo9", "photo10",
@@ -233,11 +598,83 @@ async function loadDashboard(role: string, email: string, memberID: string, toke
       query("particularbuyersearches", { accountId: { $eq: accountId } }, ["accountId", "searchName", "transactionType", "propertyTypes", "city", "postalCode", "latitude", "longitude", "radius", "minBudget", "maxBudget", "minSurface", "maxSurface", "minLandSurface", "maxLandSurface", "minRooms", "minBedrooms", "minBathrooms", "singleStory", "garage", "garden", "terrace", "pool", "parking", "emailAlertsEnabled", "isActive", "createdAt", "updatedAt"], token),
       query("particularsearchmatchings", { buyerAccountId: { $eq: accountId } }, ["buyerAccountId", "searchId", "propertyId", "propertyTitle", "propertyCity", "propertyPostalCode", "propertyPrice", "propertySurface", "propertyType", "transactionType", "propertyUrl", "propertyImage", "professionalId", "professionalMemberId", "professionalName", "professionalFirstName", "professionalEmail", "professionalPhone", "professionalCity", "professionalNetwork", "professionalPhoto", "professionalSlug", "matchingScore", "status", "dismissedByParticulier", "emailSentToBuyer", "emailSentToProfessional", "createdAt", "notifiedAt"], token),
     ]);
+    const properties = [...new Map([...profileOwnedProperties, ...legacyAccountOwnedProperties]
+      .map((item) => [String(item._id ?? ""), item] as const)
+      .filter(([id]) => Boolean(id))).values()];
+    const ownedPropertyIDs = new Set(properties
+      .filter((item) => item.isDeleted !== true)
+      .map((item) => String(item._id ?? "")).filter(Boolean));
+    // The site has a second seller-to-professional-buyer matching stream.
+    // Query only this account's property IDs instead of downloading the whole
+    // CMS collection each time its dashboard opens.
+    const privatePropertyIDs = [...ownedPropertyIDs];
+    const allPrivatePropertyMatchings = (await Promise.all(
+      Array.from({ length: Math.ceil(privatePropertyIDs.length / 100) }, (_, index) =>
+        queryAll("privateprofessionalmatchings", {
+          propertyId: { $in: privatePropertyIDs.slice(index * 100, (index + 1) * 100) },
+        }, ["propertyId", "professionalId", "matchingScore", "matchingType", "status", "vendorHidden", "professionalHidden", "createdAt"], token)),
+    )).flat();
+    const propertyByID = new Map(properties.map((item) => [String(item._id ?? ""), item]));
+    const bestPrivatePropertyMatchByProfessional = new Map<string, Record<string, unknown>>();
+    for (const matching of allPrivatePropertyMatchings
+      .filter((item) => ownedPropertyIDs.has(String(item.propertyId ?? "")) && item.vendorHidden !== true)
+      .sort((a, b) => Number(b.matchingScore ?? 0) - Number(a.matchingScore ?? 0))) {
+      const professionalID = String(matching.professionalId ?? "");
+      if (!professionalID) continue;
+      const property = propertyByID.get(String(matching.propertyId ?? ""));
+      const propertySummary = property ? {
+        propertyTitle: property.title,
+        propertyCity: property.city,
+        propertyPostalCode: property.postalCode,
+        propertyType: property.propertyType,
+        transactionType: property.transactionType,
+        propertyPrice: property.sellingPrice ?? property.estimatedPrice,
+        propertySurface: property.surface,
+        propertyImage: property.mainImage ?? property.photo1,
+        propertyUrl: property.slug ? `/annonce/${String(property.slug)}` : `/annonce/${String(matching.propertyId ?? "")}`,
+      } : {};
+      const existing = bestPrivatePropertyMatchByProfessional.get(professionalID);
+      if (!existing) {
+        bestPrivatePropertyMatchByProfessional.set(professionalID, {
+          ...matching,
+          ...propertySummary,
+          matchingLabel: "Professionnel intéressé par votre bien",
+          compatiblePropertyCount: 1,
+        });
+      } else if (String(existing.propertyId ?? "") !== String(matching.propertyId ?? "")) {
+        existing.compatiblePropertyCount = Number(existing.compatiblePropertyCount ?? 1) + 1;
+      }
+    }
+    const matchedProfessionalIDs = [...bestPrivatePropertyMatchByProfessional.keys()];
+    let matchingProfessionals: Record<string, unknown>[] = [];
+    try {
+      matchingProfessionals = (await Promise.all(
+        Array.from({ length: Math.ceil(matchedProfessionalIDs.length / 100) }, (_, index) =>
+          queryAll("professionnels", {
+            _id: { $in: matchedProfessionalIDs.slice(index * 100, (index + 1) * 100) },
+          }, ["firstName", "lastName", "companyName", "businessSector", "city", "phone", "email", "photo", "slug", "minisiteSlug", "isActive"], token)),
+      )).flat();
+    } catch (error) {
+      console.warn("[ios-native-dashboard] Matching professional details unavailable", error);
+    }
+    const professionalByID = new Map(matchingProfessionals.map((item) => [String(item._id ?? ""), item]));
+    for (const [professionalID, matching] of bestPrivatePropertyMatchByProfessional) {
+      const professional = professionalByID.get(professionalID);
+      if (!professional) continue;
+      matching.professionalName = professional.companyName || `${String(professional.firstName ?? "")} ${String(professional.lastName ?? "")}`.trim();
+      matching.professionalEmail = professional.email;
+      matching.professionalPhone = professional.phone;
+      matching.professionalCity = professional.city;
+      matching.professionalPhoto = professional.photo;
+      matching.professionalSlug = professional.slug ?? professional.minisiteSlug;
+      matching.professionalActivity = professional.businessSector;
+    }
     return {
       role, account: { id: accountId }, profile: first(profiles),
       properties: properties.filter((item) => item.status !== "archived"),
       classifieds: classifieds.filter((item) => item.status !== "archived"),
       favorites, savedSearches, buyerMatchings: buyerMatchings.filter((item) => item.dismissedByParticulier !== true),
+      vendorMatchings: [...bestPrivatePropertyMatchByProfessional.values()],
     };
   }
 
@@ -260,12 +697,48 @@ async function loadDashboard(role: string, email: string, memberID: string, toke
     ], token, 2));
     const matchingProfile = legacyProfessional ?? profile;
     const professionalId = String(matchingProfile._id ?? profile._id ?? "");
-    const [properties, matchings, allClaims, allDemands, hiddenDemands, minisiteRequests, estimationRequests, propertyRequests, messages] = await Promise.all([
+    const [properties, allProfessionalMatchings, allPrivatePropertyMatchings, allOpportunities, allCollaborations, allClaims, allDemands, hiddenDemands, minisiteRequests, estimationRequests, propertyRequests, messages] = await Promise.all([
       // Public Wix listings are linked to the Wix member identity, not the
       // separate prosprofiles item ID. Using professionalId here returned an
       // empty property list for otherwise active professional accounts.
       query("biensprofessionnels", { wixMemberId: { $eq: memberID } }, ["wixMemberId", "professionalId", "title", "description", "propertyType", "transactionType", "price", "surface", "surfaceLand", "landSurface", "rooms", "bedrooms", "bathrooms", "address", "city", "postalCode", "mainImageUrl", "photo1", "photo2", "photo3", "photo4", "photo5", "galleryImages", "status", "commercialStatus", "updatedAt"], token),
-      query("matchings", { professionalId: { $eq: professionalId } }, ["professionalId", "propertyId", "acquereurId", "matchingScore", "matchingType", "status", "seen", "createdAt"], token),
+      // Match the Wix ProMatchingsPage participant rule. A pro can appear on
+      // either side of a network matching; filtering only `professionalId`
+      // hid records where they were the other professional or property owner.
+      Promise.all([
+        "professionalId", "otherProfessionalId", "propertyProfessionalId",
+        "propertyProfessionalMemberId", "buyerProfessionalId", "buyerProfessionalMemberId",
+      ].map((field) => queryAll("matchings", { [field]: { $eq: memberID } }, [
+        "professionalId", "otherProfessionalId", "propertyProfessionalId",
+        "propertyProfessionalMemberId", "buyerProfessionalId", "buyerProfessionalMemberId",
+        "propertyId", "acquereurId", "buyerId", "matchingScore", "matchingType",
+        "type", "status", "seen", "createdAt",
+      ], token))).then((pages) => [...new Map(pages.flat()
+        .map((item) => [String(item._id ?? ""), item] as const)
+        .filter(([id]) => Boolean(id))).values()]),
+      // Wix's private-property page shows the existing seller-property matches
+      // attached to this professional, ordered by score in the client.
+      queryAll("privateprofessionalmatchings", { professionalId: { $eq: professionalId } }, ["propertyId", "professionalId", "matchingScore", "matchingType", "status", "vendorHidden", "professionalHidden", "createdAt"], token),
+      // Mirror the Wix matching service: load opportunities where this
+      // professional is either the buyer owner or the property owner.
+      Promise.all([
+        queryAll("opportunitesprov2", { professionalId: { $eq: memberID } }, [
+          "propertyId", "buyerProfileId", "acquereurId", "professionalId", "otherProfessionalId",
+          "matchingScore", "type", "status", "createdAt",
+        ], token),
+        queryAll("opportunitesprov2", { otherProfessionalId: { $eq: memberID } }, [
+          "propertyId", "buyerProfileId", "acquereurId", "professionalId", "otherProfessionalId",
+          "matchingScore", "type", "status", "createdAt",
+        ], token),
+      ]).then((pages) => [...new Map(pages.flat()
+        .map((item) => [String(item._id ?? ""), item] as const)
+        .filter(([id]) => Boolean(id))).values()]),
+      Promise.all([
+        queryAll("collaborations", { professional1Id: { $eq: memberID } }, ["opportunityId", "professional1Id", "professional2Id", "propertyId", "acquereurId", "status", "createdAt"], token),
+        queryAll("collaborations", { professional2Id: { $eq: memberID } }, ["opportunityId", "professional1Id", "professional2Id", "propertyId", "acquereurId", "status", "createdAt"], token),
+      ]).then((pages) => [...new Map(pages.flat()
+        .map((item) => [String(item._id ?? ""), item] as const)
+        .filter(([id]) => Boolean(id))).values()]),
       queryAll("demandespromatchings", {}, [], token),
       queryAll("particuliersprives", {}, [], token),
       queryAll("prohiddendemands", { proId: { $eq: professionalId } }, ["proId", "demandId"], token),
@@ -274,6 +747,244 @@ async function loadDashboard(role: string, email: string, memberID: string, toke
       queryAll("propertycontactrequests", { professionalId: { $eq: professionalId } }, [], token),
       query("messages", { receiverId: { $eq: professionalId } }, ["conversationId", "senderId", "receiverId", "content", "createdAt", "isRead", "readAt"], token),
     ]);
+    const professionalIdentities = new Set([memberID, professionalId, String(profile._id ?? "")].filter(Boolean));
+    const matchings = allProfessionalMatchings.filter((matching) => {
+      const participantIDs = [
+        matching.propertyProfessionalMemberId,
+        matching.buyerProfessionalMemberId,
+        matching.propertyProfessionalId,
+        matching.buyerProfessionalId,
+        matching.professionalId,
+        matching.otherProfessionalId,
+      ].map((value) => String(value ?? "").trim()).filter(Boolean);
+      return participantIDs.some((id) => professionalIdentities.has(id));
+    });
+    const matchingPropertyIDs = [...new Set(matchings
+      .map((matching) => String(matching.propertyId ?? "").trim())
+      .filter(Boolean))];
+    const matchingBuyerIDs = [...new Set(matchings
+      .map((matching) => String(matching.acquereurId ?? matching.buyerId ?? "").trim())
+      .filter(Boolean))];
+    const matchingOtherMemberIDs = [...new Set(matchings.flatMap((matching) => [
+      matching.propertyProfessionalMemberId,
+      matching.buyerProfessionalMemberId,
+      matching.propertyProfessionalId,
+      matching.buyerProfessionalId,
+      matching.professionalId,
+      matching.otherProfessionalId,
+    ].map((value) => String(value ?? "").trim()).filter((id) => id && id !== memberID)))];
+    const [matchingPropertyDetails, matchingBuyers, matchingOtherProfessionals] = await Promise.all([
+      Promise.all(Array.from({ length: Math.ceil(matchingPropertyIDs.length / 100) }, (_, index) =>
+        queryAll("biensprofessionnels", {
+          _id: { $in: matchingPropertyIDs.slice(index * 100, (index + 1) * 100) },
+        }, ["title", "propertyType", "transactionType", "price", "surface", "rooms", "bedrooms", "bathrooms", "city", "postalCode", "mainImageUrl", "slug", "listingUrl", "propertyReference", "status"], token)))
+        .then((pages) => pages.flat())
+        .catch((error) => { console.warn("[ios-native-dashboard] Professional matching property details unavailable", error); return []; }),
+      Promise.all(Array.from({ length: Math.ceil(matchingBuyerIDs.length / 100) }, (_, index) =>
+        queryAll("acquereurs", {
+          _id: { $in: matchingBuyerIDs.slice(index * 100, (index + 1) * 100) },
+        }, ["buyerReference", "budgetMin", "minRooms", "maxRooms", "surfaceMin", "surfaceMax", "searchRadiusKm", "city", "propertyStylePreferences", "mandatoryFeatures"], token)))
+        .then((pages) => pages.flat())
+        .catch((error) => { console.warn("[ios-native-dashboard] Matching buyer details unavailable", error); return []; }),
+      Promise.all(Array.from({ length: Math.ceil(matchingOtherMemberIDs.length / 100) }, (_, index) =>
+        queryAll("professionnels", {
+          memberId: { $in: matchingOtherMemberIDs.slice(index * 100, (index + 1) * 100) },
+        }, ["memberId", "firstName", "lastName", "companyName", "network", "photo", "email", "phone", "city"], token)))
+        .then((pages) => pages.flat())
+        .catch((error) => { console.warn("[ios-native-dashboard] Matching professional details unavailable", error); return []; }),
+    ]);
+    const matchingPropertyByID = new Map(matchingPropertyDetails.map((item) => [String(item._id ?? ""), item]));
+    const matchingBuyerByID = new Map(matchingBuyers.map((item) => [String(item._id ?? ""), item]));
+    const matchingOtherProfessionalByMemberID = new Map(matchingOtherProfessionals.map((item) => [String(item.memberId ?? ""), item]));
+    const visibleOpportunities = allOpportunities.filter((item) =>
+      [String(item.professionalId ?? ""), String(item.otherProfessionalId ?? "")].includes(memberID) &&
+      String(item.status ?? "").toLowerCase() !== "converted"
+    );
+    const opportunityPropertyIDs = [...new Set(visibleOpportunities.map((item) => String(item.propertyId ?? "")).filter(Boolean))];
+    const opportunityBuyerIDs = [...new Set(visibleOpportunities.map((item) => String(item.buyerProfileId ?? item.acquereurId ?? "")).filter(Boolean))];
+    const opportunityOtherMemberIDs = [...new Set(visibleOpportunities.flatMap((item) =>
+      [String(item.professionalId ?? ""), String(item.otherProfessionalId ?? "")].filter((id) => id && id !== memberID)
+    ))];
+    const [opportunityProperties, opportunityBuyers, opportunityProfessionals] = await Promise.all([
+      Promise.all(Array.from({ length: Math.ceil(opportunityPropertyIDs.length / 100) }, (_, index) =>
+        queryAll("biensprofessionnels", { _id: { $in: opportunityPropertyIDs.slice(index * 100, (index + 1) * 100) } },
+          ["title", "propertyType", "transactionType", "price", "surface", "city", "postalCode", "mainImageUrl", "slug"], token)))
+        .then((pages) => pages.flat()).catch(() => [] as Record<string, unknown>[]),
+      Promise.all(Array.from({ length: Math.ceil(opportunityBuyerIDs.length / 100) }, (_, index) =>
+        queryAll("acquereurs", { _id: { $in: opportunityBuyerIDs.slice(index * 100, (index + 1) * 100) } },
+          ["buyerReference", "budgetMin", "budgetMax", "minRooms", "maxRooms", "surfaceMin", "surfaceMax", "surfaceHouseMin", "surfaceHouseMax", "searchRadiusKm", "city", "propertyStylePreferences", "mandatoryFeatures"], token)))
+        .then((pages) => pages.flat()).catch(() => [] as Record<string, unknown>[]),
+      Promise.all(Array.from({ length: Math.ceil(opportunityOtherMemberIDs.length / 100) }, (_, index) =>
+        queryAll("professionnels", { memberId: { $in: opportunityOtherMemberIDs.slice(index * 100, (index + 1) * 100) } },
+          ["memberId", "firstName", "lastName", "companyName", "network", "photo", "city"], token)))
+        .then((pages) => pages.flat()).catch(() => [] as Record<string, unknown>[]),
+    ]);
+    const opportunityPropertyByID = new Map(opportunityProperties.map((item) => [String(item._id ?? ""), item]));
+    const opportunityBuyerByID = new Map(opportunityBuyers.map((item) => [String(item._id ?? ""), item]));
+    const opportunityProfessionalByMemberID = new Map(opportunityProfessionals.map((item) => [String(item.memberId ?? ""), item]));
+    const detailedOpportunities = visibleOpportunities.map((item) => {
+      const property = opportunityPropertyByID.get(String(item.propertyId ?? ""));
+      const buyer = opportunityBuyerByID.get(String(item.buyerProfileId ?? item.acquereurId ?? ""));
+      const otherMemberID = [String(item.professionalId ?? ""), String(item.otherProfessionalId ?? "")].find((id) => id && id !== memberID);
+      const otherPro = otherMemberID ? opportunityProfessionalByMemberID.get(otherMemberID) : undefined;
+      return {
+        ...item,
+        propertyTitle: property?.title,
+        propertyType: property?.propertyType,
+        transactionType: property?.transactionType,
+        propertyPrice: property?.price,
+        propertySurface: property?.surface,
+        propertyCity: property?.city,
+        propertyPostalCode: property?.postalCode,
+        propertyImage: property?.mainImageUrl,
+        propertyUrl: property?.slug ? `/annonce/${String(property.slug)}` : undefined,
+        buyerReferenceCode: buyer?.buyerReference,
+        buyerBudgetMin: buyer?.budgetMin,
+        buyerBudgetMax: buyer?.budgetMax,
+        buyerMinRooms: buyer?.minRooms,
+        buyerMaxRooms: buyer?.maxRooms,
+        buyerSurfaceMin: buyer?.surfaceHouseMin ?? buyer?.surfaceMin,
+        buyerSurfaceMax: buyer?.surfaceHouseMax ?? buyer?.surfaceMax,
+        buyerSearchRadiusKm: buyer?.searchRadiusKm,
+        buyerCity: buyer?.city,
+        buyerPropertyStylePreferences: buyer?.propertyStylePreferences,
+        buyerMandatoryFeatures: buyer?.mandatoryFeatures,
+        otherProfessionalName: otherPro ? `${String(otherPro.firstName ?? "")} ${String(otherPro.lastName ?? "")}`.trim() : undefined,
+        otherProfessionalCompany: otherPro?.companyName ?? otherPro?.network,
+        otherProfessionalPhoto: otherPro?.photo,
+        otherProfessionalCity: otherPro?.city,
+      };
+    }).sort((a, b) => Number(b.matchingScore ?? 0) - Number(a.matchingScore ?? 0) ||
+      new Date(String(b.createdAt ?? 0)).getTime() - new Date(String(a.createdAt ?? 0)).getTime());
+    const professionalCollaborations = allCollaborations.filter((item) =>
+      [String(item.professional1Id ?? ""), String(item.professional2Id ?? "")].includes(memberID) &&
+      String(item.status ?? "").toLowerCase() === "active"
+    );
+    const collaborationIDs = [...new Set(professionalCollaborations.map((item) => String(item._id ?? "")).filter(Boolean))];
+    const allConversations = (await Promise.all(
+      Array.from({ length: Math.ceil(collaborationIDs.length / 100) }, (_, index) =>
+        queryAll("conversations", { collaborationId: { $in: collaborationIDs.slice(index * 100, (index + 1) * 100) } }, [
+          "participants", "subject", "collaborationId", "lastMessageText", "lastMessageAt",
+          "lastSenderId", "status", "createdAt", "updatedAt", "hiddenFor",
+        ], token)),
+    )).flat();
+    const professionalConversations = allConversations.filter((item) => {
+      const participants = String(item.participants ?? "").split(",").map((value) => value.trim());
+      const hiddenFor = String(item.hiddenFor ?? "").split(",").map((value) => value.trim());
+      return participants.includes(memberID) && !hiddenFor.includes(memberID) && String(item.status ?? "").toLowerCase() === "active";
+    });
+    const conversationOtherMemberIDs = [...new Set(professionalConversations.flatMap((item) =>
+      String(item.participants ?? "").split(",").map((value) => value.trim()).filter((id) => id && id !== memberID)
+    ))];
+    const conversationProfessionals = (await Promise.all(
+      Array.from({ length: Math.ceil(conversationOtherMemberIDs.length / 100) }, (_, index) =>
+        queryAll("professionnels", { memberId: { $in: conversationOtherMemberIDs.slice(index * 100, (index + 1) * 100) } },
+          ["memberId", "firstName", "lastName", "companyName", "network", "photo", "email", "phone", "city"], token)),
+    )).flat();
+    const conversationProfessionalByMemberID = new Map(conversationProfessionals.map((item) => [String(item.memberId ?? ""), item]));
+    const detailedConversations = professionalConversations.map((conversation) => {
+      const otherMemberID = String(conversation.participants ?? "").split(",").map((value) => value.trim()).find((id) => id && id !== memberID);
+      const otherPro = otherMemberID ? conversationProfessionalByMemberID.get(otherMemberID) : undefined;
+      return {
+        ...conversation,
+        conversationId: conversation._id,
+        senderName: otherPro?.companyName || `${String(otherPro?.firstName ?? "")} ${String(otherPro?.lastName ?? "")}`.trim(),
+        senderEmail: otherPro?.email,
+        senderPhone: otherPro?.phone,
+        otherProfessionalCity: otherPro?.city,
+        otherProfessionalCompany: otherPro?.companyName ?? otherPro?.network,
+      };
+    }).sort((a, b) => new Date(String(b.lastMessageAt ?? b.createdAt ?? 0)).getTime() - new Date(String(a.lastMessageAt ?? a.createdAt ?? 0)).getTime());
+    const detailedProfessionalMatchings = matchings.map((matching) => {
+      const property = matchingPropertyByID.get(String(matching.propertyId ?? ""));
+      const buyerID = String(matching.acquereurId ?? matching.buyerId ?? "");
+      const buyer = matchingBuyerByID.get(buyerID);
+      const participantMemberIDs = [
+        matching.propertyProfessionalMemberId,
+        matching.buyerProfessionalMemberId,
+        matching.propertyProfessionalId,
+        matching.buyerProfessionalId,
+        matching.professionalId,
+        matching.otherProfessionalId,
+      ].map((value) => String(value ?? "").trim()).filter(Boolean);
+      const otherProfessionalMemberID = participantMemberIDs.find((id) => !professionalIdentities.has(id));
+      const otherProfessional = otherProfessionalMemberID
+        ? matchingOtherProfessionalByMemberID.get(otherProfessionalMemberID)
+        : undefined;
+      const joined = {
+        ...matching,
+        buyerReferenceCode: buyer?.buyerReference,
+        buyerBudgetMin: buyer?.budgetMin,
+        buyerMinRooms: buyer?.minRooms,
+        buyerMaxRooms: buyer?.maxRooms,
+        buyerSurfaceMin: buyer?.surfaceMin,
+        buyerSurfaceMax: buyer?.surfaceMax,
+        buyerSearchRadiusKm: buyer?.searchRadiusKm,
+        buyerCity: buyer?.city,
+        buyerPropertyStylePreferences: buyer?.propertyStylePreferences,
+        buyerMandatoryFeatures: buyer?.mandatoryFeatures,
+        otherProfessionalName: otherProfessional
+          ? `${String(otherProfessional.firstName ?? "")} ${String(otherProfessional.lastName ?? "")}`.trim()
+          : undefined,
+        otherProfessionalCompany: otherProfessional?.companyName ?? otherProfessional?.network,
+        otherProfessionalPhoto: otherProfessional?.photo,
+        otherProfessionalEmail: otherProfessional?.email,
+        otherProfessionalPhone: otherProfessional?.phone,
+        otherProfessionalCity: otherProfessional?.city,
+      };
+      if (!property) return joined;
+      const slug = String(property.slug ?? "").trim();
+      return {
+        ...joined,
+        propertyTitle: property.title,
+        propertyType: property.propertyType,
+        transactionType: property.transactionType,
+        propertyPrice: property.price,
+        propertySurface: property.surface,
+        propertyRooms: property.rooms,
+        propertyBedrooms: property.bedrooms,
+        propertyBathrooms: property.bathrooms,
+        propertyCity: property.city,
+        propertyPostalCode: property.postalCode,
+        propertyImage: property.mainImageUrl,
+        propertyReferenceCode: property.propertyReference,
+        propertyListingUrl: property.listingUrl,
+        propertyUrl: slug ? "/annonce/" + slug : "/annonce/" + String(matching.propertyId ?? ""),
+      };
+    });
+    const privatePropertyMatchings = allPrivatePropertyMatchings
+      .filter((matching) => String(matching.professionalId ?? "") === professionalId && matching.professionalHidden !== true)
+      .sort((a, b) => Number(b.matchingScore ?? 0) - Number(a.matchingScore ?? 0))
+    const matchedPrivatePropertyIDs = [...new Set(privatePropertyMatchings.map((item) => String(item.propertyId ?? "")).filter(Boolean))];
+    let privatePropertyDetails: Record<string, unknown>[] = [];
+    try {
+      privatePropertyDetails = (await Promise.all(
+        Array.from({ length: Math.ceil(matchedPrivatePropertyIDs.length / 100) }, (_, index) =>
+          queryAll("privateproperties", {
+            _id: { $in: matchedPrivatePropertyIDs.slice(index * 100, (index + 1) * 100) },
+          }, ["title", "description", "propertyType", "transactionType", "sellingPrice", "estimatedPrice", "surface", "landSurface", "rooms", "bedrooms", "bathrooms", "city", "postalCode", "mainImage", "photo1", "slug", "isPublic", "status"], token)),
+      )).flat();
+    } catch (error) {
+      console.warn("[ios-native-dashboard] Private property matching details unavailable", error);
+    }
+    const privatePropertyByID = new Map(privatePropertyDetails.map((item) => [String(item._id ?? ""), item]));
+    const detailedPrivatePropertyMatchings = privatePropertyMatchings.map((matching) => {
+      const property = privatePropertyByID.get(String(matching.propertyId ?? ""));
+      if (!property) return { ...matching, matchingLabel: "Bien particulier correspondant" };
+      return {
+        ...matching,
+        matchingLabel: "Bien particulier correspondant",
+        propertyTitle: property.title,
+        propertyCity: property.city,
+        propertyPostalCode: property.postalCode,
+        propertyType: property.propertyType,
+        transactionType: property.transactionType,
+        propertyPrice: property.sellingPrice ?? property.estimatedPrice,
+        propertySurface: property.surface,
+        propertyImage: property.mainImage ?? property.photo1,
+        propertyUrl: property.slug ? `/annonce/${String(property.slug)}` : `/annonce/${String(matching.propertyId ?? "")}`,
+      };
+    });
     const ownClaims = allClaims.filter((item) => String(item.proId ?? "") === professionalId);
     const ownClaimIds = new Set(ownClaims.map((item) => String(item.demandId ?? "")));
     const claimsByDemand = new Map<string, Record<string, unknown>[]>();
@@ -302,10 +1013,10 @@ async function loadDashboard(role: string, email: string, memberID: string, toke
     });
     return {
       role, account: accountSummary, profile, matchingProfile,
-      properties: properties.filter((item) => item.status !== "archived"), matchings,
+      properties: properties.filter((item) => item.status !== "archived"), matchings: detailedProfessionalMatchings, opportunities: detailedOpportunities, privatePropertyMatchings: detailedPrivatePropertyMatchings,
       demands: newestFirst(acceptedDemands), availableDemands: newestFirst(availableDemands),
       minisiteRequests: newestFirst(minisiteRequests), estimationRequests: newestFirst(estimationRequests),
-      propertyRequests: newestFirst(propertyRequests), messages,
+      propertyRequests: newestFirst(propertyRequests), messages, conversations: detailedConversations,
     };
   }
 
@@ -527,9 +1238,11 @@ Deno.serve(async (req: Request) => {
         }, ["ownerId", "title", "slug"], token, 2));
         const ownerId = String(property?.ownerId ?? "");
         if (!property || !ownerId) return response({ error: "Cette annonce n’est plus disponible." }, 404);
+        const profileByID = first(await query("privateprofiles", { _id: { $eq: ownerId } }, ["ownerId", "email", "firstName", "lastName"], token, 2));
+        const accountId = String(profileByID?.ownerId ?? ownerId);
         const [accounts, profiles] = await Promise.all([
-          query("privateaccounts", { _id: { $eq: ownerId } }, ["email", "isActive"], token, 2),
-          query("privateprofiles", { ownerId: { $eq: ownerId } }, ["email", "firstName", "lastName"], token, 2),
+          query("privateaccounts", { _id: { $eq: accountId } }, ["email", "isActive"], token, 2),
+          profileByID ? Promise.resolve([profileByID]) : query("privateprofiles", { ownerId: { $eq: accountId } }, ["email", "firstName", "lastName"], token, 2),
         ]);
         const account = first(accounts);
         const profile = first(profiles);
@@ -1304,6 +2017,8 @@ Deno.serve(async (req: Request) => {
           const rooms = Number(body.rooms);
           const bedrooms = Number(body.bedrooms ?? 0);
           const bathrooms = Number(body.bathrooms ?? 0);
+          const latitude = body.latitude === undefined || body.latitude === null ? undefined : Number(body.latitude);
+          const longitude = body.longitude === undefined || body.longitude === null ? undefined : Number(body.longitude);
           const supabaseURL = String(Deno.env.get("SUPABASE_URL") ?? "");
           const photos = ownedListingPhotos(body.photos, role, result.member.id, supabaseURL);
           if (!photos) return response({ error: "Une photo ne provient pas de votre sélection d’images sécurisée." }, 400);
@@ -1312,16 +2027,25 @@ Deno.serve(async (req: Request) => {
               !/^\d{4,10}$/.test(postalCode) || !Number.isFinite(price) || price < 0 ||
               !Number.isFinite(surface) || surface <= 0 ||
               (landSurface !== undefined && (!Number.isFinite(landSurface) || landSurface < 0)) ||
+              (latitude !== undefined && (!Number.isFinite(latitude) || latitude < -90 || latitude > 90)) ||
+              (longitude !== undefined && (!Number.isFinite(longitude) || longitude < -180 || longitude > 180)) ||
               !Number.isInteger(rooms) || rooms < 1 || !Number.isInteger(bedrooms) || bedrooms < 0 ||
               !Number.isInteger(bathrooms) || bathrooms < 0) {
             return response({ error: "Vérifiez le titre, la description, la localisation et les caractéristiques du bien." }, 400);
           }
           const data: Record<string, unknown> = {
             ownerId: accountID, title, description, propertyType, transactionType, sellingPrice: price, surface,
-            rooms, bedrooms, bathrooms, city, postalCode, isPublic: body.publishImmediately === true,
+            vendorProfileId: String(profile._id ?? ""),
+            rooms, bedrooms, bathrooms, hasGarage: body.hasGarage === true,
+            hasPiscine: body.hasPiscine === true, hasAnnexe: body.hasAnnexe === true,
+            city, postalCode, isPublic: body.publishImmediately === true, isDeleted: false,
             status: "active", createdAt: now, updatedAt: now,
           };
           if (landSurface !== undefined) data.landSurface = landSurface;
+          if (latitude !== undefined && longitude !== undefined) {
+            data.latitude = latitude;
+            data.longitude = longitude;
+          }
           if (photos.length > 0) {
             data.mainImage = photos[0];
             data.photo1 = photos[0];
@@ -1333,6 +2057,10 @@ Deno.serve(async (req: Request) => {
             body: JSON.stringify({ dataCollectionId: "privateproperties", dataItem: { data } }),
           });
           if (!inserted.dataItem?.id) return response({ error: "Wix n’a pas confirmé l’enregistrement du bien." }, 502);
+          if (data.isPublic === true) {
+            scheduleWixPrivatePropertyMatching(inserted.dataItem.id, token);
+            scheduleSavedSearchNewListingEmail({ _id: inserted.dataItem.id, ...data }, "privateproperties");
+          }
           return response({ success: true, propertyId: inserted.dataItem.id, status: data.status, isPublic: data.isPublic });
         }
 
@@ -1406,6 +2134,11 @@ Deno.serve(async (req: Request) => {
         const rooms = Number(body.rooms);
         const bedrooms = Number(body.bedrooms ?? 0);
         const bathrooms = Number(body.bathrooms ?? 0);
+        const hasGarage = body.hasGarage === true;
+        const hasSwimmingPool = body.hasSwimmingPool === true;
+        const hasAnnex = body.hasAnnex === true;
+        const latitude = body.latitude === undefined || body.latitude === null ? undefined : Number(body.latitude);
+        const longitude = body.longitude === undefined || body.longitude === null ? undefined : Number(body.longitude);
         const photos = ownedListingPhotos(body.photos, role, result.member.id, String(Deno.env.get("SUPABASE_URL") ?? ""));
         if (!photos) return response({ error: "Une photo ne provient pas de votre sélection d’images sécurisée." }, 400);
         const allowedPropertyTypes = new Set([
@@ -1415,6 +2148,8 @@ Deno.serve(async (req: Request) => {
             !["sale", "rent"].includes(transactionType) || address.length < 5 || city.length < 2 ||
             !/^\d{4,10}$/.test(postalCode) || !Number.isFinite(price) || price < 0 ||
             (landSurface !== undefined && (!Number.isFinite(landSurface) || landSurface < 0)) ||
+            (latitude !== undefined && (!Number.isFinite(latitude) || latitude < -90 || latitude > 90)) ||
+            (longitude !== undefined && (!Number.isFinite(longitude) || longitude < -180 || longitude > 180)) ||
             !Number.isFinite(surface) || surface <= 0 || !Number.isInteger(rooms) || rooms < 1 ||
             !Number.isInteger(bedrooms) || bedrooms < 0 || !Number.isInteger(bathrooms) || bathrooms < 0) {
           return response({ error: "Vérifiez le titre, la description, la localisation et les caractéristiques du bien." }, 400);
@@ -1441,6 +2176,9 @@ Deno.serve(async (req: Request) => {
           rooms,
           bedrooms,
           bathrooms,
+          hasGarage,
+          hasSwimmingPool,
+          hasAnnex,
           address,
           city,
           postalCode,
@@ -1452,6 +2190,10 @@ Deno.serve(async (req: Request) => {
           data.landSurface = landSurface;
           data.surfaceLand = landSurface;
         }
+        if (latitude !== undefined && longitude !== undefined) {
+          data.latitude = latitude;
+          data.longitude = longitude;
+        }
         if (photos.length > 0) {
           data.mainImageUrl = photos[0];
           data.galleryImages = JSON.stringify(photos);
@@ -1462,6 +2204,10 @@ Deno.serve(async (req: Request) => {
           body: JSON.stringify({ dataCollectionId: "biensprofessionnels", dataItem: { data } }),
         });
         if (!inserted.dataItem?.id) return response({ error: "Wix n’a pas confirmé l’enregistrement du bien." }, 502);
+        if (data.status === "active") {
+          scheduleWixProfessionalMatching(inserted.dataItem.id, token);
+          scheduleSavedSearchNewListingEmail({ _id: inserted.dataItem.id, ...data }, "biensprofessionnels");
+        }
         return response({ success: true, propertyId: inserted.dataItem.id, status: data.status });
       }
       if (body.action === "archive_listing") {
@@ -1639,6 +2385,12 @@ Deno.serve(async (req: Request) => {
           method: "PATCH",
           body: JSON.stringify({ dataCollectionId: collection, patch: { dataItemId: itemId, fieldModifications } }),
         });
+        if (role === "professionnel" && list === "properties" && String(data.status ?? ownedItem.status ?? "").toLowerCase() === "active") {
+          scheduleWixProfessionalMatching(itemId, token);
+        }
+        if (role === "particulier" && list === "properties" && (data.isPublic === true || (data.isPublic === undefined && ownedItem.isPublic === true))) {
+          scheduleWixPrivatePropertyMatching(itemId, token);
+        }
         return response({ success: true, itemId, list });
       }
       if (body.action === "mark_matching_seen") {
@@ -1676,6 +2428,143 @@ Deno.serve(async (req: Request) => {
           }),
         });
         return response({ success: true, itemId, list });
+      }
+      if (body.action === "accept_matching_opportunity") {
+        if (role !== "professionnel") return response({ error: "Cette action est réservée à l’espace professionnel." }, 403);
+        const opportunityID = String(body.opportunityId ?? "").trim();
+        if (!/^[A-Za-z0-9_-]{1,160}$/.test(opportunityID)) return response({ error: "Identifiant d’opportunité invalide." }, 400);
+        const dashboard = await loadDashboard(role, email, result.member.id, token);
+        const rows = (dashboard?.opportunities as Record<string, unknown>[] | undefined) ?? [];
+        const opportunity = rows.find((item) => String(item._id ?? item.id ?? "") === opportunityID &&
+          [String(item.professionalId ?? ""), String(item.otherProfessionalId ?? "")].includes(String(result.member?.id ?? "")));
+        if (!opportunity) return response({ error: "Cette opportunité n’est pas associée à votre espace." }, 404);
+        const status = String(opportunity.status ?? "").toLowerCase();
+        if (!["pending", "accepted"].includes(status)) return response({ error: "Cette opportunité n’est plus disponible." }, 409);
+        const propertyID = String(opportunity.propertyId ?? "");
+        const buyerID = String(opportunity.buyerProfileId ?? opportunity.acquereurId ?? "");
+        const buyerProfessionalID = String(opportunity.professionalId ?? "");
+        const propertyProfessionalID = String(opportunity.otherProfessionalId ?? "");
+        if (!propertyID || !buyerID || !buyerProfessionalID || !propertyProfessionalID) {
+          return response({ error: "Les informations nécessaires à cette collaboration sont incomplètes." }, 409);
+        }
+        const now = new Date().toISOString();
+        const existingCollaboration = first(await query("collaborations", { opportunityId: { $eq: opportunityID } }, ["opportunityId", "status"], token, 2));
+        if (status === "pending") {
+          await wixRequest(`/wix-data/v2/items/${encodeURIComponent(opportunityID)}`, token, {
+            method: "PATCH",
+            body: JSON.stringify({ dataCollectionId: "opportunitesprov2", patch: { dataItemId: opportunityID, fieldModifications: [
+              { fieldPath: "status", action: "SET_FIELD", setFieldOptions: { value: "accepted" } },
+              { fieldPath: "updatedAt", action: "SET_FIELD", setFieldOptions: { value: now } },
+            ] } }),
+          });
+        }
+        let collaborationID = String(existingCollaboration?._id ?? "");
+        if (!existingCollaboration) {
+          const createdCollaboration = await wixRequest<{ dataItem?: { id?: string } }>("/wix-data/v2/items", token, { method: "POST", body: JSON.stringify({
+            dataCollectionId: "collaborations", dataItem: { data: {
+              opportunityId: opportunityID,
+              professional1Id: propertyProfessionalID, professional2Id: buyerProfessionalID,
+              propertyId: propertyID, acquereurId: buyerID, status: "active", createdAt: now, updatedAt: now,
+            } },
+          }) });
+          collaborationID = String(createdCollaboration.dataItem?.id ?? "");
+          if (!collaborationID) return response({ error: "Wix n’a pas confirmé la création de la collaboration." }, 502);
+        }
+        const existingConversation = collaborationID
+          ? first(await query("conversations", { collaborationId: { $eq: collaborationID } }, ["collaborationId"], token, 2))
+          : null;
+        if (collaborationID && !existingConversation) {
+          await wixRequest("/wix-data/v2/items", token, { method: "POST", body: JSON.stringify({
+            dataCollectionId: "conversations", dataItem: { data: {
+              participants: `${propertyProfessionalID},${buyerProfessionalID}`,
+              subject: "Collaboration confirmée", collaborationId: collaborationID,
+              status: "active", createdAt: now, updatedAt: now,
+            } },
+          }) });
+        }
+        const existingMatching = first(await query("matchings", {
+          propertyId: { $eq: propertyID }, acquereurId: { $eq: buyerID }, matchingType: { $eq: "reseau" },
+        }, ["propertyId", "acquereurId", "matchingType"], token, 2));
+        let matchingID = String(existingMatching?._id ?? "");
+        if (!existingMatching) {
+          const createdMatching = await wixRequest<{ dataItem?: { id?: string } }>("/wix-data/v2/items", token, { method: "POST", body: JSON.stringify({
+            dataCollectionId: "matchings", dataItem: { data: {
+              propertyId: propertyID, acquereurId: buyerID, buyerId: buyerID,
+              professionalId: buyerProfessionalID, matchingScore: opportunity.matchingScore ?? 0,
+              matchingType: "reseau", type: "reseau", status: "accepted", createdAt: now, updatedAt: now,
+            } },
+          }) });
+          matchingID = String(createdMatching.dataItem?.id ?? "");
+          if (!matchingID) return response({ error: "Wix n’a pas confirmé la création du matching." }, 502);
+        }
+        // Wix treats push as a secondary effect: it must not roll back the accepted matching.
+        try {
+          await fetch("https://www.partenairefoyer.com/api/push-notify-event", {
+            method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" },
+            body: JSON.stringify({ eventType: "matching", entityId: matchingID }), signal: AbortSignal.timeout(8_000),
+          });
+        } catch (pushError) { console.warn("[ios-native-dashboard] Matching push delivery failed", pushError); }
+        return response({ success: true, opportunityId: opportunityID, matchingId, status: "accepted" });
+      }
+      if (body.action === "hide_private_property_matching") {
+        if (!["particulier", "professionnel"].includes(role)) {
+          return response({ error: "Cette action est réservée aux espaces particulier et professionnel." }, 403);
+        }
+        const matchingId = String(body.matchingId ?? "").trim();
+        if (!/^[A-Za-z0-9_-]{1,160}$/.test(matchingId)) {
+          return response({ error: "Identifiant de matching invalide." }, 400);
+        }
+        const dashboard = await loadDashboard(role, email, result.member.id, token);
+        const list = role === "particulier" ? "vendorMatchings" : "privatePropertyMatchings";
+        const rows = (dashboard?.[list] as Record<string, unknown>[] | undefined) ?? [];
+        const matching = rows.find((item) => String(item._id ?? item.id ?? "") === matchingId);
+        if (!matching) return response({ error: "Ce matching n’est pas associé à votre espace." }, 404);
+        const hiddenByOtherSide = role === "particulier"
+          ? matching.professionalHidden === true
+          : matching.vendorHidden === true;
+        if (hiddenByOtherSide) {
+          await wixRequest(
+            `/wix-data/v2/items/${encodeURIComponent(matchingId)}?dataCollectionId=privateprofessionalmatchings`,
+            token,
+            { method: "DELETE" },
+          );
+          return response({ success: true, matchingId, deleted: true });
+        }
+        const hiddenField = role === "particulier" ? "vendorHidden" : "professionalHidden";
+        await wixRequest(`/wix-data/v2/items/${encodeURIComponent(matchingId)}`, token, {
+          method: "PATCH",
+          body: JSON.stringify({
+            dataCollectionId: "privateprofessionalmatchings",
+            patch: {
+              dataItemId: matchingId,
+              fieldModifications: [{
+                fieldPath: hiddenField,
+                action: "SET_FIELD",
+                setFieldOptions: { value: true },
+              }],
+            },
+          }),
+        });
+        return response({ success: true, matchingId, hiddenField });
+      }
+      if (body.action === "delete_professional_matching") {
+        if (role !== "professionnel") {
+          return response({ error: "Cette action est réservée à l’espace professionnel." }, 403);
+        }
+        const matchingId = String(body.matchingId ?? "").trim();
+        if (!/^[A-Za-z0-9_-]{1,160}$/.test(matchingId)) {
+          return response({ error: "Identifiant de matching invalide." }, 400);
+        }
+        const dashboard = await loadDashboard(role, email, result.member.id, token);
+        const rows = (dashboard?.matchings as Record<string, unknown>[] | undefined) ?? [];
+        const matching = rows.find((item) => String(item._id ?? item.id ?? "") === matchingId);
+        if (!matching) return response({ error: "Ce matching n’est pas associé à votre espace." }, 404);
+        await wixRequest(
+          `/wix-data/v2/items/${encodeURIComponent(matchingId)}?dataCollectionId=matchings`,
+          token,
+          { method: "DELETE" },
+        );
+        return response({ success: true, matchingId, deleted: true });
       }
       if (body.action !== "mark_inquiry_read" || !["courtier", "artisan", "diagnostiqueur", "prestataire"].includes(role)) {
         return response({ error: "Action de messagerie inconnue." }, 400);
