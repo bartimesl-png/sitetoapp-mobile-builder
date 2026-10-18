@@ -4279,7 +4279,31 @@ private struct NativeProfessionalPropertyForm: View {
                     .font(.footnote).foregroundStyle(.secondary)
             }
             Section("Adresse") {
-                TextField("Adresse", text: $address).ublier" : "Enregistrer comme masquée", systemImage: "checkmark.circle.fill").font(.headline) }
+                TextField("Adresse", text: $address).textContentType(.streetAddressLine1)
+                TextField("Ville", text: $city).textContentType(.addressCity)
+                TextField("Code postal", text: $postalCode)
+                    .keyboardType(.numberPad)
+                    .onChange(of: postalCode) { _, value in postalCode = String(value.filter(\.isNumber).prefix(10)) }
+            }
+            Section("Photos") { NativeListingPhotoPicker(photos: $photos) }
+            Section("Publication") {
+                Toggle("Publier dès l’enregistrement", isOn: $publishImmediately)
+                Text(publishImmediately
+                     ? "L’annonce sera créée avec le statut actif dans Wix et pourra apparaître dans l’application."
+                     : "L’annonce sera créée comme inactive et ne sera pas affichée publiquement.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            if let errorMessage {
+                Section("Enregistrement impossible") { Text(errorMessage).font(.footnote).foregroundStyle(.red) }
+            }
+            Section {
+                Button {
+                    Task { await submit() }
+                } label: {
+                    HStack {
+                        Spacer()
+                        if isSaving { ProgressView("Enregistrement…") }
+                        else { Label(publishImmediately ? "Créer et publier" : "Enregistrer comme masquée", systemImage: "checkmark.circle.fill").font(.headline) }
                         Spacer()
                     }
                 }
