@@ -46,7 +46,7 @@ workflows:
           xcode-project build-ipa \
             --project "$CM_BUILD_DIR/$XCODE_PROJECT" \
             --scheme "$XCODE_SCHEME" \
-            --archive-xcargs="SWIFT_ENABLE_EXPLICIT_MODULES=NO" \
+            --archive-xcargs="SWIFT_ENABLE_EXPLICIT_MODULES=NO SWIFT_COMPILATION_MODE=incremental" \
             --disable-xcpretty \
             --verbose 2>&1 | tee /tmp/partenairefoyer-xcode-build.log
           BUILD_STATUS=${PIPESTATUS[0]}
