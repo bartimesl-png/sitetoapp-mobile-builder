@@ -1340,9 +1340,11 @@ private struct NativeListingsView: View {
                 (minBathrooms.map { minimum in listing.bathrooms.map { $0 >= minimum } ?? false } ?? true)
         }
         switch propertySort {
-        case "Plus récentes": return filtered.sorted {
-            if $0.sortDateKey == $1.sortDateKey { return $0.id < $1.id }
-            return $0.sortDateKey > $1.sortDateKey
+        case "Plus récentes": return filtered.sorted { left, right in
+            let leftDate = left.catalogCreatedDate?.timeIntervalSince1970 ?? -.greatestFiniteMagnitude
+            let rightDate = right.catalogCreatedDate?.timeIntervalSince1970 ?? -.greatestFiniteMagnitude
+            if leftDate == rightDate { return left.id < right.id }
+            return leftDate > rightDate
         }
         case "Prix croissant": return filtered.sorted { ($0.price ?? .greatestFiniteMagnitude) < ($1.price ?? .greatestFiniteMagnitude) }
         case "Prix décroissant": return filtered.sorted { ($0.price ?? -.greatestFiniteMagnitude) > ($1.price ?? -.greatestFiniteMagnitude) }
