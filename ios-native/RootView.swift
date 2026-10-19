@@ -586,13 +586,6 @@ private struct ProfessionalDirectoryListView: View {
                         if service.isLoading {
                             Section { ProgressView("Chargement des autres fiches…").font(.footnote) }
                         }
-                        if let warning = service.warningMessage {
-                            Section {
-                                Label(warning, systemImage: "exclamationmark.triangle.fill")
-                                    .font(.footnote)
-                                    .foregroundStyle(.orange)
-                            }
-                        }
                         Section {
                             ForEach(filtered) { professional in
                                 NavigationLink {
@@ -611,6 +604,19 @@ private struct ProfessionalDirectoryListView: View {
                                 }
                                 .buttonStyle(.plain)
                                 .listRowInsets(EdgeInsets(top: 7, leading: 16, bottom: 7, trailing: 16))
+                            }
+                        }
+                        if let warning = service.warningMessage {
+                            Section {
+                                HStack(alignment: .top, spacing: 8) {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .foregroundStyle(.orange)
+                                    Text("Certaines fiches n’ont pas pu être chargées.")
+                                        .font(.footnote).foregroundStyle(.primary)
+                                }
+                                Button("Réessayer le chargement") { Task { await service.reload() } }
+                            } footer: {
+                                Text(warning).font(.footnote).foregroundStyle(.secondary)
                             }
                         }
                     }
@@ -672,9 +678,100 @@ private struct ProfessionalRow: View {
     }
 }
 
+private struct ProfessionalPropertyRow: View {
+    let listing: Listing
+
+    var body: some View {
+        HStack(spacing: 12) {
+            NativeProfileImage(source: listing.gallery.first?.absoluteString, fallback: "house")
+                .frame(width: 104, height: 78)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+            VStack(alignment: .leading, spacing: 5) {
+                Text(listing.title ?? "Bien immobilier")
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(2)
+                Text(listing.formattedPrice)
+                    .font(.subheadline.bold())
+                    .foregroundStyle(PFTheme.deepGreen)
+                if !listing.locationLabel.isEmpty {
+                    Text(listing.locationLabel)
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+                HStack(spacing: 8) {
+                    if let surface = listing.formattedSurface { Text(surface) }
+                    if let rooms = listing.rooms { Text("\(rooms) pièces") }
+                }
+                .font(.caption2).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+            Image(systemName: "chevron.right").font(.caption.bold()).foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+    }
+}
+
+private struct ProfessionalPropertyDetailView: View {
+    let listing: Listing
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                if listing.gallery.count > 1 {
+                    TabView {
+                        ForEach(Array(listing.gallery.enumerated()), id: \.offset) { image in
+                            NativeProfileImage(source: image.element.absoluteString, fallback: "house")
+                                .frame(maxWidth: .infinity).frame(height: 270)
+                                .clipped()
+                        }
+                    }
+                    .tabViewStyle(.page)
+                    .frame(height: 270)
+                } else {
+                    NativeProfileImage(source: listing.gallery.first?.absoluteString, fallback: "house")
+                        .frame(maxWidth: .infinity).frame(height: 270)
+                        .clipped()
+                }
+
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(listing.title ?? "Bien immobilier")
+                        .font(.title2.bold())
+                    Text(listing.formattedPrice)
+                        .font(.title3.bold()).foregroundStyle(PFTheme.deepGreen)
+                    if !listing.locationLabel.isEmpty {
+                        Label(listing.locationLabel, systemImage: "mappin.and.ellipse")
+                            .foregroundStyle(.secondary)
+                    }
+                    HStack(spacing: 14) {
+                        if let surface = listing.formattedSurface { Label(surface, systemImage: "square.dashed") }
+                        if let rooms = listing.rooms { Label("\(rooms) pièces", systemImage: "door.left.hand.open") }
+                        if let bedrooms = listing.bedrooms { Label("\(bedrooms) chambres", systemImage: "bed.double") }
+                    }
+                    .font(.subheadline).foregroundStyle(.secondary)
+                    if let description = listing.description?.trimmingCharacters(in: .whitespacesAndNewlines),
+                       !description.isEmpty {
+                        Text(description).font(.body)
+                    }
+                    if let rawURL = listing.sourceUrl, let url = URL(string: rawURL) {
+                        Link(destination: url) {
+                            Label("Voir l’annonce sur PartenaireFoyer", systemImage: "safari")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent).tint(.teal)
+                    }
+                }
+                .padding(16)
+            }
+        }
+        .navigationTitle("Annonce immobilière")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
 private struct ProfessionalDetailView: View {
     let professional: WixPublicProfessional
     @ObservedObject private var auth = WixAuthStore.shared
+    @StateObject private var propertyService = ProfessionalListingsService()
     @State private var showImportedContact = false
     @State private var selectedMinisiteRequest: String?
     @State private var isFavorite = false
@@ -694,6 +791,14 @@ private struct ProfessionalDetailView: View {
         case "diagnostiqueur": return "diagnostiqueur"
         default: return "agent"
         }
+    }
+
+    private var showsProfessionalListings: Bool {
+        professional.importedID == nil &&
+            professional.importedCategory == nil &&
+            !professional.isLocalProsProfile &&
+            !professional.isServiceProviderProfile &&
+            (professional.cmsProfileID != nil || professional.memberID != nil)
     }
 
     var body: some View {
@@ -728,6 +833,36 @@ private struct ProfessionalDetailView: View {
             if let description = professional.description, !description.isEmpty {
                 Section("Présentation") {
                     Text(description).textSelection(.enabled)
+                }
+            }
+
+            if showsProfessionalListings {
+                Section {
+                    if propertyService.isLoading && propertyService.listings.isEmpty {
+                        ProgressView("Chargement des biens…")
+                    } else if let error = propertyService.errorMessage {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(error).font(.footnote).foregroundStyle(.secondary)
+                            Button("Réessayer") { Task { await propertyService.reload(for: professional) } }
+                        }
+                    } else if propertyService.listings.isEmpty {
+                        Text("Aucun bien publié pour le moment.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    } else {
+                        ForEach(propertyService.listings) { listing in
+                            NavigationLink {
+                                ProfessionalPropertyDetailView(listing: listing)
+                            } label: {
+                                ProfessionalPropertyRow(listing: listing)
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Biens proposés par \(professional.directoryDisplayName)")
+                } footer: {
+                    if !propertyService.listings.isEmpty {
+                        Text("\(propertyService.listings.count) bien\(propertyService.listings.count > 1 ? "s" : "") publié\(propertyService.listings.count > 1 ? "s" : "")")
+                    }
                 }
             }
 
@@ -851,6 +986,11 @@ private struct ProfessionalDetailView: View {
         .navigationTitle("Fiche professionnelle")
         .navigationBarTitleDisplayMode(.inline)
         .task(id: auth.member?.id) { await loadFavoriteStatus() }
+        .task(id: professional.cmsProfileID ?? professional.memberID ?? professional.id) {
+            if showsProfessionalListings {
+                await propertyService.loadIfNeeded(for: professional)
+            }
+        }
     }
 
     @MainActor
