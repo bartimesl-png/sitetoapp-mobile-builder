@@ -2259,67 +2259,97 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         onPartialUpdate(registered, nil)
 
         var warnings: [String] = []
-        async let registeredLocalTask = fetchRegisteredLocalProsProfiles(accessToken: visitor.accessToken)
-        async let registeredProvidersTask = fetchRegisteredServiceProviders(accessToken: visitor.accessToken)
-        async let brokersTask = fetchPublicBrokers(accessToken: visitor.accessToken)
-
-        let registeredLocalPros: [WixPublicProfessional]
-        do { registeredLocalPros = try await registeredLocalTask }
-        catch { registeredLocalPros = []; warnings.append("les fiches locales inscrites") }
-        let registeredProviders: [WixPublicProfessional]
-        do { registeredProviders = try await registeredProvidersTask }
-        catch { registeredProviders = []; warnings.append("les prestataires inscrits") }
-        let brokers: [WixPublicProfessional]
-        do { brokers = try await brokersTask }
-        catch { brokers = []; warnings.append("l’annuaire des courtiers") }
-
-        let registeredGroups = [
+        var registeredGroups: [[WixPublicProfessional]] = [
             sortedRegisteredProfessionals(registered),
-            brokers,
-            registeredLocalPros,
-            registeredProviders
+            [],
+            [],
+            []
         ]
-        let orderedRegistered = registeredGroups.flatMap { $0 }
-        onPartialUpdate(orderedRegistered, nil)
+
+        // Load Wix collections one at a time. Showing the main professional
+        // directory first avoids launching several large paginated requests
+        // together, which can stall or terminate the app on older devices.
+        do {
+            registeredGroups[1] = try await fetchPublicBrokers(accessToken: visitor.accessToken)
+        } catch {
+            warnings.append("l’annuaire des courtiers")
+        }
+        publishPartialDirectory()
+
+        do {
+            registeredGroups[2] = try await fetchRegisteredLocalProsProfiles(accessToken: visitor.accessToken)
+        } catch {
+            warnings.append("les fiches locales inscrites")
+        }
+        publishPartialDirectory()
+
+        do {
+            registeredGroups[3] = try await fetchRegisteredServiceProviders(accessToken: visitor.accessToken)
+        } catch {
+            warnings.append("les prestataires inscrits")
+        }
+        publishPartialDirectory()
 
         var visibleImported: [WixPublicProfessional] = []
+        func publishPartialDirectory() {
+            onPartialUpdate(registeredGroups.flatMap { $0 } + visibleImported, nil)
+        }
+
         func appendImportedGroup(_ group: [WixPublicProfessional]) {
             let categories = Set(group.compactMap(\.importedCategory))
-            let categoryRegistered = registeredGroups.flatMap { $0 }.filter {
+            let registered = registeredGroups.flatMap { $0 }
+            let categoryRegistered = registered.filter {
                 let category = $0.importedCategory ?? "immobilier"
                 return categories.contains(category)
             }
             let registeredContacts = Set(categoryRegistered.flatMap { [$0.professionalEmail, $0.publicPhone] }
                 .compactMap { $0 }.map(normalizedContactKey).filter { !$0.isEmpty })
             var seen = Set(categoryRegistered.map { normalizedProfessionalKey($0.resolvedName, $0.postalCode) })
-            let existingIDs = Set(visibleImported.map(\.id))
-            visibleImported.append(contentsOf: group.filter { professional in
-                guard !existingIDs.contains(professional.id) else { return false }
+            var existingIDs = Set(visibleImported.map(\.id))
+
+            for professional in group {
+                guard existingIDs.insert(professional.id).inserted else { continue }
                 let contacts = [professional.dedupeEmail, professional.dedupePhone].compactMap { $0 }
                     .map(normalizedContactKey).filter { !$0.isEmpty }
-                return contacts.allSatisfy { !registeredContacts.contains($0) } &&
-                    seen.insert(normalizedProfessionalKey(professional.resolvedName, professional.postalCode)).inserted
-            })
-            onPartialUpdate(orderedRegistered + visibleImported, nil)
+                guard contacts.allSatisfy({ !registeredContacts.contains($0) }) else { continue }
+                guard seen.insert(normalizedProfessionalKey(professional.resolvedName, professional.postalCode)).inserted else { continue }
+                visibleImported.append(professional)
+            }
+            publishPartialDirectory()
         }
 
-        // Start each public feed together, then publish each completed group
-        // as soon as it is ready so the directory remains responsive.
-        async let importedBrokersTask = fetchImportedLocalProfessionals(categories: ["courtier"])
-        async let importedProvidersTask = fetchImportedLocalProfessionals(categories: ["prestataire"])
-        async let importedLocalProsTask = fetchImportedLocalProfessionals()
-        async let importedRealEstateTask = fetchImportedRealEstateProfessionals()
+        // External imports start only after registered Wix profiles are visible,
+        // and each feed is paged and published before the next one begins.
+        do {
+            try await fetchImportedLocalProfessionals(categories: ["courtier"]) { page in
+                appendImportedGroup(page)
+            }
+        } catch {
+            warnings.append("les courtiers importés")
+        }
+        do {
+            try await fetchImportedLocalProfessionals(categories: ["prestataire"]) { page in
+                appendImportedGroup(page)
+            }
+        } catch {
+            warnings.append("les prestataires importés")
+        }
+        do {
+            try await fetchImportedLocalProfessionals { page in
+                appendImportedGroup(page)
+            }
+        } catch {
+            warnings.append("les artisans et diagnostiqueurs importés")
+        }
+        do {
+            try await fetchImportedRealEstateProfessionals { page in
+                appendImportedGroup(page)
+            }
+        } catch {
+            warnings.append("les professionnels immobiliers importés")
+        }
 
-        do { appendImportedGroup(try await importedBrokersTask) }
-        catch { warnings.append("les courtiers importés") }
-        do { appendImportedGroup(try await importedProvidersTask) }
-        catch { warnings.append("les prestataires importés") }
-        do { appendImportedGroup(try await importedLocalProsTask) }
-        catch { warnings.append("les artisans et diagnostiqueurs importés") }
-        do { appendImportedGroup(try await importedRealEstateTask) }
-        catch { warnings.append("les professionnels immobiliers importés") }
-
-        let professionals = orderedRegistered + visibleImported
+        let professionals = registeredGroups.flatMap { $0 } + visibleImported
         let warning = warnings.isEmpty ? nil : "Annuaire partiellement chargé : " + warnings.joined(separator: ", ") + ". Réessayez pour actualiser les fiches manquantes."
         onPartialUpdate(professionals, warning)
         return ProfessionalDirectoryResult(professionals: professionals, warning: warning)
