@@ -1920,7 +1920,7 @@ private struct NativeCatalogContentView: View {
                 else { await buyerSearches.reload() }
             }
             .navigationDestination(for: Listing.self) { listing in
-                ListingDetailView(listing: listing, professionalsService: professionalsService)
+                ListingDetailView(listing: listing, listingsService: service, professionalsService: professionalsService)
             }
             .navigationDestination(for: ClassifiedAd.self) { ad in
                 NativeClassifiedAdDetailView(ad: ad)
@@ -2606,7 +2606,7 @@ private struct NativeFavoritesView: View {
                 }
             }
             .listStyle(.insetGrouped)
-            .navigationDestination(for: Listing.self) { ListingDetailView(listing: $0, professionalsService: professionalsService) }
+            .navigationDestination(for: Listing.self) { ListingDetailView(listing: $0, listingsService: service, professionalsService: professionalsService) }
             .navigationDestination(for: ClassifiedAd.self) { NativeClassifiedAdDetailView(ad: $0) }
             .navigationDestination(for: String.self) { id in
                 if let professional = professionalsService.professionals.first(where: { $0.id == id }) {
@@ -2734,6 +2734,7 @@ private struct ListingImage: View {
 
 private struct ListingDetailView: View {
     let listing: Listing
+    @ObservedObject var listingsService: ListingsService
     @ObservedObject var professionalsService: ProfessionalsService
     @ObservedObject private var favorites = FavoritesStore.shared
     @State private var showImportedContact = false
@@ -2741,9 +2742,76 @@ private struct ListingDetailView: View {
     @State private var showPrivateOwnerContact = false
 
     private var linkedProfessional: WixPublicProfessional? {
-        guard let profileID = listing.professionalID, !profileID.isEmpty else { return nil }
-        return professionalsService.professionals.first {
-            $0.cmsProfileID == profileID || $0.id == profileID || $0.id == "prosprofile-\(profileID)"
+        if let profileID = listing.professionalID, !profileID.isEmpty,
+           let professional = professionalsService.professionals.first(where: {
+               $0.cmsProfileID == profileID || $0.id == profileID || $0.id == "prosprofile-\(profileID)"
+           }) {
+            return professional
+        }
+        if let importedID = listing.importedProId?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !importedID.isEmpty {
+            return professionalsService.professionals.first {
+                $0.importedID == importedID || $0.id == importedID || $0.cmsProfileID == importedID
+            }
+        }
+        return nil
+    }
+
+    private var otherListings: [Listing] {
+        listingsService.listings.filter { candidate in
+            guard candidate.id != listing.id else { return false }
+            if let professionalID = listing.professionalID, !professionalID.isEmpty {
+                return candidate.professionalID == professionalID
+            }
+            if let importedProId = listing.importedProId, !importedProId.isEmpty {
+                return candidate.importedProId == importedProId
+            }
+            return false
+        }.prefix(8).map { $0 }
+    }
+
+    private var recommendedProfessionals: [WixPublicProfessional] {
+        let postalCode = (listing.postalCode ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let city = (listing.city ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard postalCode.count >= 2 || !city.isEmpty else { return [] }
+        let department = String(postalCode.prefix(2))
+        return professionalsService.professionals
+            .filter { professional in
+                if let linkedProfessional, professional.id == linkedProfessional.id { return false }
+                let proPostalCode = (professional.postalCode ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                let proCity = (professional.city ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                let sameDepartment = department.count == 2 && proPostalCode.hasPrefix(department)
+                let sameCity = !city.isEmpty && proCity.compare(city, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
+                return sameDepartment || sameCity
+            }
+            .sorted { left, right in
+                let leftExact = left.postalCode == postalCode
+                let rightExact = right.postalCode == postalCode
+                if leftExact != rightExact { return leftExact }
+                let leftCity = left.city?.compare(city, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
+                let rightCity = right.city?.compare(city, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
+                if leftCity != rightCity { return leftCity }
+                return left.resolvedName.localizedCaseInsensitiveCompare(right.resolvedName) == .orderedAscending
+            }
+            .prefix(6)
+            .map { $0 }
+    }
+
+    private var listingShareText: String {
+        let title = listing.title ?? "Annonce immobilière"
+        var parts = [title, listing.formattedPrice, listing.locationLabel]
+        if let sourceUrl = listing.sourceUrl, !sourceUrl.isEmpty { parts.append(sourceUrl) }
+        else { parts.append("Retrouvez cette annonce dans l’application PartenaireFoyer.") }
+        return parts.filter { !$0.isEmpty }.joined(separator: "\n")
+    }
+
+    private func professionalDestination(_ professional: WixPublicProfessional) -> some View {
+        Group {
+            if let url = professional.miniSiteURL {
+                InAppSafariView(url: url).ignoresSafeArea()
+            } else {
+                ProfessionalDetailView(professional: professional)
+            }
         }
     }
 
@@ -2886,6 +2954,109 @@ private struct ListingDetailView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(Color(red: 0.02, green: 0.38, blue: 0.34))
+                }
+
+                if let professional = linkedProfessional {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Professionnel de l’annonce").font(.headline)
+                        HStack(spacing: 12) {
+                            if let logo = professional.logo {
+                                NativeProfileImage(source: logo, fallback: "building.2")
+                                    .frame(width: 56, height: 56)
+                                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                            }
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(professional.resolvedName).font(.subheadline.bold())
+                                if let activity = professional.resolvedActivity {
+                                    Text(activity).font(.caption).foregroundStyle(.secondary)
+                                }
+                                if !professional.locationLabel.isEmpty {
+                                    Text(professional.locationLabel).font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        if let phone = professional.publicPhone {
+                            let dialable = phone.filter { $0.isNumber || $0 == "+" }
+                            if let url = URL(string: "tel:\(dialable)"), !dialable.isEmpty {
+                                Link(destination: url) {
+                                    Label("Appeler \(professional.directoryDisplayName)", systemImage: "phone.fill")
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                            }
+                        }
+                        if let email = professional.professionalEmail {
+                            let trimmed = email.trimmingCharacters(in: .whitespacesAndNewlines)
+                            if let url = URL(string: "mailto:\(trimmed)"), !trimmed.isEmpty {
+                                Link(destination: url) {
+                                    Label("Envoyer un e-mail", systemImage: "envelope.fill")
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                            }
+                        }
+                        NavigationLink {
+                            professionalDestination(professional)
+                        } label: {
+                            Label("Voir la fiche du professionnel", systemImage: "person.crop.circle")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .padding(15)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.teal.opacity(0.08), in: RoundedRectangle(cornerRadius: 18))
+                }
+
+                ShareLink(item: listingShareText) {
+                    Label("Partager cette annonce", systemImage: "square.and.arrow.up")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 13)
+                }
+                .buttonStyle(.bordered)
+
+                if !otherListings.isEmpty, let professional = linkedProfessional {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Les autres biens de \(professional.directoryDisplayName)")
+                            .font(.headline)
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(alignment: .top, spacing: 12) {
+                                ForEach(otherListings) { other in
+                                    NavigationLink(value: other) {
+                                        VStack(alignment: .leading, spacing: 7) {
+                                            ListingImage(url: other.gallery.first)
+                                                .frame(width: 220, height: 145)
+                                                .clipShape(RoundedRectangle(cornerRadius: 14))
+                                            Text(other.formattedPrice).font(.subheadline.bold())
+                                            Text(other.title ?? "Annonce immobilière")
+                                                .font(.subheadline)
+                                                .lineLimit(2)
+                                            Text(other.locationLabel).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                        }
+                                        .frame(width: 220, alignment: .leading)
+                                        .foregroundStyle(.primary)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if !recommendedProfessionals.isEmpty {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Professionnels suggérés près de ce bien")
+                            .font(.headline)
+                        ForEach(recommendedProfessionals) { professional in
+                            NavigationLink {
+                                professionalDestination(professional)
+                            } label: {
+                                ProfessionalRow(professional: professional)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(15)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.teal.opacity(0.06), in: RoundedRectangle(cornerRadius: 18))
                 }
             }
             .padding(18)
