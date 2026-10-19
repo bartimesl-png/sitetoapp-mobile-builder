@@ -615,10 +615,8 @@ struct WixPublicProfessionalProperty: Decodable {
             sourceUrl: nil,
             ownerType: "professionnel",
             importedProId: nil,
-            professionalID: wixMemberId ?? professionalId,
-            professionalOwnerIDs: [wixMemberId, professionalId]
-                .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty },
+            professionalID: professionalId,
+            professionalOwnerIDs: professionalId.map { [$0] },
             createdAt: createdAt ?? _createdDate?.value,
             firstSeenAt: nil,
             updatedAt: updatedAt,
