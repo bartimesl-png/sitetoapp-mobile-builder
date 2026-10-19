@@ -2196,7 +2196,9 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         return results
     }
 
-    func fetchPublicPrivateListings() async throws -> [Listing] {
+    func fetchPublicPrivateListings(
+        onPage: @escaping @MainActor ([Listing]) -> Void = { _ in }
+    ) async throws -> [Listing] {
         let visitor = try await requestToken([
             "clientId": clientID,
             "grantType": "anonymous"
@@ -2233,6 +2235,13 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
                 as: WixPublicPropertiesResponse.self
             )
             properties.append(contentsOf: response.dataItems)
+            let pageListings = response.dataItems
+                .filter {
+                    $0.data.isPublic == true &&
+                        ["active", "published"].contains($0.data.status?.lowercased() ?? "")
+                }
+                .map { $0.data.listing(id: $0.id) }
+            if !pageListings.isEmpty { await onPage(pageListings) }
             guard response.dataItems.count == pageSize else { break }
             let nextOffset = offset + response.dataItems.count
             guard nextOffset > offset else { break }
@@ -2265,9 +2274,30 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
             [],
             []
         ]
+        var registeredDirectory = registeredGroups.flatMap { $0 }
         var visibleImported: [WixPublicProfessional] = []
+        var importedIDs = Set<String>()
+        var importedNamesByCategory: [String: Set<String>] = [:]
+        var registeredNamesByCategory: [String: Set<String>] = [:]
+        var registeredContactsByCategory: [String: Set<String>] = [:]
+        var pendingImportedUpdates = 0
+        for professional in registeredDirectory {
+            let category = professional.importedCategory ?? "immobilier"
+            registeredNamesByCategory[category, default: []]
+                .insert(normalizedProfessionalKey(professional.resolvedName, professional.postalCode))
+            let contacts = [professional.professionalEmail, professional.publicPhone]
+                .compactMap { $0 }
+                .map(normalizedContactKey)
+                .filter { !$0.isEmpty }
+            registeredContactsByCategory[category, default: []].formUnion(contacts)
+        }
         let publishPartialDirectory: () -> Void = {
-            onPartialUpdate(registeredGroups.flatMap { $0 } + visibleImported, nil)
+            onPartialUpdate(registeredDirectory + visibleImported, nil)
+        }
+        let flushImportedUpdates: () -> Void = {
+            guard pendingImportedUpdates > 0 else { return }
+            publishPartialDirectory()
+            pendingImportedUpdates = 0
         }
 
         // Load Wix collections one at a time. Showing the main professional
@@ -2278,12 +2308,32 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         } catch {
             warnings.append("l’annuaire des courtiers")
         }
+        registeredDirectory = registeredGroups.flatMap { $0 }
+        for professional in registeredGroups[1] {
+            let category = professional.importedCategory ?? "immobilier"
+            registeredNamesByCategory[category, default: []]
+                .insert(normalizedProfessionalKey(professional.resolvedName, professional.postalCode))
+            registeredContactsByCategory[category, default: []].formUnion(
+                [professional.professionalEmail, professional.publicPhone]
+                    .compactMap { $0 }.map(normalizedContactKey).filter { !$0.isEmpty }
+            )
+        }
         publishPartialDirectory()
 
         do {
             registeredGroups[2] = try await fetchRegisteredLocalProsProfiles(accessToken: visitor.accessToken)
         } catch {
             warnings.append("les fiches locales inscrites")
+        }
+        registeredDirectory = registeredGroups.flatMap { $0 }
+        for professional in registeredGroups[2] {
+            let category = professional.importedCategory ?? "immobilier"
+            registeredNamesByCategory[category, default: []]
+                .insert(normalizedProfessionalKey(professional.resolvedName, professional.postalCode))
+            registeredContactsByCategory[category, default: []].formUnion(
+                [professional.professionalEmail, professional.publicPhone]
+                    .compactMap { $0 }.map(normalizedContactKey).filter { !$0.isEmpty }
+            )
         }
         publishPartialDirectory()
 
@@ -2292,29 +2342,41 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         } catch {
             warnings.append("les prestataires inscrits")
         }
+        registeredDirectory = registeredGroups.flatMap { $0 }
+        for professional in registeredGroups[3] {
+            let category = professional.importedCategory ?? "immobilier"
+            registeredNamesByCategory[category, default: []]
+                .insert(normalizedProfessionalKey(professional.resolvedName, professional.postalCode))
+            registeredContactsByCategory[category, default: []].formUnion(
+                [professional.professionalEmail, professional.publicPhone]
+                    .compactMap { $0 }.map(normalizedContactKey).filter { !$0.isEmpty }
+            )
+        }
         publishPartialDirectory()
 
         func appendImportedGroup(_ group: [WixPublicProfessional]) {
-            let categories = Set(group.compactMap(\.importedCategory))
-            let registered = registeredGroups.flatMap { $0 }
-            let categoryRegistered = registered.filter {
-                let category = $0.importedCategory ?? "immobilier"
-                return categories.contains(category)
-            }
-            let registeredContacts = Set(categoryRegistered.flatMap { [$0.professionalEmail, $0.publicPhone] }
-                .compactMap { $0 }.map(normalizedContactKey).filter { !$0.isEmpty })
-            var seen = Set(categoryRegistered.map { normalizedProfessionalKey($0.resolvedName, $0.postalCode) })
-            var existingIDs = Set(visibleImported.map(\.id))
-
+            var added = 0
             for professional in group {
-                guard existingIDs.insert(professional.id).inserted else { continue }
-                let contacts = [professional.dedupeEmail, professional.dedupePhone].compactMap { $0 }
-                    .map(normalizedContactKey).filter { !$0.isEmpty }
+                guard importedIDs.insert(professional.id).inserted else { continue }
+                let category = professional.importedCategory ?? "immobilier"
+                let contacts = [professional.dedupeEmail, professional.dedupePhone]
+                    .compactMap { $0 }
+                    .map(normalizedContactKey)
+                    .filter { !$0.isEmpty }
+                let registeredContacts = registeredContactsByCategory[category] ?? []
                 guard contacts.allSatisfy({ !registeredContacts.contains($0) }) else { continue }
-                guard seen.insert(normalizedProfessionalKey(professional.resolvedName, professional.postalCode)).inserted else { continue }
+
+                let nameKey = normalizedProfessionalKey(professional.resolvedName, professional.postalCode)
+                let registeredNames = registeredNamesByCategory[category] ?? []
+                guard !registeredNames.contains(nameKey),
+                      importedNamesByCategory[category, default: []].insert(nameKey).inserted else { continue }
                 visibleImported.append(professional)
+                added += 1
             }
-            publishPartialDirectory()
+            pendingImportedUpdates += added
+            // Publish in chunks so a large import does not rebuild the entire
+            // SwiftUI directory for every 50-record network page.
+            if pendingImportedUpdates >= 100 { flushImportedUpdates() }
         }
 
         // External imports start only after registered Wix profiles are visible,
@@ -2326,6 +2388,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         } catch {
             warnings.append("les courtiers importés")
         }
+        flushImportedUpdates()
         do {
             try await fetchImportedLocalProfessionals(categories: ["prestataire"]) { page in
                 appendImportedGroup(page)
@@ -2333,6 +2396,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         } catch {
             warnings.append("les prestataires importés")
         }
+        flushImportedUpdates()
         do {
             try await fetchImportedLocalProfessionals { page in
                 appendImportedGroup(page)
@@ -2340,6 +2404,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         } catch {
             warnings.append("les artisans et diagnostiqueurs importés")
         }
+        flushImportedUpdates()
         do {
             try await fetchImportedRealEstateProfessionals { page in
                 appendImportedGroup(page)
@@ -2347,6 +2412,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         } catch {
             warnings.append("les professionnels immobiliers importés")
         }
+        flushImportedUpdates()
 
         let professionals = registeredGroups.flatMap { $0 } + visibleImported
         let warning = warnings.isEmpty ? nil : "Annuaire partiellement chargé : " + warnings.joined(separator: ", ") + ". Réessayez pour actualiser les fiches manquantes."
@@ -2678,7 +2744,9 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         return entries
     }
 
-    func fetchPublicProfessionalListings() async throws -> [Listing] {
+    func fetchPublicProfessionalListings(
+        onPage: @escaping @MainActor ([Listing]) -> Void = { _ in }
+    ) async throws -> [Listing] {
         let visitor = try await requestToken([
             "clientId": clientID,
             "grantType": "anonymous"
@@ -2687,7 +2755,11 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         let ownerIDs = professionals.flatMap { professional in
             [professional.id, professional.data.memberId]
         }
-        return try await fetchPublicProfessionalListings(ownerIDs: ownerIDs, accessToken: visitor.accessToken)
+        return try await fetchPublicProfessionalListings(
+            ownerIDs: ownerIDs,
+            accessToken: visitor.accessToken,
+            onPage: onPage
+        )
     }
 
     /// Fetch one profile's homes directly instead of loading and filtering the
@@ -2701,7 +2773,11 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         return try await fetchPublicProfessionalListings(ownerIDs: ownerIDs, accessToken: visitor.accessToken)
     }
 
-    private func fetchPublicProfessionalListings(ownerIDs: [String?], accessToken: String) async throws -> [Listing] {
+    private func fetchPublicProfessionalListings(
+        ownerIDs: [String?],
+        accessToken: String,
+        onPage: @escaping @MainActor ([Listing]) -> Void
+    ) async throws -> [Listing] {
         let professionalIDs = Array(Set(ownerIDs
             .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }))
@@ -2747,7 +2823,9 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
                 let activeItems = response.dataItems.filter {
                     ["active", "published"].contains($0.data.status?.lowercased() ?? "")
                 }
-                listings.append(contentsOf: activeItems.map { $0.data.listing(id: $0.id) })
+                let pageListings = activeItems.map { $0.data.listing(id: $0.id) }
+                listings.append(contentsOf: pageListings)
+                if !pageListings.isEmpty { await onPage(pageListings) }
                 guard response.dataItems.count == pageSize else { break }
                 let nextOffset = offset + response.dataItems.count
                 guard nextOffset > offset else { break }
