@@ -595,27 +595,27 @@ private struct ProfessionalDirectoryListView: View {
                         }
                         Section {
                             ForEach(filtered) { professional in
-                                NavigationLink(value: professional.id) {
+                                NavigationLink {
+                                    if let miniSiteURL = professional.miniSiteURL {
+                                        InAppSafariView(url: miniSiteURL)
+                                            .ignoresSafeArea()
+                                            .navigationTitle(professional.directoryDisplayName)
+                                            .navigationBarTitleDisplayMode(.inline)
+                                    } else {
+                                        ProfessionalDetailView(professional: professional)
+                                    }
+                                } label: {
                                     ProfessionalRow(professional: professional)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .contentShape(Rectangle())
                                 }
+                                .buttonStyle(.plain)
                                 .listRowInsets(EdgeInsets(top: 7, leading: 16, bottom: 7, trailing: 16))
                             }
                         }
                     }
                     .listStyle(.plain)
                     .refreshable { await service.reload() }
-                    .navigationDestination(for: String.self) { id in
-                        if let professional = service.professionals.first(where: { $0.id == id }) {
-                            if let miniSiteURL = professional.miniSiteURL {
-                                InAppSafariView(url: miniSiteURL)
-                                    .ignoresSafeArea()
-                                    .navigationTitle(professional.directoryDisplayName)
-                                    .navigationBarTitleDisplayMode(.inline)
-                            } else {
-                                ProfessionalDetailView(professional: professional)
-                            }
-                        }
-                    }
                 }
             }
             .navigationTitle(title)
@@ -3501,7 +3501,9 @@ private struct CatalogPhotoCard: View {
         ZStack(alignment: .bottomLeading) {
             Image(image).resizable().scaledToFill()
                 .frame(maxWidth: .infinity, minHeight: 142, maxHeight: 142).clipped()
+                .allowsHitTesting(false)
             LinearGradient(colors: [.clear, .black.opacity(0.78)], startPoint: .center, endPoint: .bottom)
+                .allowsHitTesting(false)
             HStack(alignment: .bottom, spacing: 10) {
                 Image(systemName: symbol).font(.headline.weight(.semibold))
                     .frame(width: 38, height: 38).background(.white.opacity(0.2), in: Circle())
@@ -3512,8 +3514,10 @@ private struct CatalogPhotoCard: View {
                 Spacer(minLength: 0)
                 Image(systemName: "arrow.right").font(.subheadline.bold())
             }.foregroundStyle(.white).padding(14)
+                .allowsHitTesting(false)
         }
         .frame(maxWidth: .infinity, minHeight: 142, maxHeight: 142)
+        .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .shadow(color: PFTheme.deepGreen.opacity(0.14), radius: 8, y: 3)
     }
