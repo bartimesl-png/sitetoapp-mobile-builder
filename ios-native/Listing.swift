@@ -321,7 +321,13 @@ struct WixPublicProfessional: Identifiable {
     var isDirectoryFeatured: Bool = false
 
     var miniSiteURL: URL? {
-        guard let slug = miniSiteSlug?.trimmingCharacters(in: .whitespacesAndNewlines),
+        // /minisite/:slug is the public mini-site for registered real-estate
+        // professionals. Other professional types use their native profile detail.
+        guard !isLocalProsProfile,
+              !isServiceProviderProfile,
+              importedID == nil,
+              importedCategory == nil,
+              let slug = miniSiteSlug?.trimmingCharacters(in: .whitespacesAndNewlines),
               slug.range(of: "^[A-Za-z0-9-]{1,180}$", options: .regularExpression) != nil else { return nil }
         return URL(string: "https://www.partenairefoyer.com/minisite/\(slug)")
     }
