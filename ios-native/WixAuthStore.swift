@@ -2652,22 +2652,26 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
             "grantType": "anonymous"
         ])
         let professionals = try await fetchVisibleProfessionalRecords(accessToken: visitor.accessToken)
-        let professionalIDs = Array(Set(professionals.compactMap { $0.data.memberId }))
+        let professionalIDs = Array(Set(professionals.flatMap { professional in
+            [professional.id, professional.data.memberId]
+                .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        }))
         guard !professionalIDs.isEmpty else { return [] }
 
         let pageSize = 100
         var listings: [Listing] = []
         let fields = [
-            "professionalId", "title", "description", "city", "postalCode", "price", "surface", "surfaceHouse",
+            "professionalId", "wixMemberId", "title", "description", "city", "postalCode", "price", "surface", "surfaceHouse",
             "surfaceLand", "landSurface", "rooms", "bedrooms", "bathrooms", "propertyType",
             "transactionType", "mainImageUrl", "galleryImages", "photo1", "photo2", "photo3",
             "photo4", "photo5", "createdAt", "_createdDate", "updatedAt", "previousPrice",
             "lastPriceDropDate", "commercialStatus", "slug", "status"
         ]
 
-        // Listings are connected to Wix Members through `wixMemberId`, while
-        // public directory records store the same ID as `memberId`. Query only
-        // active listings for visible profiles and recheck the status in-app.
+        // Legacy and current listings can point to a profile through either
+        // `professionalId` (CMS profile ID) or `wixMemberId` (Wix member ID).
+        // Query both confirmed fields for visible profiles, then recheck status.
         for start in stride(from: 0, to: professionalIDs.count, by: 100) {
             let end = min(start + 100, professionalIDs.count)
             let batch = Array(professionalIDs[start..<end])
@@ -2680,7 +2684,10 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
                         "dataCollectionId": "biensprofessionnels",
                         "query": [
                             "filter": [
-                                "wixMemberId": ["$in": batch],
+                                "$or": [
+                                    ["wixMemberId": ["$in": batch]],
+                                    ["professionalId": ["$in": batch]]
+                                ],
                                 "status": ["$in": ["active", "published"]]
                             ],
                             "paging": ["limit": pageSize, "offset": offset],

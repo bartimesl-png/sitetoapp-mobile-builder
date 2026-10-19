@@ -36,6 +36,7 @@ struct Listing: Decodable, Identifiable, Hashable {
     let ownerType: String?
     let importedProId: String?
     let professionalID: String?
+    let professionalOwnerIDs: [String]?
     let createdAt: String?
     let firstSeenAt: String?
     let updatedAt: String?
@@ -536,6 +537,7 @@ struct WixPublicProperty: Decodable {
             ownerType: "particulier",
             importedProId: nil,
             professionalID: nil,
+            professionalOwnerIDs: nil,
             createdAt: createdAt ?? _createdDate?.value,
             firstSeenAt: nil,
             updatedAt: nil,
@@ -613,7 +615,10 @@ struct WixPublicProfessionalProperty: Decodable {
             sourceUrl: nil,
             ownerType: "professionnel",
             importedProId: nil,
-            professionalID: professionalId,
+            professionalID: wixMemberId ?? professionalId,
+            professionalOwnerIDs: [wixMemberId, professionalId]
+                .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty },
             createdAt: createdAt ?? _createdDate?.value,
             firstSeenAt: nil,
             updatedAt: updatedAt,

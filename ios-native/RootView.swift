@@ -2744,10 +2744,19 @@ private struct ListingDetailView: View {
     @State private var showProfessionalContact = false
     @State private var showPrivateOwnerContact = false
 
+    private var listingOwnerIDs: Set<String> {
+        let values = (listing.professionalOwnerIDs ?? []) + [listing.professionalID].compactMap { $0 }
+        return Set(values.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })
+    }
+
     private var linkedProfessional: WixPublicProfessional? {
-        if let profileID = listing.professionalID, !profileID.isEmpty,
-           let professional = professionalsService.professionals.first(where: {
-               $0.cmsProfileID == profileID || $0.id == profileID || $0.id == "prosprofile-\(profileID)"
+        if !listingOwnerIDs.isEmpty,
+           let professional = professionalsService.professionals.first(where: { profile in
+               let ids = [profile.memberID, profile.cmsProfileID, profile.id, "prosprofile-\(profile.id)"]
+                   .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+               return ids.contains { candidate in
+                   listingOwnerIDs.contains { $0.caseInsensitiveCompare(candidate) == .orderedSame }
+               }
            }) {
             return professional
         }
@@ -2760,11 +2769,24 @@ private struct ListingDetailView: View {
         return nil
     }
 
+    private var professionalIdentityIDs: Set<String> {
+        let values = Array(listingOwnerIDs) + [
+            linkedProfessional?.memberID, linkedProfessional?.cmsProfileID, linkedProfessional?.id
+        ].compactMap { $0 }
+        return Set(values.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })
+    }
+
     private var otherListings: [Listing] {
         listingsService.listings.filter { candidate in
             guard candidate.id != listing.id else { return false }
-            if let professionalID = listing.professionalID, !professionalID.isEmpty {
-                return candidate.professionalID == professionalID
+            let candidateOwnerIDs = (candidate.professionalOwnerIDs ?? []) + [candidate.professionalID].compactMap { $0 }
+            if !professionalIdentityIDs.isEmpty {
+                let isProfessional = ["professionnel", "professional"].contains(candidate.ownerType?.lowercased() ?? "")
+                return isProfessional && candidateOwnerIDs.contains { candidateID in
+                    professionalIdentityIDs.contains {
+                        $0.caseInsensitiveCompare(candidateID.trimmingCharacters(in: .whitespacesAndNewlines)) == .orderedSame
+                    }
+                }
             }
             if let importedProId = listing.importedProId, !importedProId.isEmpty {
                 return candidate.importedProId == importedProId
