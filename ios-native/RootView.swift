@@ -683,7 +683,7 @@ private struct ProfessionalPropertyRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            NativeProfileImage(source: listing.gallery.first?.absoluteString, fallback: "house")
+            NativeProfileImage(source: listing.gallery.first?.absoluteString ?? "", fallback: "house")
                 .frame(width: 104, height: 78)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
             VStack(alignment: .leading, spacing: 5) {
@@ -728,7 +728,7 @@ private struct ProfessionalPropertyDetailView: View {
                     .tabViewStyle(.page)
                     .frame(height: 270)
                 } else {
-                    NativeProfileImage(source: listing.gallery.first?.absoluteString, fallback: "house")
+                    NativeProfileImage(source: listing.gallery.first?.absoluteString ?? "", fallback: "house")
                         .frame(maxWidth: .infinity).frame(height: 270)
                         .clipped()
                 }
