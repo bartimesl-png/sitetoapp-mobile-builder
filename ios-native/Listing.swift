@@ -596,6 +596,11 @@ struct WixPublicProfessionalProperty: Decodable {
            !gallery.contains(mainImageUrl) { gallery.insert(mainImageUrl, at: 0) }
         var seen = Set<String>()
         gallery = gallery.filter { !$0.isEmpty && seen.insert($0).inserted }
+        let publicDetailURL: URL? = {
+            guard let slug = slug?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  slug.range(of: "^[A-Za-z0-9-]{1,240}$", options: .regularExpression) != nil else { return nil }
+            return URL(string: "https://www.partenairefoyer.com/annonce-immobiliere/\(slug)")
+        }()
         return Listing(
             id: "wix-pro-\(id)",
             title: title,
@@ -612,7 +617,7 @@ struct WixPublicProfessionalProperty: Decodable {
             imageUrl: mainImageUrl?.values.first ?? gallery.first,
             transactionType: transactionType,
             propertyType: propertyType,
-            sourceUrl: nil,
+            sourceUrl: publicDetailURL?.absoluteString,
             ownerType: "professionnel",
             importedProId: nil,
             professionalID: professionalId,
