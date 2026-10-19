@@ -1964,9 +1964,45 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
             "photo15", "photo16", "photo17", "photo18", "photo19", "photo20"
         ]
         var offset = 0
-        var wixAds: [ClassifiedAd] = []
+        var orderedWixAds: [ClassifiedAd] = []
         var warnings: [String] = []
         let pageSize = 100
+
+        func ordered(_ values: [ClassifiedAd]) -> [ClassifiedAd] {
+            var seen = Set<String>()
+            return values.filter { seen.insert($0.id).inserted }.enumerated().sorted { left, right in
+                let lhs = left.element.catalogOrderDate
+                let rhs = right.element.catalogOrderDate
+                if lhs == rhs { return left.offset < right.offset }
+                return lhs > rhs
+            }.map(\.element)
+        }
+
+        func mergeOrdered(_ left: [ClassifiedAd], _ right: [ClassifiedAd]) -> [ClassifiedAd] {
+            var result: [ClassifiedAd] = []
+            result.reserveCapacity(left.count + right.count)
+            var seen = Set<String>()
+            var leftIndex = 0
+            var rightIndex = 0
+            while leftIndex < left.count || rightIndex < right.count {
+                let next: ClassifiedAd
+                if leftIndex >= left.count {
+                    next = right[rightIndex]
+                    rightIndex += 1
+                } else if rightIndex >= right.count {
+                    next = left[leftIndex]
+                    leftIndex += 1
+                } else if left[leftIndex].catalogOrderDate >= right[rightIndex].catalogOrderDate {
+                    next = left[leftIndex]
+                    leftIndex += 1
+                } else {
+                    next = right[rightIndex]
+                    rightIndex += 1
+                }
+                if seen.insert(next.id).inserted { result.append(next) }
+            }
+            return result
+        }
 
         do {
             while true {
@@ -1983,7 +2019,9 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
                     ],
                     as: WixPublicClassifiedAdsResponse.self
                 )
-                wixAds.append(contentsOf: response.dataItems.compactMap { $0.data.classifiedAd(id: $0.id) })
+                let page = response.dataItems.compactMap { $0.data.classifiedAd(id: $0.id) }
+                orderedWixAds = mergeOrdered(orderedWixAds, ordered(page))
+                if !page.isEmpty { await onPartialUpdate(orderedWixAds, nil) }
                 guard response.dataItems.count == pageSize else { break }
                 let nextOffset = offset + response.dataItems.count
                 guard nextOffset > offset else { break }
@@ -1993,34 +2031,22 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
             warnings.append("Les petites annonces PartenaireFoyer n’ont pas pu être chargées.")
         }
 
-        func ordered(_ values: [ClassifiedAd]) -> [ClassifiedAd] {
-            var seen = Set<String>()
-            let unique = values.filter { seen.insert($0.id).inserted }
-            return unique.enumerated().sorted { left, right in
-                let lhs = left.element.catalogOrderDate
-                let rhs = right.element.catalogOrderDate
-                if lhs == rhs { return left.offset < right.offset }
-                return lhs > rhs
-            }.map(\.element)
-        }
-
-        onPartialUpdate(ordered(wixAds), warnings.isEmpty ? nil : warnings.joined(separator: " "))
+        if warnings.isEmpty { await onPartialUpdate(orderedWixAds, nil) }
         var importedAds: [ClassifiedAd] = []
         do {
-            let fetched = try await fetchImportedVehicleClassifiedAds { page in
-                importedAds.append(contentsOf: page)
-                onPartialUpdate(ordered(wixAds + importedAds), warnings.isEmpty ? nil : warnings.joined(separator: " "))
+            _ = try await fetchImportedVehicleClassifiedAds { page in
+                importedAds = mergeOrdered(importedAds, ordered(page))
+                await onPartialUpdate(mergeOrdered(orderedWixAds, importedAds),
+                                      warnings.isEmpty ? nil : warnings.joined(separator: " "))
             }
-            importedAds = fetched
         } catch {
             warnings.append("Les annonces de véhicules importées ne sont pas disponibles pour le moment.")
         }
-        let final = ordered(wixAds + importedAds)
+        let final = mergeOrdered(orderedWixAds, importedAds)
         let warning = warnings.isEmpty ? nil : warnings.joined(separator: " ")
-        onPartialUpdate(final, warning)
+        await onPartialUpdate(final, warning)
         return (final, warning)
     }
-
     func fetchPublicBuyerSearches() async throws -> [WixPublicBuyerSearch] {
         let visitor = try await requestToken(["clientId": clientID, "grantType": "anonymous"])
         let fields = [
@@ -2206,7 +2232,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
 
         let pageSize = 100
         var offset = 0
-        var properties: [WixPublicPropertyItem] = []
+        var properties: [Listing] = []
         let fields = [
             "title", "description", "city", "postalCode", "sellingPrice", "estimatedPrice",
             "previousPrice", "lastPriceDropDate", "_createdDate",
@@ -2234,13 +2260,13 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
                 ],
                 as: WixPublicPropertiesResponse.self
             )
-            properties.append(contentsOf: response.dataItems)
             let pageListings = response.dataItems
                 .filter {
                     $0.data.isPublic == true &&
                         ["active", "published"].contains($0.data.status?.lowercased() ?? "")
                 }
                 .map { $0.data.listing(id: $0.id) }
+            properties.append(contentsOf: pageListings)
             if !pageListings.isEmpty { await onPage(pageListings) }
             guard response.dataItems.count == pageSize else { break }
             let nextOffset = offset + response.dataItems.count
@@ -2249,11 +2275,6 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         }
 
         return properties
-            .filter {
-                $0.data.isPublic == true &&
-                    ["active", "published"].contains($0.data.status?.lowercased() ?? "")
-            }
-            .map { $0.data.listing(id: $0.id) }
     }
 
     func fetchPublicProfessionals(
