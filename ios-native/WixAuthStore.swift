@@ -2265,6 +2265,10 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
             [],
             []
         ]
+        var visibleImported: [WixPublicProfessional] = []
+        let publishPartialDirectory: () -> Void = {
+            onPartialUpdate(registeredGroups.flatMap { $0 } + visibleImported, nil)
+        }
 
         // Load Wix collections one at a time. Showing the main professional
         // directory first avoids launching several large paginated requests
@@ -2289,11 +2293,6 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
             warnings.append("les prestataires inscrits")
         }
         publishPartialDirectory()
-
-        var visibleImported: [WixPublicProfessional] = []
-        func publishPartialDirectory() {
-            onPartialUpdate(registeredGroups.flatMap { $0 } + visibleImported, nil)
-        }
 
         func appendImportedGroup(_ group: [WixPublicProfessional]) {
             let categories = Set(group.compactMap(\.importedCategory))
