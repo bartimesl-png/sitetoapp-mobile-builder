@@ -3013,9 +3013,10 @@ private struct ListingDetailView: View {
                 }
                 .buttonStyle(.bordered)
 
-                if !otherListings.isEmpty, let professional = linkedProfessional {
+                if !otherListings.isEmpty {
+                    let professionalName = linkedProfessional?.directoryDisplayName ?? "ce professionnel"
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Les autres biens de \(professional.directoryDisplayName)")
+                        Text("Les autres biens de \(professionalName)")
                             .font(.headline)
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(alignment: .top, spacing: 12) {
