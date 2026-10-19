@@ -323,7 +323,7 @@ struct WixPublicProfessional: Identifiable {
     var miniSiteURL: URL? {
         guard let slug = miniSiteSlug?.trimmingCharacters(in: .whitespacesAndNewlines),
               slug.range(of: "^[A-Za-z0-9-]{1,180}$", options: .regularExpression) != nil else { return nil }
-        return URL(string: "https://www.partenairefoyer.com/minisite/\\(slug)")
+        return URL(string: "https://www.partenairefoyer.com/minisite/\(slug)")
     }
 
     var resolvedName: String {
