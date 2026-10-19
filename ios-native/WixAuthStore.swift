@@ -2021,7 +2021,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
                 )
                 let page = response.dataItems.compactMap { $0.data.classifiedAd(id: $0.id) }
                 orderedWixAds = mergeOrdered(orderedWixAds, ordered(page))
-                if !page.isEmpty { await onPartialUpdate(orderedWixAds, nil) }
+                if !page.isEmpty { onPartialUpdate(orderedWixAds, nil) }
                 guard response.dataItems.count == pageSize else { break }
                 let nextOffset = offset + response.dataItems.count
                 guard nextOffset > offset else { break }
@@ -2031,12 +2031,12 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
             warnings.append("Les petites annonces PartenaireFoyer n’ont pas pu être chargées.")
         }
 
-        if warnings.isEmpty { await onPartialUpdate(orderedWixAds, nil) }
+        if warnings.isEmpty { onPartialUpdate(orderedWixAds, nil) }
         var importedAds: [ClassifiedAd] = []
         do {
             _ = try await fetchImportedVehicleClassifiedAds { page in
                 importedAds = mergeOrdered(importedAds, ordered(page))
-                await onPartialUpdate(mergeOrdered(orderedWixAds, importedAds),
+                onPartialUpdate(mergeOrdered(orderedWixAds, importedAds),
                                       warnings.isEmpty ? nil : warnings.joined(separator: " "))
             }
         } catch {
@@ -2044,7 +2044,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         }
         let final = mergeOrdered(orderedWixAds, importedAds)
         let warning = warnings.isEmpty ? nil : warnings.joined(separator: " ")
-        await onPartialUpdate(final, warning)
+        onPartialUpdate(final, warning)
         return (final, warning)
     }
     func fetchPublicBuyerSearches() async throws -> [WixPublicBuyerSearch] {
@@ -2267,7 +2267,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
                 }
                 .map { $0.data.listing(id: $0.id) }
             properties.append(contentsOf: pageListings)
-            if !pageListings.isEmpty { await onPage(pageListings) }
+            if !pageListings.isEmpty { onPage(pageListings) }
             guard response.dataItems.count == pageSize else { break }
             let nextOffset = offset + response.dataItems.count
             guard nextOffset > offset else { break }
@@ -2846,7 +2846,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
                 }
                 let pageListings = activeItems.map { $0.data.listing(id: $0.id) }
                 listings.append(contentsOf: pageListings)
-                if !pageListings.isEmpty { await onPage(pageListings) }
+                if !pageListings.isEmpty { onPage(pageListings) }
                 guard response.dataItems.count == pageSize else { break }
                 let nextOffset = offset + response.dataItems.count
                 guard nextOffset > offset else { break }
