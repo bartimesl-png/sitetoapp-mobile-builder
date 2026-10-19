@@ -446,6 +446,49 @@ final class ProfessionalsService: ObservableObject {
     }
 }
 
+/// Loads only the published homes linked to one registered professional.
+@MainActor
+final class ProfessionalListingsService: ObservableObject {
+    @Published private(set) var listings: [Listing] = []
+    @Published private(set) var isLoading = false
+    @Published private(set) var hasLoaded = false
+    @Published private(set) var errorMessage: String?
+
+    private var loadedOwnerKey: String?
+
+    func loadIfNeeded(for professional: WixPublicProfessional) async {
+        let key = ownerKey(for: professional)
+        guard !isLoading, loadedOwnerKey != key else { return }
+        await reload(for: professional)
+    }
+
+    func reload(for professional: WixPublicProfessional) async {
+        guard !isLoading else { return }
+        let key = ownerKey(for: professional)
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+        do {
+            listings = try await WixAuthStore.shared.fetchPublicProfessionalListings(for: professional)
+            errorMessage = nil
+            loadedOwnerKey = key
+            hasLoaded = true
+        } catch {
+            errorMessage = "Les biens de ce professionnel n’ont pas pu être chargés."
+            hasLoaded = false
+            loadedOwnerKey = nil
+        }
+    }
+
+    private func ownerKey(for professional: WixPublicProfessional) -> String {
+        [professional.cmsProfileID, professional.memberID, professional.id]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .sorted()
+            .joined(separator: "|")
+    }
+}
+
 /// Client for the existing referral workflow. Candidate creation is a live,
 /// rate-limited operation; it is only invoked from the user's submit action.
 @MainActor
