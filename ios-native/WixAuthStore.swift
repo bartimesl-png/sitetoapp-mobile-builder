@@ -2785,13 +2785,20 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
 
     /// Fetch one profile's homes directly instead of loading and filtering the
     /// entire public property catalogue when a user opens a professional page.
-    func fetchPublicProfessionalListings(for professional: WixPublicProfessional) async throws -> [Listing] {
+    func fetchPublicProfessionalListings(
+        for professional: WixPublicProfessional,
+        onPage: @escaping @MainActor ([Listing]) -> Void = { _ in }
+    ) async throws -> [Listing] {
         let visitor = try await requestToken([
             "clientId": clientID,
             "grantType": "anonymous"
         ])
         let ownerIDs = [professional.cmsProfileID, professional.memberID, professional.id]
-        return try await fetchPublicProfessionalListings(ownerIDs: ownerIDs, accessToken: visitor.accessToken)
+        return try await fetchPublicProfessionalListings(
+            ownerIDs: ownerIDs,
+            accessToken: visitor.accessToken,
+            onPage: onPage
+        )
     }
 
     private func fetchPublicProfessionalListings(
