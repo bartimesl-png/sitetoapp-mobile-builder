@@ -1781,19 +1781,22 @@ private struct NativeCatalogContentView: View {
                     }
                     if (service.isLoading || service.isLoadingImported) && !service.listings.isEmpty {
                         Section {
-                            ProgressView(service.isLoading
-                                ? "Chargement des biens Wix…"
-                                : "Chargement des annonces importées…")
-                                .font(.footnote)
+                            if service.isLoading {
+                                ProgressView("Chargement des biens Wix…").font(.footnote)
+                            } else {
+                                ProgressView().font(.footnote)
+                            }
                         }
                     }
                     if (service.isLoading || service.isLoadingImported) && service.listings.isEmpty {
                         Section {
                             HStack {
                                 Spacer()
-                                ProgressView(service.isLoading
-                                    ? "Chargement des biens Wix…"
-                                    : "Chargement des annonces importées…")
+                                if service.isLoading {
+                                    ProgressView("Chargement des biens Wix…")
+                                } else {
+                                    ProgressView()
+                                }
                                 Spacer()
                             }
                         }
@@ -1849,7 +1852,7 @@ private struct NativeCatalogContentView: View {
                         }
                     }
                     if classifiedAds.isLoading && !classifiedAds.ads.isEmpty {
-                        Section { ProgressView("Chargement des annonces importées…").font(.footnote) }
+                        Section { ProgressView().font(.footnote) }
                     }
                     if classifiedAds.isLoading && classifiedAds.ads.isEmpty {
                         Section { HStack { Spacer(); ProgressView("Chargement des annonces Wix…"); Spacer() } }
