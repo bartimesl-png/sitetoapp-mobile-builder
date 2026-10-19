@@ -15,6 +15,9 @@ final class ListingsService: ObservableObject {
         case professional
     }
 
+    private var privateOwnerIDs = Set<String>()
+    private var professionalIDs = Set<String>()
+
     private var importedSource: [Listing]?
     private var privateOwnerSource: [Listing]?
     private var professionalSource: [Listing]?
@@ -39,22 +42,58 @@ final class ListingsService: ObservableObject {
         // The Wix catalog finishes before optional imported feeds start.
         Task { @MainActor [weak self] in
             guard let self else { return }
-            do { self.finish(.privateOwner, items: try await WixAuthStore.shared.fetchPublicPrivateListings(), failure: nil) }
-            catch { self.finish(.privateOwner, items: nil, failure: "les biens de particuliers (\(error.localizedDescription))") }
+            do {
+                let items = try await WixAuthStore.shared.fetchPublicPrivateListings { [weak self] page in
+                    self?.appendSourcePage(.privateOwner, page)
+                }
+                self.finish(.privateOwner, items: items, failure: nil)
+            } catch {
+                self.finish(.privateOwner, items: nil, failure: "les biens de particuliers (\(error.localizedDescription))")
+            }
         }
         Task { @MainActor [weak self] in
             guard let self else { return }
-            do { self.finish(.professional, items: try await WixAuthStore.shared.fetchPublicProfessionalListings(), failure: nil) }
-            catch { self.finish(.professional, items: nil, failure: "les biens de professionnels (\(error.localizedDescription))") }
+            do {
+                let items = try await WixAuthStore.shared.fetchPublicProfessionalListings { [weak self] page in
+                    self?.appendSourcePage(.professional, page)
+                }
+                self.finish(.professional, items: items, failure: nil)
+            } catch {
+                self.finish(.professional, items: nil, failure: "les biens de professionnels (\(error.localizedDescription))")
+            }
         }
+    }
+
+    private func appendSourcePage(_ source: Source, _ page: [Listing]) {
+        var knownIDs: Set<String>
+        switch source {
+        case .privateOwner: knownIDs = privateOwnerIDs
+        case .professional: knownIDs = professionalIDs
+        }
+        let fresh = page.filter { knownIDs.insert($0.id).inserted }
+        guard !fresh.isEmpty else { return }
+        switch source {
+        case .privateOwner:
+            privateOwnerIDs = knownIDs
+            privateOwnerSource = (privateOwnerSource ?? []) + fresh
+        case .professional:
+            professionalIDs = knownIDs
+            professionalSource = (professionalSource ?? []) + fresh
+        }
+        hasLoaded = true
+        publishCatalog(ordered: false)
     }
 
     private func finish(_ source: Source, items: [Listing]?, failure: String?) {
         pendingSources = max(0, pendingSources - 1)
         if let items {
             switch source {
-            case .privateOwner: privateOwnerSource = items
-            case .professional: professionalSource = items
+            case .privateOwner:
+                privateOwnerSource = items
+                privateOwnerIDs = Set(items.map(\.id))
+            case .professional:
+                professionalSource = items
+                professionalIDs = Set(items.map(\.id))
             }
         } else if let failure, !sourceFailures.contains(failure) {
             sourceFailures.append(failure)
@@ -117,11 +156,11 @@ final class ListingsService: ObservableObject {
         hasLoaded = true
     }
 
-    private func publishCatalog() {
+    private func publishCatalog(ordered: Bool = true) {
         var seen = Set<String>()
-        listings = ListingCatalogOrdering.ordered(
-            (importedSource ?? []) + (privateOwnerSource ?? []) + (professionalSource ?? [])
-        ).filter { seen.insert($0.id).inserted }
+        let unique = ((importedSource ?? []) + (privateOwnerSource ?? []) + (professionalSource ?? []))
+            .filter { seen.insert($0.id).inserted }
+        listings = ordered ? ListingCatalogOrdering.ordered(unique) : unique
         if !listings.isEmpty { hasLoaded = true }
     }
 
@@ -167,42 +206,52 @@ final class ListingsService: ObservableObject {
 
 /// Native equivalent of the website's property promotion cycle.
 private enum ListingCatalogOrdering {
+    private struct SortKey {
+        let listing: Listing
+        let isNew: Bool
+        let createdTime: TimeInterval
+        let hasRecentDrop: Bool
+        let dropTime: TimeInterval
+        let promotionTime: TimeInterval
+    }
+
     static func ordered(_ listings: [Listing], now: Date = Date()) -> [Listing] {
-        listings.sorted { left, right in
-            let leftCreated = left.catalogCreatedDate
-            let rightCreated = right.catalogCreatedDate
-            let leftAge = leftCreated.map { now.timeIntervalSince($0) / 86_400 }
-            let rightAge = rightCreated.map { now.timeIntervalSince($0) / 86_400 }
-            let leftIsNew = leftAge.map { $0 < 2 } ?? false
-            let rightIsNew = rightAge.map { $0 < 2 } ?? false
-            let leftCreatedTime = leftCreated?.timeIntervalSince1970 ?? 0
-            let rightCreatedTime = rightCreated?.timeIntervalSince1970 ?? 0
-
-            if leftIsNew != rightIsNew { return leftIsNew }
-            if leftIsNew {
-                if leftCreatedTime != rightCreatedTime { return leftCreatedTime > rightCreatedTime }
-                return left.id < right.id
-            }
-
-            let leftDrop = left.catalogPriceDropDate
-            let rightDrop = right.catalogPriceDropDate
-            let leftHasRecentDrop = leftAge != nil && leftDrop.map { now.timeIntervalSince($0) / 86_400 < 7 } == true
-            let rightHasRecentDrop = rightAge != nil && rightDrop.map { now.timeIntervalSince($0) / 86_400 < 7 } == true
-            if leftHasRecentDrop != rightHasRecentDrop { return leftHasRecentDrop }
-            if leftHasRecentDrop, rightHasRecentDrop {
-                let leftDropTime = leftDrop?.timeIntervalSince1970 ?? 0
-                let rightDropTime = rightDrop?.timeIntervalSince1970 ?? 0
-                if leftDropTime != rightDropTime { return leftDropTime > rightDropTime }
-                if leftCreatedTime != rightCreatedTime { return leftCreatedTime > rightCreatedTime }
-                return left.id < right.id
-            }
-
-            let leftPromotionTime = promotionTime(created: leftCreated, ageDays: leftAge)
-            let rightPromotionTime = promotionTime(created: rightCreated, ageDays: rightAge)
-            if leftPromotionTime != rightPromotionTime { return leftPromotionTime > rightPromotionTime }
-            if leftCreatedTime != rightCreatedTime { return leftCreatedTime > rightCreatedTime }
-            return left.id < right.id
+        // Parse each date and compute each promotion key once. Doing this inside
+        // the sort comparator repeatedly created thousands of formatter objects
+        // while the main thread rendered a large catalogue.
+        let keys = listings.map { listing -> SortKey in
+            let created = listing.catalogCreatedDate
+            let ageDays = created.map { now.timeIntervalSince($0) / 86_400 }
+            let drop = listing.catalogPriceDropDate
+            let hasRecentDrop = ageDays != nil && drop.map { now.timeIntervalSince($0) / 86_400 < 7 } == true
+            return SortKey(
+                listing: listing,
+                isNew: ageDays.map { $0 < 2 } ?? false,
+                createdTime: created?.timeIntervalSince1970 ?? 0,
+                hasRecentDrop: hasRecentDrop,
+                dropTime: drop?.timeIntervalSince1970 ?? 0,
+                promotionTime: promotionTime(created: created, ageDays: ageDays)
+            )
         }
+
+        return keys.sorted { left, right in
+            if left.isNew != right.isNew { return left.isNew }
+            if left.isNew {
+                if left.createdTime != right.createdTime { return left.createdTime > right.createdTime }
+                return left.listing.id < right.listing.id
+            }
+
+            if left.hasRecentDrop != right.hasRecentDrop { return left.hasRecentDrop }
+            if left.hasRecentDrop, right.hasRecentDrop {
+                if left.dropTime != right.dropTime { return left.dropTime > right.dropTime }
+                if left.createdTime != right.createdTime { return left.createdTime > right.createdTime }
+                return left.listing.id < right.listing.id
+            }
+
+            if left.promotionTime != right.promotionTime { return left.promotionTime > right.promotionTime }
+            if left.createdTime != right.createdTime { return left.createdTime > right.createdTime }
+            return left.listing.id < right.listing.id
+        }.map(\.listing)
     }
 
     private static func promotionTime(created: Date?, ageDays: Double?) -> TimeInterval {
