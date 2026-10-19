@@ -414,6 +414,42 @@ struct WixProfessionalFavorite: Identifiable, Hashable {
     let professionalType: String
 }
 
+/// Accept Wix image fields in the same shapes as the website normalizer:
+/// plain URL, Wix image object, array, or a JSON-encoded gallery.
+struct WixImageField: Decodable {
+    let values: [String]
+
+    init(from decoder: Decoder) throws {
+        let decoded = try AnyCodableValue(from: decoder)
+        values = Self.extract(decoded.value)
+    }
+
+    private static func extract(_ value: Any) -> [String] {
+        if let string = value as? String {
+            let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return [] }
+            if let data = trimmed.data(using: .utf8),
+               let json = try? JSONSerialization.jsonObject(with: data),
+               !(json is String) {
+                return extract(json)
+            }
+            return [trimmed]
+        }
+        if let values = value as? [Any] {
+            return values.flatMap(extract)
+        }
+        if let object = value as? [String: Any] {
+            for key in ["url", "src", "fileUrl", "imageUrl", "originalImageUrl"] {
+                if let candidate = object[key] {
+                    let extracted = extract(candidate)
+                    if !extracted.isEmpty { return extracted }
+                }
+            }
+        }
+        return []
+    }
+}
+
 struct WixPublicPropertyItem: Decodable {
     let id: String
     let data: WixPublicProperty
@@ -436,50 +472,41 @@ struct WixPublicProperty: Decodable {
     let bathrooms: Double?
     let propertyType: String?
     let transactionType: String?
-    let mainImage: String?
+    let mainImage: WixImageField?
     let isPublic: Bool?
-    let photo1: String?
-    let photo2: String?
-    let photo3: String?
-    let photo4: String?
-    let photo5: String?
-    let photo6: String?
-    let photo7: String?
-    let photo8: String?
-    let photo9: String?
-    let photo10: String?
-    let photo11: String?
-    let photo12: String?
-    let photo13: String?
-    let photo14: String?
-    let photo15: String?
-    let photo16: String?
-    let photo17: String?
-    let photo18: String?
-    let photo19: String?
-    let photo20: String?
-    let galleryImages: String?
+    let photo1: WixImageField?
+    let photo2: WixImageField?
+    let photo3: WixImageField?
+    let photo4: WixImageField?
+    let photo5: WixImageField?
+    let photo6: WixImageField?
+    let photo7: WixImageField?
+    let photo8: WixImageField?
+    let photo9: WixImageField?
+    let photo10: WixImageField?
+    let photo11: WixImageField?
+    let photo12: WixImageField?
+    let photo13: WixImageField?
+    let photo14: WixImageField?
+    let photo15: WixImageField?
+    let photo16: WixImageField?
+    let photo17: WixImageField?
+    let photo18: WixImageField?
+    let photo19: WixImageField?
+    let photo20: WixImageField?
+    let galleryImages: WixImageField?
     let createdAt: String?
     let _createdDate: WixDateValue?
 
     var photos: [String] {
-        var result = [mainImage, photo1, photo2, photo3, photo4, photo5,
+        let fields = [mainImage, photo1, photo2, photo3, photo4, photo5,
                       photo6, photo7, photo8, photo9, photo10, photo11,
                       photo12, photo13, photo14, photo15, photo16, photo17,
-                      photo18, photo19, photo20].compactMap { $0 }
-        if let galleryImages, let data = galleryImages.data(using: .utf8),
-           let decoded = try? JSONSerialization.jsonObject(with: data) as? [Any] {
-            for image in decoded {
-                if let url = image as? String {
-                    result.append(url)
-                } else if let object = image as? [String: Any],
-                          let url = (object["url"] as? String) ?? (object["src"] as? String) {
-                    result.append(url)
-                }
-            }
-        }
+                      photo18, photo19, photo20, galleryImages]
         var seen = Set<String>()
-        return result.filter { !$0.isEmpty && seen.insert($0).inserted }
+        return fields.compactMap { $0 }.flatMap(\.values).filter {
+            !$0.isEmpty && seen.insert($0).inserted
+        }
     }
 
     func listing(id: String) -> Listing {
@@ -538,13 +565,13 @@ struct WixPublicProfessionalProperty: Decodable {
     let bathrooms: Double?
     let propertyType: String?
     let transactionType: String?
-    let mainImageUrl: String?
-    let galleryImages: String?
-    let photo1: String?
-    let photo2: String?
-    let photo3: String?
-    let photo4: String?
-    let photo5: String?
+    let mainImageUrl: WixImageField?
+    let galleryImages: WixImageField?
+    let photo1: WixImageField?
+    let photo2: WixImageField?
+    let photo3: WixImageField?
+    let photo4: WixImageField?
+    let photo5: WixImageField?
     let createdAt: String?
     let _createdDate: WixDateValue?
     let updatedAt: String?
@@ -555,19 +582,10 @@ struct WixPublicProfessionalProperty: Decodable {
     let slug: String?
 
     func listing(id: String) -> Listing {
-        var gallery: [String] = [photo1, photo2, photo3, photo4, photo5].compactMap { $0 }
-        if let galleryImages, let data = galleryImages.data(using: .utf8),
-           let values = try? JSONSerialization.jsonObject(with: data) as? [Any] {
-            for value in values {
-                if let url = value as? String {
-                    gallery.append(url)
-                } else if let object = value as? [String: Any],
-                          let url = (object["url"] as? String) ?? (object["src"] as? String) {
-                    gallery.append(url)
-                }
-            }
-        }
-        if let mainImageUrl, !gallery.contains(mainImageUrl) { gallery.insert(mainImageUrl, at: 0) }
+        var gallery = [photo1, photo2, photo3, photo4, photo5, galleryImages]
+            .compactMap { $0 }.flatMap(\.values)
+        if let mainImageUrl = mainImageUrl?.values.first,
+           !gallery.contains(mainImageUrl) { gallery.insert(mainImageUrl, at: 0) }
         var seen = Set<String>()
         gallery = gallery.filter { !$0.isEmpty && seen.insert($0).inserted }
         return Listing(
@@ -583,7 +601,7 @@ struct WixPublicProfessionalProperty: Decodable {
             bedrooms: bedrooms.map(Int.init),
             bathrooms: bathrooms.map(Int.init),
             images: gallery,
-            imageUrl: mainImageUrl ?? gallery.first,
+            imageUrl: mainImageUrl?.values.first ?? gallery.first,
             transactionType: transactionType,
             propertyType: propertyType,
             sourceUrl: nil,
