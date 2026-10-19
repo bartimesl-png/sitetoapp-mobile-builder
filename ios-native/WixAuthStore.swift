@@ -2303,18 +2303,21 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
             onPartialUpdate(orderedRegistered + visibleImported, nil)
         }
 
-        do {
-            _ = try await fetchImportedRealEstateProfessionals { page in appendImportedGroup(page) }
-        } catch { warnings.append("les professionnels immobiliers importés") }
-        do {
-            _ = try await fetchImportedLocalProfessionals(categories: ["courtier"]) { page in appendImportedGroup(page) }
-        } catch { warnings.append("les courtiers importés") }
-        do {
-            _ = try await fetchImportedLocalProfessionals { page in appendImportedGroup(page) }
-        } catch { warnings.append("les artisans et diagnostiqueurs importés") }
-        do {
-            _ = try await fetchImportedLocalProfessionals(categories: ["prestataire"]) { page in appendImportedGroup(page) }
-        } catch { warnings.append("les prestataires importés") }
+        // Start each public feed together, then publish each completed group
+        // as soon as it is ready so the directory remains responsive.
+        async let importedBrokersTask = fetchImportedLocalProfessionals(categories: ["courtier"])
+        async let importedProvidersTask = fetchImportedLocalProfessionals(categories: ["prestataire"])
+        async let importedLocalProsTask = fetchImportedLocalProfessionals()
+        async let importedRealEstateTask = fetchImportedRealEstateProfessionals()
+
+        do { appendImportedGroup(try await importedBrokersTask) }
+        catch { warnings.append("les courtiers importés") }
+        do { appendImportedGroup(try await importedProvidersTask) }
+        catch { warnings.append("les prestataires importés") }
+        do { appendImportedGroup(try await importedLocalProsTask) }
+        catch { warnings.append("les artisans et diagnostiqueurs importés") }
+        do { appendImportedGroup(try await importedRealEstateTask) }
+        catch { warnings.append("les professionnels immobiliers importés") }
 
         let professionals = orderedRegistered + visibleImported
         let warning = warnings.isEmpty ? nil : "Annuaire partiellement chargé : " + warnings.joined(separator: ", ") + ". Réessayez pour actualiser les fiches manquantes."
@@ -2652,11 +2655,27 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
             "grantType": "anonymous"
         ])
         let professionals = try await fetchVisibleProfessionalRecords(accessToken: visitor.accessToken)
-        let professionalIDs = Array(Set(professionals.flatMap { professional in
+        let ownerIDs = professionals.flatMap { professional in
             [professional.id, professional.data.memberId]
-                .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-        }))
+        }
+        return try await fetchPublicProfessionalListings(ownerIDs: ownerIDs, accessToken: visitor.accessToken)
+    }
+
+    /// Fetch one profile's homes directly instead of loading and filtering the
+    /// entire public property catalogue when a user opens a professional page.
+    func fetchPublicProfessionalListings(for professional: WixPublicProfessional) async throws -> [Listing] {
+        let visitor = try await requestToken([
+            "clientId": clientID,
+            "grantType": "anonymous"
+        ])
+        let ownerIDs = [professional.cmsProfileID, professional.memberID, professional.id]
+        return try await fetchPublicProfessionalListings(ownerIDs: ownerIDs, accessToken: visitor.accessToken)
+    }
+
+    private func fetchPublicProfessionalListings(ownerIDs: [String?], accessToken: String) async throws -> [Listing] {
+        let professionalIDs = Array(Set(ownerIDs
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }))
         guard !professionalIDs.isEmpty else { return [] }
 
         let pageSize = 100
@@ -2669,9 +2688,9 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
             "lastPriceDropDate", "commercialStatus", "slug", "status"
         ]
 
-        // Legacy and current listings can point to a profile through either
-        // `professionalId` (CMS profile ID) or `wixMemberId` (Wix member ID).
-        // Query both confirmed fields for visible profiles, then recheck status.
+        // Older homes can reference the CMS profile while newer ones can
+        // reference the Wix member. Query both identifiers and keep published
+        // homes only.
         for start in stride(from: 0, to: professionalIDs.count, by: 100) {
             let end = min(start + 100, professionalIDs.count)
             let batch = Array(professionalIDs[start..<end])
@@ -2679,7 +2698,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
             while true {
                 let response = try await post(
                     "https://www.wixapis.com/wix-data/v2/items/query",
-                    bearer: visitor.accessToken,
+                    bearer: accessToken,
                     body: [
                         "dataCollectionId": "biensprofessionnels",
                         "query": [
