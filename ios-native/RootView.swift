@@ -750,7 +750,7 @@ private struct ProfessionalPropertyDetailView: View {
                     .font(.subheadline).foregroundStyle(.secondary)
                     if let description = listing.description?.trimmingCharacters(in: .whitespacesAndNewlines),
                        !description.isEmpty {
-                        Text(description).font(.body)
+                        ListingDescriptionTranslation(original: description)
                     }
                     if let rawURL = listing.sourceUrl, let url = URL(string: rawURL) {
                         Link(destination: url) {
@@ -3063,7 +3063,7 @@ private struct ListingDetailView: View {
                 if let description = listing.description, !description.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Description").font(.headline)
-                        Text(description).font(.body).foregroundStyle(.secondary)
+                        ListingDescriptionTranslation(original: description)
                     }
                 }
 
@@ -3314,8 +3314,13 @@ private struct HomeDashboardView: View {
                         HStack(spacing: 11) {
                             Image(systemName: "safari.fill")
                                 .font(.subheadline.weight(.semibold))
-                            Text("Toutes les pages du site")
-                                .font(.subheadline.weight(.semibold))
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Site complet · Français / English")
+                                    .font(.subheadline.weight(.semibold))
+                                Text("Annonces, inscriptions et parcours internationaux")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                             Spacer()
                             Image(systemName: "arrow.right")
                                 .font(.caption.weight(.bold))
@@ -3326,7 +3331,7 @@ private struct HomeDashboardView: View {
                         .background(PFTheme.paleMint, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
                     }
                     .buttonStyle(.plain)
-                    .accessibilityHint("Ouvre le site complet dans l’application avec sa navigation et sa session partagée.")
+                    .accessibilityHint("Ouvre le site complet dans l’application, avec le choix de langue et les parcours internationaux.")
 
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Votre projet")
@@ -9079,4 +9084,141 @@ private struct DashboardItemDetailView: View {
         }
     }
 
+}
+
+/// Translates a public listing description only after the reader requests English.
+/// The French source stays in its original record and remains the fallback.
+private struct ListingDescriptionTranslation: View {
+    let original: String
+    @State private var translatedText: String?
+    @State private var showingEnglish = false
+    @State private var isTranslating = false
+    @State private var translationFailed = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(showingEnglish ? (translatedText ?? original) : original)
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+
+            Button {
+                if translatedText != nil {
+                    showingEnglish.toggle()
+                    return
+                }
+                guard !isTranslating else { return }
+                isTranslating = true
+                translationFailed = false
+                Task {
+                    let result = await FreePublicListingTranslator.translate(original)
+                    isTranslating = false
+                    if let result, !result.isEmpty {
+                        translatedText = result
+                        showingEnglish = true
+                    } else {
+                        translationFailed = true
+                    }
+                }
+            } label: {
+                HStack(spacing: 7) {
+                    if isTranslating {
+                        ProgressView().controlSize(.small)
+                        Text("Traduction en cours…")
+                    } else {
+                        Label(
+                            translatedText != nil && showingEnglish
+                                ? "Afficher le français"
+                                : "Traduire en anglais (gratuit)",
+                            systemImage: "translate"
+                        )
+                    }
+                }
+                .font(.footnote.weight(.semibold))
+            }
+            .buttonStyle(.bordered)
+            .disabled(isTranslating)
+
+            Text("La description publique est envoyée à un service de traduction gratuit. Le texte français reste inchangé.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+
+            if translationFailed {
+                Text("Traduction indisponible pour le moment ; le texte original est conservé.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+private enum FreePublicListingTranslator {
+    private struct Response: Decodable {
+        let translatedText: String
+    }
+
+    private static let endpoints = [
+        "https://translate.cutie.dating/translate",
+        "https://translate.fedilab.app/translate"
+    ]
+
+    static func translate(_ text: String) async -> String? {
+        let chunks = split(text, maximumLength: 1800)
+        guard !chunks.isEmpty else { return nil }
+
+        for endpoint in endpoints {
+            var translated: [String] = []
+            var endpointSucceeded = true
+            for chunk in chunks {
+                guard let result = await translate(chunk, endpoint: endpoint) else {
+                    endpointSucceeded = false
+                    break
+                }
+                translated.append(result)
+            }
+            if endpointSucceeded { return translated.joined(separator: " ") }
+        }
+        return nil
+    }
+
+    private static func translate(_ text: String, endpoint: String) async -> String? {
+        guard let url = URL(string: endpoint),
+              let body = try? JSONSerialization.data(withJSONObject: [
+                "q": text,
+                "source": "auto",
+                "target": "en",
+                "format": "text"
+              ]) else { return nil }
+
+        var request = URLRequest(url: url, timeoutInterval: 20)
+        request.httpMethod = "POST"
+        request.httpBody = body
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode),
+              let decoded = try? JSONDecoder().decode(Response.self, from: data) else {
+            return nil
+        }
+        return decoded.translatedText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func split(_ text: String, maximumLength: Int) -> [String] {
+        var remaining = text[...]
+        var chunks: [String] = []
+        while !remaining.isEmpty {
+            let count = min(maximumLength, remaining.count)
+            var end = remaining.index(remaining.startIndex, offsetBy: count)
+            if end < remaining.endIndex,
+               let boundary = remaining[..<end].lastIndex(where: { $0.isWhitespace }) {
+                end = remaining.index(after: boundary)
+            }
+            let chunk = String(remaining[..<end]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !chunk.isEmpty { chunks.append(chunk) }
+            remaining = remaining[end...]
+        }
+        return chunks
+    }
 }

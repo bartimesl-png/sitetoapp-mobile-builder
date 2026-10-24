@@ -9,9 +9,9 @@
     <key>CFBundleIdentifier</key>
     <string>com.partenairefoyer.app</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.16</string>
+    <string>1.0.17</string>
     <key>CFBundleVersion</key>
-    <string>56</string>
+    <string>57</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>LSRequiresIPhoneOS</key>
