@@ -358,15 +358,18 @@ Les trois parcours demandés sont trois flux CMS distincts dans Wix. Ils ne part
 
 ## Inventaire SwiftUI complet
 
-Les **56 déclarations `View`** de `RootView.swift` au moment de l’audit :
+Les **60 déclarations `View`** de `RootView.swift` au moment de l’audit :
 
 - `RootView`
 - `NativeSeasonalStaysView`
 - `SeasonalAccommodationRow`
+- `CountryPickerRow`
 - `NativeSeasonalAccommodationDetail`
 - `NativeProfessionalsView`
 - `ProfessionalDirectoryListView`
 - `ProfessionalRow`
+- `ProfessionalPropertyRow`
+- `ProfessionalPropertyDetailView`
 - `ProfessionalDetailView`
 - `PrivatePropertyContactForm`
 - `ProfessionalMinisiteRequestForm`
@@ -417,4 +420,5 @@ Les **56 déclarations `View`** de `RootView.swift` au moment de l’audit :
 - `ProfessionalMiniSitePreviewView`
 - `NativeListingEditForm`
 - `DashboardItemDetailView`
+- `ListingDescriptionTranslation`
 - Audit CMS Wix en lecture seule (2026-10-18) : la collection `professionnels` a 62 fiches; les règles publiques du site laissent 30 fiches complètes et visibles, puis 28 après déduplication par e-mail. La fiche de Baptiste est classée 1re par `activityScore` (2237, puis 24). Elle porte `isVisibleInDirectory = true` et `isActive = false`; le site et iOS ne doivent donc pas appliquer de filtre actif à cette collection. iOS reprend maintenant le nom/prénom dans l’affichage et la recherche, avec la société en seconde ligne. Le classement utilise `activityScore`; les `lastLoginAt` des collections de comptes et les points du programme ambassadeur (`pointsTotal`, `ambassadorpoints`) sont distincts. Les CMS locaux contiennent 5 profils éligibles (3 artisans, 2 diagnostiqueurs) dans un champ `categories` encodé en JSON; iOS lit maintenant `categories.mainCategory` pour préserver le métier réel. Wix contient aussi un profil courtier, un profil courtier historique et deux prestataires actifs, actuellement sans mise en avant. Le code local place les fiches Wix avant les imports; la présence exacte sur l’appareil dépend encore des droits de lecture anonymes et du build installé.

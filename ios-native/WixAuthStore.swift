@@ -1958,7 +1958,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         ])
         let fields = [
             "itemName", "itemDescription", "itemPrice", "category", "subcategory",
-            "itemCondition", "adListingType", "attributesJSON", "slug", "city", "postalCode", "status", "itemImage", "isImported", "bumpedAt", "_createdDate",
+            "itemCondition", "adListingType", "attributesJSON", "slug", "city", "postalCode", "countryCode", "country", "status", "itemImage", "isImported", "bumpedAt", "_createdDate",
             "photo2", "photo3", "photo4", "photo5", "photo6", "photo7", "photo8",
             "photo9", "photo10", "photo11", "photo12", "photo13", "photo14",
             "photo15", "photo16", "photo17", "photo18", "photo19", "photo20"
@@ -2201,6 +2201,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
                     condition: nil,
                     city: city,
                     postalCode: postalCode,
+                    countryCode: importedString(item, ["countryCode", "country_code", "country"]),
                     images: imageURLs,
                     externalURL: source,
                     isImported: true,
@@ -2234,7 +2235,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         var offset = 0
         var properties: [Listing] = []
         let fields = [
-            "title", "description", "city", "postalCode", "sellingPrice", "estimatedPrice",
+            "title", "description", "city", "postalCode", "countryCode", "country", "sellingPrice", "estimatedPrice",
             "previousPrice", "lastPriceDropDate", "_createdDate",
             "surface", "landSurface", "rooms", "bedrooms", "bathrooms", "propertyType", "transactionType", "mainImage", "isPublic", "status",
             "createdAt",
@@ -2675,7 +2676,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         let photoFields = (1...30).map { "photo\($0)" } + ["galleryImage2", "galleryImage3", "galleryImage4", "galleryImage5"]
         let fields = [
             "itemName", "itemPrice", "itemImage", "itemDescription", "slug", "accommodationType",
-            "city", "postalCode", "department", "maxGuests", "numberOfBedrooms", "minimumStay",
+            "city", "postalCode", "countryCode", "country", "department", "maxGuests", "numberOfBedrooms", "minimumStay",
             "petsAllowed", "amenities", "latitude", "longitude"
         ] + photoFields
         var offset = 0
@@ -2705,6 +2706,8 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
                     description: importedString(data, ["itemDescription"]),
                     city: importedString(data, ["city"]),
                     postalCode: importedString(data, ["postalCode"]),
+                    countryCode: importedString(data, ["countryCode", "country_code"]),
+                    country: importedString(data, ["country"]),
                     department: importedString(data, ["department"]),
                     guestCapacity: (data["maxGuests"] as? NSNumber)?.intValue,
                     bedroomCount: (data["numberOfBedrooms"] as? NSNumber)?.intValue,
@@ -2814,7 +2817,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         let pageSize = 100
         var listings: [Listing] = []
         let fields = [
-            "professionalId", "wixMemberId", "title", "description", "city", "postalCode", "price", "surface", "surfaceHouse",
+            "professionalId", "wixMemberId", "title", "description", "city", "postalCode", "countryCode", "country", "price", "surface", "surfaceHouse",
             "surfaceLand", "landSurface", "rooms", "bedrooms", "bathrooms", "propertyType",
             "transactionType", "mainImageUrl", "galleryImages", "photo1", "photo2", "photo3",
             "photo4", "photo5", "createdAt", "_createdDate", "updatedAt", "previousPrice",

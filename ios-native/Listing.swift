@@ -22,6 +22,9 @@ struct Listing: Decodable, Identifiable, Hashable {
     let description: String?
     let city: String?
     let postalCode: String?
+    var countryCode: String? = nil
+    var country: String? = nil
+    var country_code: String? = nil
     let price: Double?
     let surface: Double?
     let landSurface: Double?
@@ -85,6 +88,10 @@ struct Listing: Decodable, Identifiable, Hashable {
 
     var locationLabel: String {
         [postalCode, city].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
+    }
+
+    var resolvedCountryCode: String? {
+        CountryCatalog.code(countryCode ?? country ?? country_code) ?? CountryCatalog.legacyCode(postalCode: postalCode)
     }
 
     var formattedPrice: String {
@@ -377,6 +384,8 @@ struct WixSeasonalAccommodation: Identifiable, Hashable {
     let description: String?
     let city: String?
     let postalCode: String?
+    var countryCode: String? = nil
+    var country: String? = nil
     let department: String?
     let guestCapacity: Int?
     let bedroomCount: Int?
@@ -392,6 +401,10 @@ struct WixSeasonalAccommodation: Identifiable, Hashable {
         [postalCode, city, department].compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .joined(separator: " · ")
+    }
+
+    var resolvedCountryCode: String? {
+        CountryCatalog.code(countryCode ?? country) ?? CountryCatalog.legacyCode(postalCode: postalCode)
     }
 
     var gallery: [URL] {
@@ -467,6 +480,8 @@ struct WixPublicProperty: Decodable {
     let description: String?
     let city: String?
     let postalCode: String?
+    let countryCode: String?
+    let country: String?
     let sellingPrice: Double?
     let estimatedPrice: Double?
     let previousPrice: Double?
@@ -523,6 +538,8 @@ struct WixPublicProperty: Decodable {
             description: description,
             city: city,
             postalCode: postalCode,
+            countryCode: countryCode,
+            country: country,
             price: sellingPrice ?? estimatedPrice,
             surface: surface,
             landSurface: landSurface,
@@ -563,6 +580,8 @@ struct WixPublicProfessionalProperty: Decodable {
     let description: String?
     let city: String?
     let postalCode: String?
+    let countryCode: String?
+    let country: String?
     let price: Double?
     let surface: Double?
     let surfaceHouse: Double?
@@ -607,6 +626,8 @@ struct WixPublicProfessionalProperty: Decodable {
             description: description,
             city: city,
             postalCode: postalCode,
+            countryCode: countryCode,
+            country: country,
             price: price,
             surface: surfaceHouse ?? surface,
             landSurface: surfaceLand ?? landSurface,
@@ -642,6 +663,9 @@ struct ClassifiedAd: Identifiable, Hashable {
     let condition: String?
     let city: String?
     let postalCode: String?
+    var countryCode: String? = nil
+    var country: String? = nil
+    var country_code: String? = nil
     let images: [URL]
     var externalURL: URL? = nil
     var isImported: Bool = false
@@ -680,6 +704,16 @@ struct ClassifiedAd: Identifiable, Hashable {
 
     var locationLabel: String {
         [postalCode, city].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
+    }
+
+    var resolvedCountryCode: String? {
+        let attributesCountry: String? = {
+            guard let data = importedAttributesJSON?.data(using: .utf8),
+                  let values = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+            return (values["countryCode"] as? String) ?? (values["country_code"] as? String) ?? (values["country"] as? String)
+        }()
+        return CountryCatalog.code(countryCode ?? country ?? country_code ?? attributesCountry)
+            ?? CountryCatalog.legacyCode(postalCode: postalCode)
     }
 
     var listingTypeLabel: String? {
@@ -721,6 +755,59 @@ struct ClassifiedAd: Identifiable, Hashable {
         case "month": return "mois"
         default: return unit
         }
+    }
+}
+
+/// ISO country choices shared by search filters and signup. France is the
+/// initial selection; localized names are shown in French to match the app.
+enum CountryCatalog {
+    static let defaultCode = "FR"
+    private static let frenchLocale = Locale(identifier: "fr_FR")
+    private static let englishLocale = Locale(identifier: "en_US")
+
+    static let codes: [String] = {
+        let all = Set(Locale.isoRegionCodes.map { $0.uppercased() })
+        return ["FR", "US"] + all.subtracting(["FR", "US"]).sorted {
+            name($0).localizedCaseInsensitiveCompare(name($1)) == .orderedAscending
+        }
+    }()
+
+    static func name(_ code: String) -> String {
+        frenchLocale.localizedString(forRegionCode: code.uppercased()) ?? code.uppercased()
+    }
+
+    static func flag(_ code: String) -> String {
+        let scalars = code.uppercased().unicodeScalars.compactMap { UnicodeScalar(127397 + $0.value) }
+        return String(String.UnicodeScalarView(scalars))
+    }
+
+    static func code(_ rawValue: String?) -> String? {
+        guard let rawValue else { return nil }
+        let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return nil }
+        let normalized = value.uppercased()
+        if normalized.count == 2, codes.contains(normalized) { return normalized }
+        switch normalized {
+        case "USA", "U.S.A.", "UNITED STATES OF AMERICA", "UNITED STATES": return "US"
+        case "UK", "UNITED KINGDOM OF GREAT BRITAIN AND NORTHERN IRELAND": return "GB"
+        default: break
+        }
+        return codes.first {
+            name($0).localizedCaseInsensitiveCompare(value) == .orderedSame ||
+                (englishLocale.localizedString(forRegionCode: $0) ?? "").localizedCaseInsensitiveCompare(value) == .orderedSame
+        }
+    }
+
+    /// The existing Wix catalogs contain French listings without a country
+    /// field. Five-digit French postal codes keep those listings searchable.
+    static func legacyCode(postalCode: String?) -> String? {
+        // Legacy Wix catalog records were France-only and may omit the postal
+        // code. Keep them visible under the default country until a feed sends
+        // explicit international metadata.
+        guard let postalCode else { return defaultCode }
+        let digits = postalCode.filter(\.isNumber)
+        guard digits.count == 5 else { return defaultCode }
+        return "FR"
     }
 }
 
@@ -786,6 +873,8 @@ struct WixPublicClassifiedAdData: Decodable {
     let slug: String?
     let city: String?
     let postalCode: String?
+    let countryCode: String?
+    let country: String?
     let status: String?
     let itemImage: String?
     let photo2: String?
@@ -831,6 +920,8 @@ struct WixPublicClassifiedAdData: Decodable {
             condition: itemCondition,
             city: city,
             postalCode: postalCode,
+            countryCode: countryCode,
+            country: country,
             images: images,
             externalURL: nil,
             isImported: false,

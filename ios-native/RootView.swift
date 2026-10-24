@@ -83,6 +83,7 @@ struct RootView: View {
 private struct NativeSeasonalStaysView: View {
     @State private var accommodations: [WixSeasonalAccommodation] = []
     @State private var searchText = ""
+    @AppStorage("partenairefoyer.searchCountryCode") private var searchCountryCode = CountryCatalog.defaultCode
     @State private var selectedType = "Tous"
     @State private var guests = 1
     @State private var petsOnly = false
@@ -115,7 +116,8 @@ private struct NativeSeasonalStaysView: View {
             let text = [accommodation.name, accommodation.accommodationType, accommodation.city,
                         accommodation.postalCode, accommodation.department, accommodation.description,
                         accommodation.amenities].compactMap { $0 }.joined(separator: " ")
-            return (query.isEmpty || text.localizedCaseInsensitiveContains(query)) &&
+            return accommodation.resolvedCountryCode == searchCountryCode &&
+                (query.isEmpty || text.localizedCaseInsensitiveContains(query)) &&
                 (selectedType == "Tous" || accommodation.accommodationType == selectedType) &&
                 ((accommodation.guestCapacity ?? guests) >= guests) &&
                 (!petsOnly || accommodation.petsAllowed) &&
@@ -188,6 +190,7 @@ private struct NativeSeasonalStaysView: View {
                 NavigationStack {
                     Form {
                         Section("Destination et logement") {
+                            CountryPickerRow(countryCode: $searchCountryCode, title: "Pays")
                             Picker("Type d’hébergement", selection: $selectedType) {
                                 ForEach(accommodationTypes, id: \.self) { Text($0).tag($0) }
                             }
@@ -377,6 +380,20 @@ private struct SeasonalAccommodationRow: View {
     }
 }
 
+private struct CountryPickerRow: View {
+    @Binding var countryCode: String
+    var title: String = "Pays"
+
+    var body: some View {
+        Picker(title, selection: $countryCode) {
+            ForEach(CountryCatalog.codes, id: \.self) { code in
+                Text("\(CountryCatalog.flag(code))  \(CountryCatalog.name(code))").tag(code)
+            }
+        }
+        .pickerStyle(.menu)
+    }
+}
+
 private struct NativeSeasonalAccommodationDetail: View {
     let accommodation: WixSeasonalAccommodation
     @State private var showHostedBooking = false
@@ -436,7 +453,7 @@ private struct NativeSeasonalAccommodationDetail: View {
                 LabeledContent("Animaux", value: accommodation.petsAllowed ? "Acceptés" : "Non indiqué comme acceptés")
             }
             if let description = accommodation.description?.trimmingCharacters(in: .whitespacesAndNewlines), !description.isEmpty {
-                Section("Description") { Text(description).textSelection(.enabled) }
+                Section("Description") { ListingDescriptionTranslation(original: description) }
             }
             if !amenities.isEmpty {
                 Section("Équipements et services") {
@@ -832,7 +849,7 @@ private struct ProfessionalDetailView: View {
 
             if let description = professional.description, !description.isEmpty {
                 Section("Présentation") {
-                    Text(description).textSelection(.enabled)
+                    ListingDescriptionTranslation(original: description)
                 }
             }
 
@@ -1556,6 +1573,7 @@ private struct NativeCatalogContentView: View {
     @ObservedObject var professionalsService: ProfessionalsService
     @ObservedObject private var favorites = FavoritesStore.shared
     @State private var searchText = ""
+    @AppStorage("partenairefoyer.searchCountryCode") private var searchCountryCode = CountryCatalog.defaultCode
     @Binding var catalogSection: NativeCatalogSection
     @State private var showPropertyFilters = false
     @State private var showClassifiedFilters = false
@@ -1607,7 +1625,8 @@ private struct NativeCatalogContentView: View {
             let transaction = (listing.transactionType ?? "").lowercased()
             let isSale = ["sale", "vente", "sell"].contains(transaction)
             let isRent = ["rent", "location", "rental"].contains(transaction)
-            return (query.isEmpty ||
+            return listing.resolvedCountryCode == searchCountryCode &&
+                (query.isEmpty ||
                 (listing.title ?? "").localizedCaseInsensitiveContains(query) ||
                 (listing.propertyType ?? "").localizedCaseInsensitiveContains(query) ||
                 (listing.transactionType ?? "").localizedCaseInsensitiveContains(query) ||
@@ -1645,7 +1664,8 @@ private struct NativeCatalogContentView: View {
         [propertyTypeFilter != "Tous", propertyTransactionFilter != "Tous", !propertyMinPrice.isEmpty,
          !propertyMaxPrice.isEmpty, !propertyMinSurface.isEmpty, !propertyMaxSurface.isEmpty, !propertyMinLandSurface.isEmpty,
          !propertyMinRooms.isEmpty, !propertyMinBedrooms.isEmpty, !propertyMinBathrooms.isEmpty,
-         !propertyCity.isEmpty, !propertyPostalCode.isEmpty].filter { $0 }.count
+         !propertyCity.isEmpty, !propertyPostalCode.isEmpty,
+         searchCountryCode != CountryCatalog.defaultCode].filter { $0 }.count
     }
 
     private var filteredClassifiedAds: [ClassifiedAd] {
@@ -1659,6 +1679,7 @@ private struct NativeCatalogContentView: View {
         let mileageMaximum = Double(classifiedMileageMax.replacingOccurrences(of: ",", with: "."))
         let usesVehicleFilters = classifiedCategory == "Auto / Moto — accessoires"
         let filtered = classifiedAds.ads.filter { ad in
+            ad.resolvedCountryCode == searchCountryCode &&
             (query.isEmpty ||
              ad.title.localizedCaseInsensitiveContains(query) ||
              (ad.category ?? "").localizedCaseInsensitiveContains(query) ||
@@ -1724,7 +1745,8 @@ private struct NativeCatalogContentView: View {
 
     private var activeClassifiedFilterCount: Int {
         [classifiedCategory != "Toutes", classifiedSubcategory != "Toutes", classifiedListingType != "Tous", classifiedCondition != "Tous",
-         !classifiedCity.isEmpty, !classifiedPostalCode.isEmpty, !classifiedMinPrice.isEmpty, !classifiedMaxPrice.isEmpty,
+         !classifiedCity.isEmpty, !classifiedPostalCode.isEmpty,
+         searchCountryCode != CountryCatalog.defaultCode, !classifiedMinPrice.isEmpty, !classifiedMaxPrice.isEmpty,
          classifiedAttributeKey != "Aucun" && !classifiedAttributeValue.isEmpty,
          (classifiedCategory == "Auto / Moto — accessoires" && !classifiedBrand.isEmpty),
          (classifiedCategory == "Auto / Moto — accessoires" && !classifiedModel.isEmpty),
@@ -1880,6 +1902,7 @@ private struct NativeCatalogContentView: View {
                                         TextField("Salles de bain", text: $propertyMinBathrooms).keyboardType(.numberPad)
                                     }
                                     Section("Localisation") {
+                                        CountryPickerRow(countryCode: $searchCountryCode, title: "Pays")
                                         TextField("Ville", text: $propertyCity).textContentType(.addressCity)
                                         TextField("Code postal", text: $propertyPostalCode).keyboardType(.numberPad)
                                     }
@@ -1897,6 +1920,7 @@ private struct NativeCatalogContentView: View {
                                             propertyMinBathrooms = ""
                                             propertyCity = ""
                                             propertyPostalCode = ""
+                                            searchCountryCode = CountryCatalog.defaultCode
                                             propertySort = "Ordre du catalogue"
                                         }
                                     }
@@ -2110,6 +2134,7 @@ private struct NativeCatalogContentView: View {
                             TextField("Prix maximum (€)", text: $classifiedMaxPrice).keyboardType(.decimalPad)
                         }
                         Section("Localisation") {
+                            CountryPickerRow(countryCode: $searchCountryCode, title: "Pays")
                             TextField("Ville", text: $classifiedCity).textContentType(.addressCity)
                             TextField("Code postal", text: $classifiedPostalCode).keyboardType(.numberPad)
                         }
@@ -2148,6 +2173,7 @@ private struct NativeCatalogContentView: View {
                                 classifiedAttributeValue = ""
                                 classifiedCity = ""
                                 classifiedPostalCode = ""
+                                searchCountryCode = CountryCatalog.defaultCode
                                 classifiedMinPrice = ""
                                 classifiedMaxPrice = ""
                                 classifiedBrand = ""
@@ -2418,7 +2444,7 @@ private struct NativeClassifiedAdDetailView: View {
                 if let description = ad.description, !description.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Description").font(.headline)
-                        Text(description).font(.body).foregroundStyle(.secondary).textSelection(.enabled)
+                        ListingDescriptionTranslation(original: description)
                     }
                 }
                 if let checkoutURL {
@@ -5331,6 +5357,8 @@ private struct RoleEntryView: View {
     @State private var showAccountRecovery = false
     @State private var showSiteLogin = false
     @State private var showSiteSignup = false
+    @State private var showSignupCountryPicker = false
+    @AppStorage("partenairefoyer.accountCountryCode") private var accountCountryCode = CountryCatalog.defaultCode
     @State private var showSiteActivation = false
     @State private var showSiteDashboard = false
     @State private var isCreatingAccount = false
@@ -5430,12 +5458,12 @@ private struct RoleEntryView: View {
                 Section {
                     Button {
                         if role == .professionnel && !isEditing {
-                            if isCreatingAccount { showSiteSignup = true }
+                            if isCreatingAccount { showSignupCountryPicker = true }
                             else { showSiteLogin = true }
                         } else if isEditing {
                             Task { await updateExistingProfile() }
                         } else if isCreatingAccount {
-                            showSiteSignup = true
+                            showSignupCountryPicker = true
                         } else if role == .professionnel {
                             Task { await signInProfessionalPortal() }
                         } else {
@@ -5458,7 +5486,7 @@ private struct RoleEntryView: View {
                     if !isEditing {
                         Button {
                             auth.errorMessage = nil
-                            showSiteSignup = true
+                            showSignupCountryPicker = true
                         } label: {
                             Label("Créer un compte PartenaireFoyer", systemImage: "person.crop.circle.badge.plus")
                         }
@@ -5500,8 +5528,38 @@ private struct RoleEntryView: View {
             .sheet(isPresented: $showSiteLogin) {
                 siteFlow(url: role.loginURL, title: "Connexion à mon espace")
             }
+            .sheet(isPresented: $showSignupCountryPicker) {
+                NavigationStack {
+                    Form {
+                        Section("Votre pays") {
+                            CountryPickerRow(countryCode: $accountCountryCode, title: "Pays de résidence")
+                            Text("La France est sélectionnée par défaut. Ce choix sera transmis au parcours d’inscription PartenaireFoyer.")
+                                .font(.footnote).foregroundStyle(.secondary)
+                        }
+                        Section {
+                            Button {
+                                UserDefaults.standard.set(accountCountryCode, forKey: "partenairefoyer.searchCountryCode")
+                                showSignupCountryPicker = false
+                                showSiteSignup = true
+                            } label: {
+                                Label("Continuer l’inscription", systemImage: "arrow.right.circle.fill")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
+                    }
+                    .navigationTitle("Pays d’inscription")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Fermer") { showSignupCountryPicker = false }
+                        }
+                    }
+                }
+                .presentationDetents([.medium])
+            }
             .sheet(isPresented: $showSiteSignup) {
-                siteFlow(url: role.signupURL, title: "Créer mon compte")
+                siteFlow(url: signupURLWithCountry, title: "Créer mon compte")
             }
             .sheet(isPresented: $showSiteActivation) {
                 siteFlow(url: role.activationURL, title: "Activer mon accès")
@@ -5564,6 +5622,7 @@ private struct RoleEntryView: View {
             "phone": phone,
             "city": city,
             "postalCode": postalCode,
+            "countryCode": accountCountryCode,
             "companyName": companyName,
             "contactName": "\(firstName) \(lastName)",
             "category": category,
@@ -5586,6 +5645,15 @@ private struct RoleEntryView: View {
             acceptedCGV: true
         )
         if didComplete { onSignedIn() }
+    }
+
+    private var signupURLWithCountry: URL {
+        var components = URLComponents(url: role.signupURL, resolvingAgainstBaseURL: false)!
+        var items = components.queryItems ?? []
+        items.removeAll { $0.name == "countryCode" }
+        items.append(URLQueryItem(name: "countryCode", value: accountCountryCode))
+        components.queryItems = items
+        return components.url ?? role.signupURL
     }
 
     private func siteFlow(url: URL, title: String) -> some View {

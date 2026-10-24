@@ -128,7 +128,7 @@ const orderingSource = listingsServiceSource.slice(
   listingsServiceSource.indexOf("private enum ListingCatalogOrdering"),
   listingsServiceSource.indexOf("@MainActor\nfinal class ClassifiedAdsService"),
 );
-assert.equal([...orderingSource.matchAll(/timeIntervalSince\(\$0\) \/ 86_400 < 7/g)].length, 2,
+assert.equal([...orderingSource.matchAll(/timeIntervalSince\(\$0\) \/ 86_400 < 7/g)].length, 1,
   "new price drops must keep the website's seven-day ordering window");
 const publicProfessionalQuery = wixAuthStoreSource.slice(
   wixAuthStoreSource.indexOf("private func fetchVisibleProfessionalRecords"),
@@ -205,7 +205,7 @@ assert.ok(publicBuyerSearchQuery.includes('"dataCollectionId": "particularbuyers
 assert.ok(source.includes('"brand": "Marque"') && source.includes('"catalog version": "Version du catalogue"') &&
   source.includes('!lower.hasPrefix("external")') && source.includes('!lower.hasSuffix("url")'),
   "classified attribute filters must use French labels and omit technical source metadata");
-assert.ok(source.includes('"Version du catalogue"') && source.includes('Autre caractéristique'),
+assert.ok(source.includes('"Version du catalogue"') && source.includes('"Critère : \\(label)"'),
   "dynamic small-ad filters must not fall back to raw English CMS field names");
 for (const adType of ['Text("Je vends").tag("sell")', 'Text("Je donne").tag("give")',
   'Text("J’échange").tag("exchange")', 'Text("Je loue").tag("rent")']) {
@@ -242,7 +242,9 @@ assert.equal([...roleEntrySource.matchAll(/\.sheet\(isPresented: \$showSiteLogin
   "each role login action must present only the shared WKWebView flow");
 assert.equal([...roleEntrySource.matchAll(/\.sheet\(isPresented: \$showSiteSignup\)/g)].length, 1,
   "each role signup action must present only the shared WKWebView flow");
-assert.ok(roleEntrySource.includes("siteFlow(url: role.loginURL") && roleEntrySource.includes("siteFlow(url: role.signupURL"),
+assert.ok(roleEntrySource.includes("siteFlow(url: role.loginURL") && roleEntrySource.includes("siteFlow(url: signupURLWithCountry") &&
+  roleEntrySource.includes("Pays d’inscription") &&
+  source.includes('URLQueryItem(name: "countryCode", value: accountCountryCode)'),
   "role login and signup must use the shared WKWebView session flow");
 assert.ok(source.includes("expectedDashboardRole.dashboardURL.path"),
   "legacy role login must only hand off after the selected role dashboard route is reached");
@@ -260,8 +262,9 @@ assert.ok(homeDashboard.includes('LazyVGrid(columns:') &&
 assert.ok(homeDashboard.includes('matchingStep("Mise en relation"'),
   "the matching explanation must not repeat the directory card's professional wording");
 assert.ok(wixAuthStoreSource.includes('sortedRegisteredProfessionals(registered)') &&
-  wixAuthStoreSource.includes('            brokers,\n            registeredLocalPros,\n            registeredProviders') &&
-  wixAuthStoreSource.includes('let importedGroups = [realEstateImported, importedBrokers, localImported, importedProviders]'),
+  wixAuthStoreSource.includes('var registeredGroups: [[WixPublicProfessional]]') &&
+  wixAuthStoreSource.includes('var registeredDirectory = registeredGroups.flatMap { $0 }') &&
+  wixAuthStoreSource.includes('let professionals = registeredGroups.flatMap { $0 } + visibleImported'),
   "professional de-duplication and source order must preserve Wix's separate registered directories before imports");
 
 console.log("Matching rules and parity inventory checks passed.");
