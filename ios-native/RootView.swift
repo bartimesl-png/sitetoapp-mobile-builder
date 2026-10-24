@@ -5,6 +5,7 @@ import PhotosUI
 import UIKit
 import SafariServices
 import WebKit
+import MapKit
 
 private enum PFTheme {
     static let brand = Color(red: 0.02, green: 0.43, blue: 0.34)
@@ -17,6 +18,7 @@ struct RootView: View {
     @State private var selectedTab = 0
     @State private var selectedCatalogSection: NativeCatalogSection = .hub
     @AppStorage("partenairefoyer.activeRole") private var activeRoleRaw = ""
+    @AppStorage("partenairefoyer.language") private var appLanguage = "fr"
     @StateObject private var listingsService = ListingsService()
     @StateObject private var classifiedAdsService = ClassifiedAdsService()
     @StateObject private var buyerSearchesService = PublicBuyerSearchesService()
@@ -31,27 +33,37 @@ struct RootView: View {
                 classifiedAdsService: classifiedAdsService,
                 professionalsService: professionalsService
             )
-                .tabItem { Label("Accueil", systemImage: "house.fill") }
+                .tabItem { Label(appLanguage == "en" ? "Home" : "Accueil", systemImage: "house.fill") }
                 .tag(0)
 
             NativeListingsView(service: listingsService, classifiedAds: classifiedAdsService, buyerSearches: buyerSearchesService, professionalsService: professionalsService, catalogSection: $selectedCatalogSection)
-                .tabItem { Label("Annonces", systemImage: "magnifyingglass") }
+                .tabItem { Label(appLanguage == "en" ? "Listings" : "Annonces", systemImage: "magnifyingglass") }
                 .tag(1)
 
             NativeSeasonalStaysView()
-                .tabItem { Label("Séjours", systemImage: "bed.double") }
+                .tabItem { Label(appLanguage == "en" ? "Stays" : "Séjours", systemImage: "bed.double") }
                 .tag(2)
 
             NativeProfessionalsView(service: professionalsService)
-                .tabItem { Label("Professionnels", systemImage: "person.2") }
+                .tabItem { Label(appLanguage == "en" ? "Professionals" : "Professionnels", systemImage: "person.2") }
                 .tag(3)
 
             NativeSpacePickerView()
-                .tabItem { Label("Menu", systemImage: "line.3.horizontal") }
+                .tabItem { Label(appLanguage == "en" ? "Menu" : "Menu", systemImage: "line.3.horizontal") }
                 .tag(4)
         }
         .tint(PFTheme.brand)
         .preferredColorScheme(.light)
+        .environment(\.locale, Locale(identifier: appLanguage == "en" ? "en_US" : "fr_FR"))
+        .safeAreaInset(edge: .top, spacing: 0) {
+            HStack {
+                Spacer()
+                AppLanguageControl(selection: $appLanguage)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 5)
+            .background(.bar)
+        }
         .onReceive(NotificationCenter.default.publisher(for: .partenaireFoyerPushNotificationTapped)) { notification in
             guard let fields = notification.object as? [String: String] else { return }
             openPushDestination(fields)
@@ -2909,6 +2921,7 @@ private struct ListingDetailView: View {
     @State private var showImportedContact = false
     @State private var showProfessionalContact = false
     @State private var showPrivateOwnerContact = false
+    @AppStorage("partenairefoyer.language") private var appLanguage = "fr"
 
     private var listingOwnerIDs: Set<String> {
         let values = (listing.professionalOwnerIDs ?? []) + [listing.professionalID].compactMap { $0 }
@@ -2989,11 +3002,16 @@ private struct ListingDetailView: View {
     }
 
     private var listingShareText: String {
-        let title = listing.title ?? "Annonce immobilière"
-        var parts = [title, listing.formattedPrice, listing.locationLabel]
+        let title = listing.title ?? (appLanguage == "en" ? "Property listing" : "Annonce immobilière")
+        var parts = [title, displayPrice, listing.locationLabel]
         if let sourceUrl = listing.sourceUrl, !sourceUrl.isEmpty { parts.append(sourceUrl) }
-        else { parts.append("Retrouvez cette annonce dans l’application PartenaireFoyer.") }
+        else { parts.append(appLanguage == "en" ? "Find this listing in the PartenaireFoyer app." : "Retrouvez cette annonce dans l’application PartenaireFoyer.") }
         return parts.filter { !$0.isEmpty }.joined(separator: "\n")
+    }
+
+    private var displayPrice: String {
+        guard let price = listing.price else { return appLanguage == "en" ? "Price on request" : "Prix sur demande" }
+        return price.formatted(.currency(code: "EUR").locale(Locale(identifier: appLanguage == "en" ? "en_US" : "fr_FR")))
     }
 
     private func professionalDestination(_ professional: WixPublicProfessional) -> some View {
@@ -3009,12 +3027,12 @@ private struct ListingDetailView: View {
     private var propertyTypeLabel: String? {
         guard let value = listing.propertyType?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return nil }
         switch value.lowercased() {
-        case "house", "maison": return "Maison"
-        case "apartment", "appartement": return "Appartement"
-        case "land", "terrain": return "Terrain"
-        case "building", "immeuble": return "Immeuble"
-        case "commercial", "commerce": return "Commerce"
-        case "office", "bureau": return "Bureau"
+        case "house", "maison": return appLanguage == "en" ? "House" : "Maison"
+        case "apartment", "appartement": return appLanguage == "en" ? "Apartment" : "Appartement"
+        case "land", "terrain": return appLanguage == "en" ? "Land" : "Terrain"
+        case "building", "immeuble": return appLanguage == "en" ? "Building" : "Immeuble"
+        case "commercial", "commerce": return appLanguage == "en" ? "Commercial" : "Commerce"
+        case "office", "bureau": return appLanguage == "en" ? "Office" : "Bureau"
         case "garage": return "Garage"
         default: return value.capitalized
         }
@@ -3022,8 +3040,8 @@ private struct ListingDetailView: View {
 
     private var transactionTypeLabel: String? {
         guard let value = listing.transactionType?.lowercased() else { return nil }
-        if ["sale", "vente", "sell"].contains(value) { return "À vendre" }
-        if ["rent", "location", "rental"].contains(value) { return "À louer" }
+        if ["sale", "vente", "sell"].contains(value) { return appLanguage == "en" ? "For sale" : "À vendre" }
+        if ["rent", "location", "rental"].contains(value) { return appLanguage == "en" ? "For rent" : "À louer" }
         return listing.transactionType
     }
 
@@ -3045,7 +3063,7 @@ private struct ListingDetailView: View {
 
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 7) {
-                        Text(listing.formattedPrice).font(.title2.bold())
+                        Text(displayPrice).font(.title2.bold())
                         if !listing.locationLabel.isEmpty {
                             Label(listing.locationLabel, systemImage: "mappin.and.ellipse")
                                 .font(.subheadline).foregroundStyle(.secondary)
@@ -3059,11 +3077,17 @@ private struct ListingDetailView: View {
                             .frame(width: 48, height: 48)
                             .background(Color.teal.opacity(0.09), in: Circle())
                     }
-                    .accessibilityLabel(favorites.contains(listing) ? "Retirer des favoris" : "Ajouter aux favoris")
+                    .accessibilityLabel(favorites.contains(listing)
+                        ? (appLanguage == "en" ? "Remove from favorites" : "Retirer des favoris")
+                        : (appLanguage == "en" ? "Add to favorites" : "Ajouter aux favoris"))
                 }
 
-                Text(listing.title ?? "Annonce immobilière")
-                    .font(.title3.weight(.semibold))
+                if let title = listing.title, !title.isEmpty {
+                    LocalizedListingTitle(original: title, language: appLanguage)
+                } else {
+                    Text(appLanguage == "en" ? "Property listing" : "Annonce immobilière")
+                        .font(.title3.weight(.semibold))
+                }
 
                 HStack(spacing: 12) {
                     if let propertyTypeLabel {
@@ -3079,23 +3103,38 @@ private struct ListingDetailView: View {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), alignment: .leading)], alignment: .leading, spacing: 10) {
                     if let surface = listing.formattedSurface { ListingFact(symbol: "square.dashed", text: surface) }
                     if let landSurface = listing.landSurface, landSurface > 0 {
-                        ListingFact(symbol: "tree", text: "Terrain \(landSurface.formatted(.number.precision(.fractionLength(0...1)).locale(Locale(identifier: "fr_FR")))) m²")
+                            ListingFact(symbol: "tree", text: "\(appLanguage == "en" ? "Land" : "Terrain") \(landSurface.formatted(.number.precision(.fractionLength(0...1)).locale(Locale(identifier: appLanguage == "en" ? "en_US" : "fr_FR")))) m²")
                     }
-                    if let rooms = listing.rooms { ListingFact(symbol: "door.left.hand.open", text: "\(rooms) pièces") }
-                    if let bedrooms = listing.bedrooms { ListingFact(symbol: "bed.double", text: "\(bedrooms) ch.") }
-                    if let bathrooms = listing.bathrooms { ListingFact(symbol: "shower", text: "\(bathrooms) SDB") }
+                    if let rooms = listing.rooms { ListingFact(symbol: "door.left.hand.open", text: "\(rooms) \(appLanguage == "en" ? "rooms" : "pièces")") }
+                    if let bedrooms = listing.bedrooms { ListingFact(symbol: "bed.double", text: "\(bedrooms) \(appLanguage == "en" ? "bedrooms" : "ch.")") }
+                    if let bathrooms = listing.bathrooms { ListingFact(symbol: "shower", text: "\(bathrooms) \(appLanguage == "en" ? "bathrooms" : "SDB")") }
                 }
 
                 if let description = listing.description, !description.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Description").font(.headline)
-                        ListingDescriptionTranslation(original: description)
+                        ListingDescriptionTranslation(original: description, language: appLanguage)
                     }
                 }
 
+                PropertyCostEstimator(listing: listing, language: appLanguage)
+                ListingNearbyMap(listing: listing, language: appLanguage)
+
+                VStack(alignment: .leading, spacing: 7) {
+                    Label(appLanguage == "en" ? "Stay safe during your property search" : "Restez vigilant lors de votre recherche immobilière", systemImage: "checkmark.shield.fill")
+                        .font(.headline)
+                    Text(appLanguage == "en"
+                         ? "Never send money before verifying the property and the identity of your contact. Use the in-app contact options when possible."
+                         : "Ne versez jamais d’argent avant d’avoir vérifié le bien et l’identité de votre interlocuteur. Utilisez si possible les moyens de contact de l’application.")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.orange.opacity(0.09), in: RoundedRectangle(cornerRadius: 16))
+
                 if let source = listing.sourceUrl, let sourceURL = URL(string: source) {
                     Link(destination: sourceURL) {
-                        Label("Voir l’annonce d’origine", systemImage: "arrow.up.right.square")
+                        Label(appLanguage == "en" ? "View original listing" : "Voir l’annonce d’origine", systemImage: "arrow.up.right.square")
                             .font(.headline)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 15)
@@ -3106,7 +3145,7 @@ private struct ListingDetailView: View {
 
                 if listing.canContactImportedProfessional {
                     Button { showImportedContact = true } label: {
-                        Label("Contacter via PartenaireFoyer", systemImage: "envelope.badge")
+                        Label(appLanguage == "en" ? "Contact via PartenaireFoyer" : "Contacter via PartenaireFoyer", systemImage: "envelope.badge")
                             .font(.headline)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 15)
@@ -3116,14 +3155,14 @@ private struct ListingDetailView: View {
                 }
                 if let linkedProfessional {
                     Button { showProfessionalContact = true } label: {
-                        Label("Contacter le professionnel", systemImage: "envelope.badge")
+                        Label(appLanguage == "en" ? "Contact the professional" : "Contacter le professionnel", systemImage: "envelope.badge")
                             .font(.headline)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 15)
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(Color(red: 0.02, green: 0.38, blue: 0.34))
-                    .accessibilityHint("Envoie une demande native dans l’espace professionnel Wix.")
+                    .accessibilityHint(appLanguage == "en" ? "Sends a request to the professional's Wix account." : "Envoie une demande native dans l’espace professionnel Wix.")
                     .sheet(isPresented: $showProfessionalContact) {
                         NavigationStack {
                             ProfessionalMinisiteRequestForm(
@@ -3138,7 +3177,7 @@ private struct ListingDetailView: View {
                 }
                 if listing.id.hasPrefix("wix-private-") {
                     Button { showPrivateOwnerContact = true } label: {
-                        Label("Contacter le propriétaire", systemImage: "envelope.badge")
+                        Label(appLanguage == "en" ? "Contact the owner" : "Contacter le propriétaire", systemImage: "envelope.badge")
                             .font(.headline)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 15)
@@ -3149,7 +3188,7 @@ private struct ListingDetailView: View {
 
                 if let professional = linkedProfessional {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Professionnel de l’annonce").font(.headline)
+                        Text(appLanguage == "en" ? "Listing professional" : "Professionnel de l’annonce").font(.headline)
                         HStack(spacing: 12) {
                             if let logo = professional.logo {
                                 NativeProfileImage(source: logo, fallback: "building.2")
@@ -3171,7 +3210,7 @@ private struct ListingDetailView: View {
                             let dialable = phone.filter { $0.isNumber || $0 == "+" }
                             if let url = URL(string: "tel:\(dialable)"), !dialable.isEmpty {
                                 Link(destination: url) {
-                                    Label("Appeler \(professional.directoryDisplayName)", systemImage: "phone.fill")
+                                    Label(appLanguage == "en" ? "Call \(professional.directoryDisplayName)" : "Appeler \(professional.directoryDisplayName)", systemImage: "phone.fill")
                                         .frame(maxWidth: .infinity, alignment: .leading)
                                 }
                             }
@@ -3180,7 +3219,7 @@ private struct ListingDetailView: View {
                             let trimmed = email.trimmingCharacters(in: .whitespacesAndNewlines)
                             if let url = URL(string: "mailto:\(trimmed)"), !trimmed.isEmpty {
                                 Link(destination: url) {
-                                    Label("Envoyer un e-mail", systemImage: "envelope.fill")
+                                    Label(appLanguage == "en" ? "Send an email" : "Envoyer un e-mail", systemImage: "envelope.fill")
                                         .frame(maxWidth: .infinity, alignment: .leading)
                                 }
                             }
@@ -3188,7 +3227,7 @@ private struct ListingDetailView: View {
                         NavigationLink {
                             professionalDestination(professional)
                         } label: {
-                            Label("Voir la fiche du professionnel", systemImage: "person.crop.circle")
+                            Label(appLanguage == "en" ? "View professional profile" : "Voir la fiche du professionnel", systemImage: "person.crop.circle")
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
@@ -3198,7 +3237,7 @@ private struct ListingDetailView: View {
                 }
 
                 ShareLink(item: listingShareText) {
-                    Label("Partager cette annonce", systemImage: "square.and.arrow.up")
+                    Label(appLanguage == "en" ? "Share this listing" : "Partager cette annonce", systemImage: "square.and.arrow.up")
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 13)
                 }
@@ -3207,7 +3246,7 @@ private struct ListingDetailView: View {
                 if !otherListings.isEmpty {
                     let professionalName = linkedProfessional?.directoryDisplayName ?? "ce professionnel"
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Les autres biens de \(professionalName)")
+                        Text(appLanguage == "en" ? "Other properties from \(professionalName)" : "Les autres biens de \(professionalName)")
                             .font(.headline)
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(alignment: .top, spacing: 12) {
@@ -3217,8 +3256,8 @@ private struct ListingDetailView: View {
                                             ListingImage(url: other.gallery.first)
                                                 .frame(width: 220, height: 145)
                                                 .clipShape(RoundedRectangle(cornerRadius: 14))
-                                            Text(other.formattedPrice).font(.subheadline.bold())
-                                            Text(other.title ?? "Annonce immobilière")
+                                            Text(other.price.map { $0.formatted(.currency(code: "EUR").locale(Locale(identifier: appLanguage == "en" ? "en_US" : "fr_FR"))) } ?? (appLanguage == "en" ? "Price on request" : "Prix sur demande")).font(.subheadline.bold())
+                                            Text(other.title ?? (appLanguage == "en" ? "Property listing" : "Annonce immobilière"))
                                                 .font(.subheadline)
                                                 .lineLimit(2)
                                             Text(other.locationLabel).font(.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -3235,7 +3274,7 @@ private struct ListingDetailView: View {
 
                 if !recommendedProfessionals.isEmpty {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Professionnels suggérés près de ce bien")
+                        Text(appLanguage == "en" ? "Professionals near this property" : "Professionnels suggérés près de ce bien")
                             .font(.headline)
                         ForEach(recommendedProfessionals) { professional in
                             NavigationLink {
@@ -3254,7 +3293,7 @@ private struct ListingDetailView: View {
             .padding(18)
         }
         .background(Color(uiColor: .systemGroupedBackground))
-        .navigationTitle("Détail de l’annonce")
+        .navigationTitle(appLanguage == "en" ? "Listing details" : "Détail de l’annonce")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showImportedContact) {
             NavigationStack {
@@ -3272,6 +3311,294 @@ private struct ListingDetailView: View {
     }
 }
 
+private struct AppLanguageControl: View {
+    @Binding var selection: String
+
+    var body: some View {
+        HStack(spacing: 3) {
+            languageButton("FR", code: "fr")
+            languageButton("EN", code: "en")
+        }
+        .padding(3)
+        .background(Color(uiColor: .secondarySystemBackground), in: Capsule())
+        .accessibilityLabel("App language")
+    }
+
+    private func languageButton(_ title: String, code: String) -> some View {
+        Button { selection = code } label: {
+            Text(title)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(selection == code ? .white : .primary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(selection == code ? PFTheme.brand : .clear, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selection == code ? .isSelected : [])
+    }
+}
+
+private struct PropertyCostEstimator: View {
+    let listing: Listing
+    let language: String
+    @State private var downPayment = ""
+    @State private var annualRate = "3.21"
+    @State private var insuranceRate = "0.30"
+    @State private var durationYears = 20
+    @State private var acquisitionType = "old"
+
+    private var isEnglish: Bool { language == "en" }
+    private var isRental: Bool {
+        let value = listing.transactionType?.lowercased() ?? ""
+        return value.contains("rent") || value.contains("location")
+    }
+    private var amount: Double { max(0, listing.price ?? 0) }
+    private var ownContribution: Double { max(0, Double(downPayment.replacingOccurrences(of: ",", with: ".")) ?? 0) }
+    private var rate: Double { max(0, Double(annualRate.replacingOccurrences(of: ",", with: ".")) ?? 3.21) }
+    private var insurance: Double { max(0, Double(insuranceRate.replacingOccurrences(of: ",", with: ".")) ?? 0.30) }
+    private var fees: ClosedRange<Double> {
+        let ratio: (Double, Double) = acquisitionType == "new" ? (0.02, 0.03) : (0.07, 0.08)
+        return (amount * ratio.0)...(amount * ratio.1)
+    }
+    private func payment(principal: Double) -> Double {
+        let months = Double(durationYears * 12)
+        let monthlyRate = rate / 1200
+        let loan = max(0, principal)
+        guard loan > 0 else { return 0 }
+        let base = monthlyRate == 0 ? loan / months : loan * monthlyRate / (1 - pow(1 + monthlyRate, -months))
+        return base + loan * insurance / 1200
+    }
+    private var lowerPayment: Double { payment(principal: amount + fees.lowerBound - ownContribution) }
+    private var upperPayment: Double { payment(principal: amount + fees.upperBound - ownContribution) }
+    private var formatter: NumberFormatter {
+        let result = NumberFormatter()
+        result.numberStyle = .currency
+        result.currencyCode = "EUR"
+        result.locale = Locale(identifier: isEnglish ? "en_US" : "fr_FR")
+        result.maximumFractionDigits = 0
+        return result
+    }
+    private func money(_ value: Double) -> String { formatter.string(from: NSNumber(value: value)) ?? "\(Int(value)) €" }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(isEnglish ? "Purchase cost estimate" : "Estimation du coût d’achat").font(.headline)
+                    Text(isEnglish ? "Indicative estimate; confirm figures with a lender or notary." : "Estimation indicative à confirmer auprès d’un prêteur ou d’un notaire.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: "percent")
+                    .foregroundStyle(PFTheme.brand)
+                    .padding(9).background(PFTheme.paleMint, in: Circle())
+            }
+
+            if isRental {
+                if let charges = listing.monthlyCharges?.value {
+                    costRow(isEnglish ? "Advertised monthly charges" : "Charges mensuelles indiquées", value: money(charges) + (isEnglish ? " / month" : " / mois"))
+                }
+                if let tax = listing.propertyTaxAnnual?.value {
+                    costRow(isEnglish ? "Advertised property tax" : "Taxe foncière indiquée", value: money(tax) + (isEnglish ? " / year" : " / an"))
+                }
+                if listing.monthlyCharges?.value == nil && listing.propertyTaxAnnual?.value == nil {
+                    Text(isEnglish ? "No additional cost figures were provided for this rental." : "Aucun autre montant de charges n’est renseigné pour cette location.")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+            } else if amount > 0 {
+                HStack {
+                    Text(isEnglish ? "Property type" : "Type de bien").font(.subheadline)
+                    Spacer()
+                    Picker(isEnglish ? "Property type" : "Type de bien", selection: $acquisitionType) {
+                        Text(isEnglish ? "Existing" : "Ancien").tag("old")
+                        Text(isEnglish ? "New build" : "Neuf").tag("new")
+                        Text(isEnglish ? "Land" : "Terrain").tag("land")
+                    }.labelsHidden()
+                }
+                HStack {
+                    Text(isEnglish ? "Loan term" : "Durée du prêt").font(.subheadline)
+                    Spacer()
+                    Picker(isEnglish ? "Loan term" : "Durée du prêt", selection: $durationYears) {
+                        ForEach([10, 15, 20, 25], id: \.self) { Text("\($0) \(isEnglish ? "years" : "ans")").tag($0) }
+                    }.labelsHidden()
+                }
+                costInput(isEnglish ? "Down payment (€)" : "Apport (€)", value: $downPayment, keyboard: .decimalPad)
+                costInput(isEnglish ? "Annual interest rate (%)" : "Taux annuel (%)", value: $annualRate, keyboard: .decimalPad)
+                costInput(isEnglish ? "Loan insurance (%)" : "Assurance du prêt (%)", value: $insuranceRate, keyboard: .decimalPad)
+                Divider()
+                costRow(isEnglish ? "Estimated notary/acquisition fees" : "Frais d’acquisition estimés", value: "\(money(fees.lowerBound))–\(money(fees.upperBound))")
+                costRow(isEnglish ? "Estimated loan amount" : "Montant emprunté estimé", value: "\(money(max(0, amount + fees.lowerBound - ownContribution)))–\(money(max(0, amount + fees.upperBound - ownContribution)))")
+                HStack(alignment: .firstTextBaseline) {
+                    Text(isEnglish ? "Estimated monthly payment" : "Mensualité estimée").font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Text("\(money(lowerPayment))–\(money(upperPayment)) / \(isEnglish ? "mo" : "mois")")
+                        .font(.subheadline.bold()).foregroundStyle(PFTheme.brand).multilineTextAlignment(.trailing)
+                }
+            } else {
+                Text(isEnglish ? "A purchase price is not available for this listing." : "Le prix d’achat n’est pas renseigné pour cette annonce.")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            }
+
+            if let tax = listing.propertyTaxAnnual?.value { costRow(isEnglish ? "Advertised property tax" : "Taxe foncière indiquée", value: money(tax) + (isEnglish ? " / year" : " / an")) }
+            if let charges = listing.condoChargesMonthly?.value { costRow(isEnglish ? "Advertised condominium charges" : "Charges de copropriété indiquées", value: money(charges) + (isEnglish ? " / month" : " / mois")) }
+            if let charges = listing.condoChargesAnnual?.value { costRow(isEnglish ? "Advertised condominium charges" : "Charges de copropriété indiquées", value: money(charges) + (isEnglish ? " / year" : " / an")) }
+            if let energy = listing.annualEnergyCost?.value { costRow(isEnglish ? "Advertised energy costs" : "Dépenses énergétiques indiquées", value: money(energy) + (isEnglish ? " / year" : " / an")) }
+        }
+        .padding(16)
+        .background(LinearGradient(colors: [PFTheme.paleMint, Color(uiColor: .secondarySystemGroupedBackground)], startPoint: .topLeading, endPoint: .bottomTrailing), in: RoundedRectangle(cornerRadius: 18))
+        .onAppear {
+            if listing.isNewBuild?.value == true { acquisitionType = "new" }
+            else if (listing.propertyType ?? "").localizedCaseInsensitiveContains("terrain") { acquisitionType = "land" }
+        }
+    }
+
+    private func costRow(_ title: String, value: String) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title).font(.subheadline).foregroundStyle(.secondary)
+            Spacer(minLength: 8)
+            Text(value).font(.subheadline.weight(.semibold)).multilineTextAlignment(.trailing)
+        }
+    }
+
+    private func costInput(_ title: String, value: Binding<String>, keyboard: UIKeyboardType) -> some View {
+        HStack {
+            Text(title).font(.subheadline).foregroundStyle(.secondary)
+            Spacer(minLength: 8)
+            TextField("0", text: value)
+                .keyboardType(keyboard)
+                .multilineTextAlignment(.trailing)
+                .frame(maxWidth: 110)
+                .textFieldStyle(.roundedBorder)
+        }
+    }
+}
+
+private struct ListingNearbyMap: View {
+    private enum NearbyLayer: String, CaseIterable, Identifiable {
+        case school, shop, transit, hospital, charging
+        var id: String { rawValue }
+    }
+    private struct NearbyPlace: Identifiable {
+        let id = UUID()
+        let name: String
+        let coordinate: CLLocationCoordinate2D
+    }
+
+    let listing: Listing
+    let language: String
+    @State private var camera: MapCameraPosition = .automatic
+    @State private var propertyCoordinate: CLLocationCoordinate2D?
+    @State private var nearbyPlaces: [NearbyPlace] = []
+    @State private var selectedLayer: NearbyLayer?
+    @State private var status: String?
+    @State private var isLoading = false
+
+    private var isEnglish: Bool { language == "en" }
+    private var locationQuery: String { [listing.postalCode, listing.city, listing.resolvedCountryCode].compactMap { $0 }.joined(separator: ", ") }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            Text(isEnglish ? "Location and nearby places" : "Localisation et lieux à proximité").font(.headline)
+            Text(isEnglish ? "The map uses the city and postal code from the listing when no exact address is provided." : "Sans adresse précise, la carte se base sur la ville et le code postal de l’annonce.")
+                .font(.caption).foregroundStyle(.secondary)
+            if let propertyCoordinate {
+                Map(position: $camera) {
+                    Annotation(isEnglish ? "Property area" : "Secteur du bien", coordinate: propertyCoordinate, anchor: .bottom) {
+                        Image(systemName: "house.fill").font(.caption).foregroundStyle(.white)
+                            .padding(8).background(PFTheme.brand, in: Circle())
+                    }
+                    ForEach(nearbyPlaces) { place in
+                        Annotation(place.name, coordinate: place.coordinate, anchor: .bottom) {
+                            Image(systemName: "mappin.circle.fill").font(.title2).foregroundStyle(.orange)
+                        }
+                    }
+                }
+                .frame(height: 250)
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .mapControls { MapCompass(); MapScaleView() }
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(NearbyLayer.allCases) { layer in
+                            Button { selectedLayer = layer; Task { await loadNearby(layer) } } label: {
+                                Text(layerTitle(layer))
+                                    .font(.caption.weight(.semibold))
+                                    .padding(.horizontal, 11).padding(.vertical, 8)
+                                    .background(selectedLayer == layer ? PFTheme.brand : Color(uiColor: .secondarySystemBackground), in: Capsule())
+                                    .foregroundStyle(selectedLayer == layer ? .white : .primary)
+                            }.buttonStyle(.plain)
+                        }
+                    }
+                }
+                if isLoading { ProgressView(isEnglish ? "Searching nearby…" : "Recherche des lieux proches…").font(.caption) }
+                else if let status { Text(status).font(.caption).foregroundStyle(.secondary) }
+            } else if isLoading {
+                ProgressView(isEnglish ? "Finding the property location…" : "Recherche de la localisation du bien…")
+                    .frame(maxWidth: .infinity).frame(height: 130)
+            } else {
+                Text(isEnglish ? "The listing does not include a usable location." : "La localisation de cette annonce ne permet pas d’afficher la carte.")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            }
+        }
+        .padding(14)
+        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+        .task { await locateProperty() }
+    }
+
+    private func layerTitle(_ layer: NearbyLayer) -> String {
+        switch layer {
+        case .school: return isEnglish ? "Schools" : "Écoles"
+        case .shop: return isEnglish ? "Shops & pharmacies" : "Commerces & pharmacies"
+        case .transit: return isEnglish ? "Public transport" : "Transports"
+        case .hospital: return isEnglish ? "Hospitals" : "Hôpitaux"
+        case .charging: return isEnglish ? "EV charging" : "Bornes électriques"
+        }
+    }
+
+    @MainActor private func locateProperty() async {
+        guard !locationQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        isLoading = true
+        defer { isLoading = false }
+        var request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = locationQuery
+        guard let response = try? await MKLocalSearch(request: request).start(), let coordinate = response.mapItems.first?.placemark.coordinate else {
+            status = isEnglish ? "The location could not be found." : "La localisation n’a pas pu être trouvée."
+            return
+        }
+        propertyCoordinate = coordinate
+        camera = .region(MKCoordinateRegion(center: coordinate, latitudinalMeters: 3000, longitudinalMeters: 3000))
+    }
+
+    @MainActor private func loadNearby(_ layer: NearbyLayer) async {
+        guard let propertyCoordinate else { return }
+        isLoading = true
+        status = nil
+        defer { isLoading = false }
+        var request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = layerTitle(layer)
+        request.region = MKCoordinateRegion(center: propertyCoordinate, latitudinalMeters: 5000, longitudinalMeters: 5000)
+        let categories: [MKPointOfInterestCategory]
+        switch layer {
+        case .school: categories = [.school, .university]
+        case .shop: categories = [.store, .pharmacy, .foodMarket]
+        case .transit: categories = [.publicTransport]
+        case .hospital: categories = [.hospital]
+        case .charging: categories = [.evCharger]
+        }
+        request.pointOfInterestFilter = MKPointOfInterestFilter(including: categories)
+        guard let response = try? await MKLocalSearch(request: request).start() else {
+            status = isEnglish ? "Nearby places are temporarily unavailable." : "Les lieux proches sont temporairement indisponibles."
+            return
+        }
+        nearbyPlaces = response.mapItems.prefix(30).map { item in
+            NearbyPlace(name: item.name ?? layerTitle(layer), coordinate: item.placemark.coordinate)
+        }
+        status = nearbyPlaces.isEmpty
+            ? (isEnglish ? "No results in this area." : "Aucun résultat dans ce secteur.")
+            : (isEnglish ? "\(nearbyPlaces.count) places found nearby." : "\(nearbyPlaces.count) lieux trouvés à proximité.")
+    }
+}
+
 private struct ListingFact: View {
     let symbol: String
     let text: String
@@ -3281,6 +3608,21 @@ private struct ListingFact: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
             .background(Color.teal.opacity(0.09), in: Capsule())
+    }
+}
+
+private struct LocalizedListingTitle: View {
+    let original: String
+    let language: String
+    @State private var translated: String?
+
+    var body: some View {
+        Text(language == "en" ? (translated ?? original) : original)
+            .font(.title3.weight(.semibold))
+            .task(id: language) {
+                guard language == "en", translated == nil else { return }
+                translated = await FreePublicListingTranslator.translate(original)
+            }
     }
 }
 
@@ -6050,6 +6392,7 @@ private struct ProfessionalPortalWebView: View {
 }
 
 private struct ProfessionalPortalWebViewRepresentable: UIViewRepresentable {
+    @AppStorage("partenairefoyer.language") private var appLanguage = "fr"
     let url: URL
     let initialToken: String?
     let onSessionToken: (String) -> Void
@@ -6077,6 +6420,7 @@ private struct ProfessionalPortalWebViewRepresentable: UIViewRepresentable {
         }
         let sessionBridge = """
         if (location.hostname === 'www.partenairefoyer.com' || location.hostname === 'partenairefoyer.com') {
+          localStorage.setItem('language', '\(appLanguage == "en" ? "en" : "fr")');
           \(injectedToken)
           (function () {
             const key = 'pf_pro_app_session_token';
@@ -6108,7 +6452,11 @@ private struct ProfessionalPortalWebViewRepresentable: UIViewRepresentable {
         return webView
     }
 
-    func updateUIView(_ webView: WKWebView, context: Context) {}
+    func updateUIView(_ webView: WKWebView, context: Context) {
+        let language = appLanguage == "en" ? "en" : "fr"
+        let script = "localStorage.setItem('language', '\(language)'); window.dispatchEvent(new CustomEvent('pf:language-change', { detail: { language: '\(language)' } }));"
+        webView.evaluateJavaScript(script)
+    }
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
         private let onSessionToken: (String) -> Void
@@ -9158,6 +9506,7 @@ private struct DashboardItemDetailView: View {
 /// The French source stays in its original record and remains the fallback.
 private struct ListingDescriptionTranslation: View {
     let original: String
+    var language: String = "fr"
     @State private var translatedText: String?
     @State private var showingEnglish = false
     @State private var isTranslating = false
@@ -9170,29 +9519,15 @@ private struct ListingDescriptionTranslation: View {
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
 
-            Button {
-                if translatedText != nil {
-                    showingEnglish.toggle()
-                    return
-                }
-                guard !isTranslating else { return }
-                isTranslating = true
-                translationFailed = false
-                Task {
-                    let result = await FreePublicListingTranslator.translate(original)
-                    isTranslating = false
-                    if let result, !result.isEmpty {
-                        translatedText = result
-                        showingEnglish = true
-                    } else {
-                        translationFailed = true
-                    }
-                }
-            } label: {
+            if language != "en" {
+                Button {
+                    if translatedText != nil { showingEnglish.toggle() }
+                    else { Task { await translateDescription() } }
+                } label: {
                 HStack(spacing: 7) {
                     if isTranslating {
                         ProgressView().controlSize(.small)
-                        Text("Traduction en cours…")
+                        Text(language == "en" ? "Translating…" : "Traduction en cours…")
                     } else {
                         Label(
                             translatedText != nil && showingEnglish
@@ -9206,16 +9541,38 @@ private struct ListingDescriptionTranslation: View {
             }
             .buttonStyle(.bordered)
             .disabled(isTranslating)
+            }
 
-            Text("La description publique est envoyée à un service de traduction gratuit. Le texte français reste inchangé.")
+            Text(language == "en"
+                 ? "The public description is translated using a free translation service. The original text is preserved."
+                 : "La description publique est envoyée à un service de traduction gratuit. Le texte français reste inchangé.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
 
             if translationFailed {
-                Text("Traduction indisponible pour le moment ; le texte original est conservé.")
+                Text(language == "en" ? "Translation is unavailable right now; the original text is shown." : "Traduction indisponible pour le moment ; le texte original est conservé.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        }
+        .task(id: language) {
+            if language == "en" { await translateDescription() }
+            else { showingEnglish = false }
+        }
+    }
+
+    @MainActor private func translateDescription() async {
+        guard !isTranslating else { return }
+        if let translatedText { showingEnglish = true; return }
+        isTranslating = true
+        translationFailed = false
+        let result = await FreePublicListingTranslator.translate(original)
+        isTranslating = false
+        if let result, !result.isEmpty {
+            translatedText = result
+            showingEnglish = true
+        } else {
+            translationFailed = true
         }
     }
 }

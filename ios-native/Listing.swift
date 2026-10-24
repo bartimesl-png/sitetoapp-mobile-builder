@@ -14,6 +14,23 @@ enum WixImageSource {
     }
 }
 
+struct WixOptionalNumber: Decodable, Hashable {
+    let value: Double?
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() { value = nil }
+        else if let number = try? container.decode(Double.self) { value = number }
+        else if let string = try? container.decode(String.self) {
+            let normalized = string.trimmingCharacters(in: .whitespacesAndNewlines)
+                .replacingOccurrences(of: "€", with: "")
+                .replacingOccurrences(of: " ", with: "")
+                .replacingOccurrences(of: ",", with: ".")
+            value = Double(normalized)
+        } else { value = nil }
+    }
+}
+
 /// Public listing DTO returned by the existing PartenaireFoyer Supabase feed.
 /// Unknown fields from the API are intentionally ignored for forward compatibility.
 struct Listing: Decodable, Identifiable, Hashable {
@@ -46,6 +63,14 @@ struct Listing: Decodable, Identifiable, Hashable {
     let lastSeenAt: String?
     let previousPrice: Double?
     let lastPriceDropDate: String?
+    // Optional public CMS figures used by the native purchase-cost overview.
+    // These remain optional so older listing feeds continue to decode safely.
+    var monthlyCharges: WixOptionalNumber? = nil
+    var propertyTaxAnnual: WixOptionalNumber? = nil
+    var annualEnergyCost: WixOptionalNumber? = nil
+    var condoChargesMonthly: WixOptionalNumber? = nil
+    var condoChargesAnnual: WixOptionalNumber? = nil
+    var isNewBuild: WixFlexibleBool? = nil
 
     var canContactImportedProfessional: Bool {
         ownerType == "professional_imported" && importedProId?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
@@ -139,7 +164,7 @@ struct WixPublicProfessionalsResponse: Decodable {
 /// Wix CMS fields are not schema-enforced and some published profile records
 /// store boolean flags as strings (for example, "false"). Accept both forms
 /// so one legacy item cannot invalidate the entire professional directory.
-struct WixFlexibleBool: Decodable {
+struct WixFlexibleBool: Decodable, Hashable {
     let value: Bool?
 
     init(from decoder: Decoder) throws {

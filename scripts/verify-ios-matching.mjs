@@ -124,6 +124,12 @@ const viewInventory = matrix.split("## Inventaire SwiftUI complet")[1] ?? "";
 const matrixViews = [...viewInventory.matchAll(/^- `([A-Za-z0-9_]+)`/gm)].map((match) => match[1]);
 assert.equal(declaredRoutes, 207, "the parity matrix must retain all inventoried Wix route declarations");
 assert.deepEqual(matrixViews, sourceViews, "the SwiftUI view list in the parity matrix must match RootView.swift");
+const englishStrings = await readFile(new URL("../ios-native/en.lproj/Localizable.strings", import.meta.url), "utf8");
+assert.ok(source.includes("ListingDetailView(listing: listing") && source.includes("struct PropertyCostEstimator: View") &&
+  source.includes("ForEach([10, 15, 20, 25]") && source.includes("struct ListingNearbyMap: View") &&
+  source.includes("case .hospital: categories = [.hospital]") && source.includes("localStorage.setItem('language'") &&
+  englishStrings.includes('"Accueil" = "Home";') && englishStrings.includes('"Conditions Générales d’Utilisation" = "Terms of Use";'),
+  "native listing details must retain SwiftUI, purchase estimates, nearby POI layers, and persistent bilingual web/app language support");
 const orderingSource = listingsServiceSource.slice(
   listingsServiceSource.indexOf("private enum ListingCatalogOrdering"),
   listingsServiceSource.indexOf("@MainActor\nfinal class ClassifiedAdsService"),
@@ -253,7 +259,7 @@ assert.ok(source.includes("configuration.websiteDataStore = .default()"),
 const homeDashboard = source.slice(source.indexOf("private struct HomeDashboardView"), source.indexOf("private struct NativeEstimationRequestView"));
 assert.ok(homeDashboard.includes('homeActionCard("Professionnels"') &&
   homeDashboard.includes('selectedTab = 3') &&
-  source.includes('.tabItem { Label("Professionnels", systemImage: "person.2") }'),
+  source.includes('.tabItem { Label(appLanguage == "en" ? "Professionals" : "Professionnels", systemImage: "person.2") }'),
   "the Home professional shortcut and persistent tab must open the same directory");
 assert.ok(homeDashboard.includes('LazyVGrid(columns:') &&
   homeDashboard.includes('homeActionCard("Petites annonces"') &&
