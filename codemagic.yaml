@@ -41,7 +41,7 @@ workflows:
         script: |
           npx cap sync android
 
-      - name: Compiler APK Android
+      - name: Compiler APK
         script: |
           cd android
           chmod +x gradlew
@@ -115,12 +115,19 @@ workflows:
 
 
   # ============================================================
-  # WORKFLOW iOS NATIF PARTENAIREFOYER
+  # WORKFLOW iOS NATIF PARTENAIREFOYER — build avec compilation Swift incrémentale
   # ============================================================
 
   partenairefoyer-ios-native:
 
     name: PartenaireFoyer iOS natif
+
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: "feature/ios-full-partenairefoyer-portal"
+      cancel_previous_builds: true
 
     max_build_duration: 120
 
@@ -130,7 +137,9 @@ workflows:
       app_store_connect: partenairefoyer_app_store_connect
 
     environment:
-      xcode: latest
+      xcode: 26.5
+      groups:
+        - firebase_ios
 
       ios_signing:
         distribution_type: app_store
@@ -147,22 +156,38 @@ workflows:
           xcode-project use-profiles \
             --project "$CM_BUILD_DIR/$XCODE_PROJECT"
 
-      - name: Préparer les assets iOS manquants
+      - name: Préparer la configuration Firebase iOS
+        script: |
+          chmod +x ./scripts/prepare-ios-firebase.sh
+          ./scripts/prepare-ios-firebase.sh
+
+      - name: Préparer le logo et l’icône iOS
         script: |
           chmod +x ./scripts/prepare-ios-assets.sh
-          export PARTENAIREFOYER_LOGO_URL="https://static.wixstatic.com/media/476a15_d601a17fe7c4406aac35fac85d309948~mv2.jpg"
           ./scripts/prepare-ios-assets.sh
 
       - name: Compiler l’IPA iOS
         script: |
+          set -o pipefail
           xcode-project build-ipa \
             --project "$CM_BUILD_DIR/$XCODE_PROJECT" \
-            --scheme "$XCODE_SCHEME"
+            --scheme "$XCODE_SCHEME" \
+            --archive-xcargs="SWIFT_ENABLE_EXPLICIT_MODULES=NO SWIFT_COMPILATION_MODE=incremental SWIFT_OPTIMIZATION_LEVEL=-Onone" \
+            --disable-xcpretty \
+            --verbose 2>&1 | tee /tmp/partenairefoyer-xcode-build.log
+          BUILD_STATUS=${PIPESTATUS[0]}
+          if [ "$BUILD_STATUS" -ne 0 ]; then
+            echo "Diagnostics Xcode pertinents :"
+            grep -nE "(error:|fatal error:|warning:|SwiftDriver|SwiftCompile|signal [0-9]+|unable to)" /tmp/partenairefoyer-xcode-build.log | tail -n 100 || true
+          fi
+          exit "$BUILD_STATUS"
 
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
 
+    # Téléverse l'IPA dans App Store Connect pour la sélection du build.
+    # Ne soumet pas à la bêta TestFlight et ne publie pas sur l'App Store.
     publishing:
       app_store_connect:
         auth: integration

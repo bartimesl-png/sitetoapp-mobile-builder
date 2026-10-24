@@ -13,6 +13,11 @@
 		A10000000000000000000005 /* FavoritesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000005 /* FavoritesStore.swift */; };
 		A10000000000000000000006 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006 /* RootView.swift */; };
 		C10000000000000000000002 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000002 /* Assets.xcassets */; };
+		A10000000000000000000008 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000010 /* AppDelegate.swift */; };
+		A10000000000000000000009 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = B20000000000000000000001 /* FirebaseMessaging */; };
+		A10000000000000000000010 /* WixAuthStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000013 /* WixAuthStore.swift */; };
+		C10000000000000000000003 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000011 /* GoogleService-Info.plist */; };
+		C10000000000000000000004 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000004 /* Localizable.strings */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -25,13 +30,20 @@
 		A20000000000000000000007 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = PartenaireFoyer/Info.plist; sourceTree = "<group>"; };
 		C20000000000000000000002 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = PartenaireFoyer/Assets.xcassets; sourceTree = "<group>"; };
 		A20000000000000000000008 /* PartenaireFoyer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PartenaireFoyer.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A20000000000000000000010 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		A20000000000000000000011 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = PartenaireFoyer/GoogleService-Info.plist; sourceTree = "<group>"; };
+		A20000000000000000000012 /* PartenaireFoyer.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PartenaireFoyer/PartenaireFoyer.entitlements; sourceTree = "<group>"; };
+		A20000000000000000000013 /* WixAuthStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WixAuthStore.swift; sourceTree = "<group>"; };
+		C20000000000000000000005 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		A30000000000000000000001 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
-			files = ();
+			files = (
+				A10000000000000000000009 /* FirebaseMessaging in Frameworks */,
+			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
@@ -42,6 +54,8 @@
 			children = (
 				A40000000000000000000002 /* Sources */,
 				A20000000000000000000007 /* Info.plist */,
+				A20000000000000000000011 /* GoogleService-Info.plist */,
+				A20000000000000000000012 /* PartenaireFoyer.entitlements */,
 				C20000000000000000000002 /* Assets.xcassets */,
 				A40000000000000000000003 /* Products */,
 			);
@@ -57,8 +71,19 @@
 				A20000000000000000000004 /* ListingsService.swift */,
 				A20000000000000000000005 /* FavoritesStore.swift */,
 				A20000000000000000000006 /* RootView.swift */,
+				A20000000000000000000013 /* WixAuthStore.swift */,
+				A20000000000000000000010 /* AppDelegate.swift */,
+				C20000000000000000000004 /* Localizable.strings */,
 			);
 			path = .;
+			sourceTree = "<group>";
+		};
+		C20000000000000000000004 /* Localizable.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				C20000000000000000000005 /* en */,
+			);
+			name = Localizable.strings;
 			sourceTree = "<group>";
 		};
 
@@ -83,6 +108,9 @@
 			);
 			buildRules = ();
 			dependencies = ();
+			packageProductDependencies = (
+				B20000000000000000000001 /* FirebaseMessaging */,
+			);
 			name = PartenaireFoyer;
 			productName = PartenaireFoyer;
 			productReference = A20000000000000000000008 /* PartenaireFoyer.app */;
@@ -115,6 +143,9 @@
 			productRefGroup = A40000000000000000000003 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
+			packageReferences = (
+				B10000000000000000000001 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+			);
 			targets = (
 				A50000000000000000000001 /* PartenaireFoyer */,
 			);
@@ -127,6 +158,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				C10000000000000000000002 /* Assets.xcassets in Resources */,
+				C10000000000000000000003 /* GoogleService-Info.plist in Resources */,
+				C10000000000000000000004 /* Localizable.strings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -143,6 +176,8 @@
 				A10000000000000000000004 /* ListingsService.swift in Sources */,
 				A10000000000000000000005 /* FavoritesStore.swift in Sources */,
 				A10000000000000000000006 /* RootView.swift in Sources */,
+				A10000000000000000000010 /* WixAuthStore.swift in Sources */,
+				A10000000000000000000008 /* AppDelegate.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -154,7 +189,7 @@
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ENABLE_MODULES = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.4;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
 			};
@@ -166,9 +201,12 @@
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ENABLE_MODULES = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.4;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
+				SWIFT_COMPILATION_MODE = incremental;
+				SWIFT_ENABLE_EXPLICIT_MODULES = NO;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
 			name = Release;
 		};
@@ -178,9 +216,11 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_ENTITLEMENTS = PartenaireFoyer/PartenaireFoyer.entitlements;
+				APS_ENVIRONMENT = development;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = PartenaireFoyer/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.4;
 				PRODUCT_BUNDLE_IDENTIFIER = com.partenairefoyer.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -195,14 +235,19 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_ENTITLEMENTS = PartenaireFoyer/PartenaireFoyer.entitlements;
+				APS_ENVIRONMENT = production;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = PartenaireFoyer/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.4;
 				PRODUCT_BUNDLE_IDENTIFIER = com.partenairefoyer.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
+				SWIFT_COMPILATION_MODE = incremental;
+				SWIFT_ENABLE_EXPLICIT_MODULES = NO;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
 			name = Release;
 		};
@@ -229,6 +274,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		B10000000000000000000001 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 12.19.2;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		B20000000000000000000001 /* FirebaseMessaging */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B10000000000000000000001 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseMessaging;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = A80000000000000000000001 /* Project object */;
 }
