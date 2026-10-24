@@ -278,7 +278,7 @@ Contrôle visuel en lecture seule du site public dans un navigateur, sans connex
 
 ### Fiches, formulaires et demandes
 
-- The property catalogue opens the matching public Wix announcement page in the in-app WKWebView so published detail-page changes are used without an iOS rebuild.
+- `ListingDetailView`
 - `NativeClassifiedAdDetailView`
 - `NativePrivatePropertyForm`
 - `NativeProfessionalPropertyForm`
@@ -358,7 +358,7 @@ Les trois parcours demandés sont trois flux CMS distincts dans Wix. Ils ne part
 
 ## Inventaire SwiftUI complet
 
-Les **61 déclarations `View`** de `RootView.swift` au moment de l’audit :
+Les **60 déclarations `View`** de `RootView.swift` au moment de l’audit :
 
 - `RootView`
 - `NativeSeasonalStaysView`
@@ -384,7 +384,6 @@ Les **61 déclarations `View`** de `RootView.swift` au moment de l’audit :
 - `NativeFavoritesView`
 - `ListingRow`
 - `ListingImage`
-- `WebsiteListingDetailView`
 - `ListingDetailView`
 - `ListingFact`
 - `HomeDashboardView`

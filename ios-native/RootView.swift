@@ -2087,7 +2087,7 @@ private struct NativeCatalogContentView: View {
                 else { await buyerSearches.reload() }
             }
             .navigationDestination(for: Listing.self) { listing in
-                WebsiteListingDetailView(listing: listing)
+                ListingDetailView(listing: listing, listingsService: service, professionalsService: professionalsService)
             }
             .navigationDestination(for: ClassifiedAd.self) { ad in
                 NativeClassifiedAdDetailView(ad: ad)
@@ -2775,7 +2775,7 @@ private struct NativeFavoritesView: View {
                 }
             }
             .listStyle(.insetGrouped)
-            .navigationDestination(for: Listing.self) { WebsiteListingDetailView(listing: $0) }
+            .navigationDestination(for: Listing.self) { ListingDetailView(listing: $0, listingsService: service, professionalsService: professionalsService) }
             .navigationDestination(for: ClassifiedAd.self) { NativeClassifiedAdDetailView(ad: $0) }
             .navigationDestination(for: String.self) { id in
                 if let professional = professionalsService.professionals.first(where: { $0.id == id }) {
@@ -2898,33 +2898,6 @@ private struct ListingImage: View {
         Rectangle()
             .fill(Color.teal.opacity(0.09))
             .overlay(Image(systemName: "house.fill").font(.title2).foregroundStyle(.teal.opacity(0.6)))
-    }
-}
-
-/// Opens the public Wix detail page inside the app so the native catalogue uses
-/// the same live announcement page as the website.
-private struct WebsiteListingDetailView: View {
-    let listing: Listing
-    @StateObject private var auth = WixAuthStore.shared
-
-    var body: some View {
-        Group {
-            if let url = listing.publicWebsiteDetailURL {
-                ProfessionalPortalWebView(
-                    url: url,
-                    initialToken: auth.professionalPortalToken,
-                    title: "Annonce"
-                ) { token in
-                    auth.adoptProfessionalPortalSession(token: token)
-                }
-            } else {
-                ContentUnavailableView(
-                    "Annonce indisponible",
-                    systemImage: "exclamationmark.magnifyingglass",
-                    description: Text("La fiche complète n’a pas pu être ouverte. Réessayez depuis la liste des annonces.")
-                )
-            }
-        }
     }
 }
 

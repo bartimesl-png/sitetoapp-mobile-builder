@@ -94,24 +94,6 @@ struct Listing: Decodable, Identifiable, Hashable {
         CountryCatalog.code(countryCode ?? country ?? country_code) ?? CountryCatalog.legacyCode(postalCode: postalCode)
     }
 
-    /// Prefer the live PartenaireFoyer detail page so changes published on Wix
-    /// are visible in the app without waiting for a new iOS release. Imported
-    /// listings whose source URL points to another portal use the site's
-    /// public /annonce/:slug-or-id route instead.
-    var publicWebsiteDetailURL: URL? {
-        if let sourceUrl,
-           let sourceURL = URL(string: sourceUrl),
-           sourceURL.scheme?.lowercased() == "https",
-           let host = sourceURL.host?.lowercased(),
-           host == "partenairefoyer.com" || host.hasSuffix(".partenairefoyer.com") {
-            return sourceURL
-        }
-
-        let websiteID = id.hasPrefix("wix-pro-") ? String(id.dropFirst("wix-pro-".count)) : id
-        guard websiteID.range(of: "^[A-Za-z0-9_-]{1,240}$", options: .regularExpression) != nil else { return nil }
-        return URL(string: "https://www.partenairefoyer.com/annonce/\(websiteID)")
-    }
-
     var formattedPrice: String {
         guard let price else { return "Prix sur demande" }
         return price.formatted(.currency(code: "EUR").locale(Locale(identifier: "fr_FR")))
