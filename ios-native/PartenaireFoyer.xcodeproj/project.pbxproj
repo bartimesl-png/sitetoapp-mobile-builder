@@ -34,7 +34,7 @@
 		A20000000000000000000011 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = PartenaireFoyer/GoogleService-Info.plist; sourceTree = "<group>"; };
 		A20000000000000000000012 /* PartenaireFoyer.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PartenaireFoyer/PartenaireFoyer.entitlements; sourceTree = "<group>"; };
 		A20000000000000000000013 /* WixAuthStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WixAuthStore.swift; sourceTree = "<group>"; };
-		C20000000000000000000005 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = Localizable.strings; sourceTree = "<group>"; };
+		C20000000000000000000005 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
