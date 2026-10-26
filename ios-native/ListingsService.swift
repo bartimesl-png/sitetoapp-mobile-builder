@@ -39,7 +39,7 @@ final class ListingsService: ObservableObject {
         pendingSources = 2
         sourceFailures = []
 
-        // The Wix catalog finishes before optional imported feeds start.
+        // Load the imported catalog alongside Wix so its first pages appear without waiting.
         Task { @MainActor [weak self] in
             guard let self else { return }
             do {
@@ -62,6 +62,7 @@ final class ListingsService: ObservableObject {
                 self.finish(.professional, items: nil, failure: "les biens de professionnels (\(error.localizedDescription))")
             }
         }
+        startImportedLoad()
     }
 
     private func appendSourcePage(_ source: Source, _ page: [Listing]) {
@@ -81,7 +82,7 @@ final class ListingsService: ObservableObject {
             professionalSource = (professionalSource ?? []) + fresh
         }
         hasLoaded = true
-        publishCatalog(ordered: false)
+        publishCatalog()
     }
 
     private func finish(_ source: Source, items: [Listing]?, failure: String?) {
@@ -103,7 +104,6 @@ final class ListingsService: ObservableObject {
         guard pendingSources == 0 else { return }
         isLoading = false
         hasLoaded = true
-        startImportedLoad()
     }
 
     private func startImportedLoad() {
@@ -120,7 +120,7 @@ final class ListingsService: ObservableObject {
                     guard !fresh.isEmpty else { return }
                     accumulated.append(contentsOf: fresh)
                     self.importedSource = accumulated
-                    self.appendImportedPage(fresh)
+                    self.publishCatalog()
                 }
                 self.finishImported(items: accumulated, failure: nil)
             } catch {
@@ -148,20 +148,15 @@ final class ListingsService: ObservableObject {
         }
     }
 
-    private func appendImportedPage(_ page: [Listing]) {
-        var seen = Set(listings.map(\.id))
-        let fresh = page.filter { seen.insert($0.id).inserted }
-        guard !fresh.isEmpty else { return }
-        listings.append(contentsOf: ListingCatalogOrdering.ordered(fresh))
-        hasLoaded = true
-    }
-
-    private func publishCatalog(ordered: Bool = true) {
+    private func publishCatalog() {
         var seen = Set<String>()
         let unique = ((importedSource ?? []) + (privateOwnerSource ?? []) + (professionalSource ?? []))
             .filter { seen.insert($0.id).inserted }
-        listings = ordered ? ListingCatalogOrdering.ordered(unique) : unique
-        if !listings.isEmpty { hasLoaded = true }
+        listings = ListingCatalogOrdering.ordered(unique)
+        if !listings.isEmpty {
+            hasLoaded = true
+            errorMessage = nil
+        }
     }
 
     private func loadImportedListings(onPage: @escaping @MainActor ([Listing]) -> Void) async throws {
