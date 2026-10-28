@@ -4042,10 +4042,20 @@ private struct CatalogPhotoCard: View {
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
-            Image(image).resizable().scaledToFill()
-                .frame(maxWidth: .infinity, minHeight: 142, maxHeight: 142).clipped()
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(LinearGradient(colors: [PFTheme.deepGreen, Color.teal], startPoint: .topLeading, endPoint: .bottomTrailing))
                 .allowsHitTesting(false)
-            LinearGradient(colors: [.clear, .black.opacity(0.78)], startPoint: .center, endPoint: .bottom)
+            Circle()
+                .fill(.white.opacity(0.06))
+                .frame(width: 150, height: 150)
+                .offset(x: 150, y: -34)
+                .allowsHitTesting(false)
+            Image(systemName: symbol)
+                .font(.system(size: 72, weight: .light))
+                .foregroundStyle(.white.opacity(0.14))
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .padding(.trailing, 20)
+                .padding(.bottom, 52)
                 .allowsHitTesting(false)
             HStack(alignment: .bottom, spacing: 10) {
                 Image(systemName: symbol).font(.headline.weight(.semibold))
