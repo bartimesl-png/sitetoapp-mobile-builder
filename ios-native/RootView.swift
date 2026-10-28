@@ -8438,7 +8438,7 @@ private struct NativeProfileShowcase: View {
     }
 }
 
-private private struct NativeBackButtonModifier: ViewModifier {
+private struct NativeBackButtonModifier: ViewModifier {
     @Environment(\.dismiss) private var dismiss
 
     func body(content: Content) -> some View {
@@ -8454,8 +8454,9 @@ private private struct NativeBackButtonModifier: ViewModifier {
             }
         }
     }
+}
 
-struct NativeProfileImage: View {
+private struct NativeProfileImage: View {
     let source: String
     let fallback: String
 
