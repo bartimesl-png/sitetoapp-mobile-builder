@@ -21,6 +21,8 @@ final class ListingsService: ObservableObject {
     private var importedSource: [Listing]?
     private var privateOwnerSource: [Listing]?
     private var professionalSource: [Listing]?
+    private var catalogPublicationTask: Task<Void, Never>?
+    private var catalogRevision = 0
     private var pendingSources = 0
     private var sourceFailures: [String] = []
 
@@ -149,13 +151,39 @@ final class ListingsService: ObservableObject {
     }
 
     private func publishCatalog() {
-        var seen = Set<String>()
-        let unique = ((importedSource ?? []) + (privateOwnerSource ?? []) + (professionalSource ?? []))
-            .filter { seen.insert($0.id).inserted }
-        listings = ListingCatalogOrdering.ordered(unique)
-        if !listings.isEmpty {
-            hasLoaded = true
-            errorMessage = nil
+        catalogRevision &+= 1
+        let revision = catalogRevision
+        let snapshot = CatalogPublicationInput(
+            imported: importedSource ?? [],
+            privateOwner: privateOwnerSource ?? [],
+            professional: professionalSource ?? []
+        )
+
+        // Pagination can deliver several pages in quick succession. Coalesce
+        // them so a large catalogue is merged and sorted once per burst, and
+        // keep all of that work off the main actor used by SwiftUI.
+        catalogPublicationTask?.cancel()
+        catalogPublicationTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 120_000_000)
+            guard !Task.isCancelled else { return }
+
+            let publication = await Task.detached(priority: .utility) {
+                var seen = Set<String>()
+                let unique = (snapshot.imported + snapshot.privateOwner + snapshot.professional)
+                    .filter { seen.insert($0.id).inserted }
+                return CatalogPublicationOutput(listings: ListingCatalogOrdering.ordered(unique))
+            }.value
+
+            guard !Task.isCancelled, let self, self.catalogRevision == revision else { return }
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                self.listings = publication.listings
+            }
+            if !self.listings.isEmpty {
+                self.hasLoaded = true
+                self.errorMessage = nil
+            }
         }
     }
 
@@ -197,6 +225,16 @@ final class ListingsService: ObservableObject {
             }
         }
     }
+}
+
+private struct CatalogPublicationInput: @unchecked Sendable {
+    let imported: [Listing]
+    let privateOwner: [Listing]
+    let professional: [Listing]
+}
+
+private struct CatalogPublicationOutput: @unchecked Sendable {
+    let listings: [Listing]
 }
 
 /// Native equivalent of the website's property promotion cycle.

@@ -6,6 +6,7 @@ import UIKit
 import SafariServices
 import WebKit
 import MapKit
+import ImageIO
 
 private enum PFTheme {
     static let brand = Color(red: 0.02, green: 0.43, blue: 0.34)
@@ -1694,7 +1695,13 @@ private struct NativeCatalogContentView: View {
         let mileageMaximum = Double(classifiedMileageMax.replacingOccurrences(of: ",", with: "."))
         let usesVehicleFilters = classifiedCategory == "Auto / Moto — accessoires"
         let filtered = classifiedAds.ads.filter { ad in
-            ad.resolvedCountryCode == searchCountryCode &&
+            let needsAttributes = !query.isEmpty ||
+                (classifiedAttributeKey != "Aucun" && !classifiedAttributeValue.isEmpty) ||
+                (usesVehicleFilters && (!classifiedBrand.isEmpty || !classifiedModel.isEmpty ||
+                    !classifiedEnergy.isEmpty || !classifiedGearbox.isEmpty || yearMinimum != nil ||
+                    yearMaximum != nil || mileageMaximum != nil))
+            let attributes = needsAttributes ? (attributeDictionary(ad) ?? [:]) : [:]
+            return ad.resolvedCountryCode == searchCountryCode &&
             (query.isEmpty ||
              ad.title.localizedCaseInsensitiveContains(query) ||
              (ad.category ?? "").localizedCaseInsensitiveContains(query) ||
@@ -1702,8 +1709,8 @@ private struct NativeCatalogContentView: View {
              (ad.listingTypeLabel ?? "").localizedCaseInsensitiveContains(query) ||
              (ad.condition ?? "").localizedCaseInsensitiveContains(query) ||
              (ad.importedAttributesJSON ?? "").localizedCaseInsensitiveContains(query) ||
-             attributeValue("brand", ad: ad).localizedCaseInsensitiveContains(query) ||
-             attributeValue("model", ad: ad).localizedCaseInsensitiveContains(query) ||
+             attributeValue("brand", attributes: attributes).localizedCaseInsensitiveContains(query) ||
+             attributeValue("model", attributes: attributes).localizedCaseInsensitiveContains(query) ||
              (ad.city ?? "").localizedCaseInsensitiveContains(query) ||
              (ad.postalCode ?? "").localizedCaseInsensitiveContains(query) ||
              (ad.description ?? "").localizedCaseInsensitiveContains(query)) &&
@@ -1716,14 +1723,14 @@ private struct NativeCatalogContentView: View {
             (minimum.map { minimumPrice in ad.price.map { $0 >= minimumPrice } ?? false } ?? true) &&
             (maximum.map { maximumPrice in ad.price.map { $0 <= maximumPrice } ?? false } ?? true) &&
             (classifiedAttributeKey == "Aucun" || classifiedAttributeValue.isEmpty ||
-                attributeValue(classifiedAttributeKey, ad: ad).localizedCaseInsensitiveContains(classifiedAttributeValue)) &&
-            (!usesVehicleFilters || classifiedBrand.isEmpty || attributeValue("brand", ad: ad).localizedCaseInsensitiveContains(classifiedBrand)) &&
-            (!usesVehicleFilters || classifiedModel.isEmpty || attributeValue("model", ad: ad).localizedCaseInsensitiveContains(classifiedModel)) &&
-            (!usesVehicleFilters || classifiedEnergy.isEmpty || attributeValue("energy", ad: ad).localizedCaseInsensitiveContains(classifiedEnergy)) &&
-            (!usesVehicleFilters || classifiedGearbox.isEmpty || attributeValue("gearbox", ad: ad).localizedCaseInsensitiveContains(classifiedGearbox)) &&
-            (!usesVehicleFilters || (yearMinimum.map { minimumYear in Double(attributeValue("year", ad: ad)).map { $0 >= minimumYear } ?? false } ?? true)) &&
-            (!usesVehicleFilters || (yearMaximum.map { maximumYear in Double(attributeValue("year", ad: ad)).map { $0 <= maximumYear } ?? false } ?? true)) &&
-            (!usesVehicleFilters || (mileageMaximum.map { maximumMileage in Double(attributeValue("mileage", ad: ad)).map { $0 <= maximumMileage } ?? false } ?? true))
+                attributeValue(classifiedAttributeKey, attributes: attributes).localizedCaseInsensitiveContains(classifiedAttributeValue)) &&
+            (!usesVehicleFilters || classifiedBrand.isEmpty || attributeValue("brand", attributes: attributes).localizedCaseInsensitiveContains(classifiedBrand)) &&
+            (!usesVehicleFilters || classifiedModel.isEmpty || attributeValue("model", attributes: attributes).localizedCaseInsensitiveContains(classifiedModel)) &&
+            (!usesVehicleFilters || classifiedEnergy.isEmpty || attributeValue("energy", attributes: attributes).localizedCaseInsensitiveContains(classifiedEnergy)) &&
+            (!usesVehicleFilters || classifiedGearbox.isEmpty || attributeValue("gearbox", attributes: attributes).localizedCaseInsensitiveContains(classifiedGearbox)) &&
+            (!usesVehicleFilters || (yearMinimum.map { minimumYear in Double(attributeValue("year", attributes: attributes)).map { $0 >= minimumYear } ?? false } ?? true)) &&
+            (!usesVehicleFilters || (yearMaximum.map { maximumYear in Double(attributeValue("year", attributes: attributes)).map { $0 <= maximumYear } ?? false } ?? true)) &&
+            (!usesVehicleFilters || (mileageMaximum.map { maximumMileage in Double(attributeValue("mileage", attributes: attributes)).map { $0 <= maximumMileage } ?? false } ?? true))
         }
         switch classifiedSort {
         case "Catégorie":
@@ -1849,8 +1856,8 @@ private struct NativeCatalogContentView: View {
             : "Critère : \(label)"
     }
 
-    private func attributeValue(_ key: String, ad: ClassifiedAd) -> String {
-        guard let value = attributeDictionary(ad)?[key], !(value is NSNull) else { return "" }
+    private func attributeValue(_ key: String, attributes: [String: Any]) -> String {
+        guard let value = attributes[key], !(value is NSNull) else { return "" }
         return String(describing: value)
     }
 
@@ -1860,6 +1867,11 @@ private struct NativeCatalogContentView: View {
     }
 
     var body: some View {
+        // Each result set is filtered/sorted once for this render instead of
+        // being recomputed for the count, empty state, and rows independently.
+        let visibleListings = catalogSection == .realEstate ? filteredListings : []
+        let visibleClassifiedAds = catalogSection == .classifiedAds ? filteredClassifiedAds : []
+        let visibleBuyerSearches = catalogSection == .buyerSearches ? filteredBuyerSearches : []
         NavigationStack {
             List {
                 if catalogSection == .realEstate {
@@ -1873,7 +1885,7 @@ private struct NativeCatalogContentView: View {
                     }
                     Section {
                         HStack {
-                            Text("\(filteredListings.count) bien\(filteredListings.count > 1 ? "s" : "")")
+                            Text("\(visibleListings.count) bien\(visibleListings.count > 1 ? "s" : "")")
                                 .font(.footnote).foregroundStyle(.secondary)
                             Spacer()
                             Menu {
@@ -1944,7 +1956,7 @@ private struct NativeCatalogContentView: View {
                                 .navigationBarTitleDisplayMode(.inline)
                                 .toolbar {
                                     ToolbarItem(placement: .cancellationAction) { Button("Fermer") { showPropertyFilters = false } }
-                                    ToolbarItem(placement: .confirmationAction) { Button("Voir \(filteredListings.count)") { showPropertyFilters = false } }
+                                    ToolbarItem(placement: .confirmationAction) { Button("Voir \(visibleListings.count)") { showPropertyFilters = false } }
                                 }
                             }
                             .presentationDetents([.large])
@@ -1984,10 +1996,10 @@ private struct NativeCatalogContentView: View {
                             Label(error, systemImage: "wifi.exclamationmark").font(.footnote).foregroundStyle(.orange)
                             Button("Réessayer") { Task { await service.reload() } }
                         }
-                    } else if filteredListings.isEmpty {
+                    } else if visibleListings.isEmpty {
                         ContentUnavailableView.search(text: searchText)
                     } else {
-                        ForEach(filteredListings) { listing in
+                        ForEach(visibleListings) { listing in
                             NavigationLink(value: listing) {
                                 ListingRow(listing: listing, isFavorite: favorites.contains(listing)) {
                                     favorites.toggle(listing)
@@ -2014,7 +2026,7 @@ private struct NativeCatalogContentView: View {
                     }
                     Section {
                         HStack {
-                            Text("\(filteredClassifiedAds.count) annonce\(filteredClassifiedAds.count > 1 ? "s" : "")")
+                            Text("\(visibleClassifiedAds.count) annonce\(visibleClassifiedAds.count > 1 ? "s" : "")")
                                 .font(.footnote).foregroundStyle(.secondary)
                             Spacer()
                             Menu {
@@ -2040,7 +2052,7 @@ private struct NativeCatalogContentView: View {
                             Label(error, systemImage: "wifi.exclamationmark").font(.footnote).foregroundStyle(.orange)
                             Button("Réessayer") { Task { await classifiedAds.reload() } }
                         }
-                    } else if filteredClassifiedAds.isEmpty {
+                    } else if visibleClassifiedAds.isEmpty {
                         ContentUnavailableView {
                             Label("Aucune petite annonce trouvée", systemImage: "tag")
                         } description: {
@@ -2052,7 +2064,7 @@ private struct NativeCatalogContentView: View {
                             }
                         }
                     } else {
-                        ForEach(filteredClassifiedAds) { ad in
+                        ForEach(visibleClassifiedAds) { ad in
                             NavigationLink(value: ad) {
                                 ClassifiedAdRow(ad: ad, isFavorite: favorites.contains(ad)) {
                                     favorites.toggle(ad)
@@ -2071,7 +2083,7 @@ private struct NativeCatalogContentView: View {
                         .listRowBackground(Color.teal.opacity(0.07))
                     }
                     Section {
-                        Text("\(filteredBuyerSearches.count) demande\(filteredBuyerSearches.count > 1 ? "s" : "") active\(filteredBuyerSearches.count > 1 ? "s" : "")")
+                        Text("\(visibleBuyerSearches.count) demande\(visibleBuyerSearches.count > 1 ? "s" : "") active\(visibleBuyerSearches.count > 1 ? "s" : "")")
                             .font(.footnote).foregroundStyle(.secondary)
                     }
                     if buyerSearches.isLoading && buyerSearches.searches.isEmpty {
@@ -2081,14 +2093,14 @@ private struct NativeCatalogContentView: View {
                             Label(error, systemImage: "wifi.exclamationmark").font(.footnote).foregroundStyle(.orange)
                             Button("Réessayer") { Task { await buyerSearches.reload() } }
                         }
-                    } else if filteredBuyerSearches.isEmpty {
+                    } else if visibleBuyerSearches.isEmpty {
                         ContentUnavailableView {
                             Label("Aucune demande active trouvée", systemImage: "magnifyingglass")
                         } description: {
                             Text(searchText.isEmpty ? "Les demandes actives publiées sur PartenaireFoyer apparaîtront ici." : "Essayez une autre recherche.")
                         }
                     } else {
-                        ForEach(filteredBuyerSearches) { search in
+                        ForEach(visibleBuyerSearches) { search in
                             BuyerSearchDirectoryRow(search: search)
                                 .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                         }
@@ -2206,7 +2218,7 @@ private struct NativeCatalogContentView: View {
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
                         ToolbarItem(placement: .cancellationAction) { Button("Fermer") { showClassifiedFilters = false } }
-                        ToolbarItem(placement: .confirmationAction) { Button("Voir \(filteredClassifiedAds.count)") { showClassifiedFilters = false } }
+                        ToolbarItem(placement: .confirmationAction) { Button("Voir \(visibleClassifiedAds.count)") { showClassifiedFilters = false } }
                     }
                 }
             }
@@ -2889,31 +2901,74 @@ private struct ListingRow: View {
 
 private struct ListingImage: View {
     let url: URL?
+    @State private var thumbnail: UIImage?
 
     var body: some View {
         Group {
-            if let url {
-                AsyncImage(url: url) { phase in
-                    if let image = phase.image {
-                        image.resizable().scaledToFill()
-                    } else if phase.error != nil {
-                        placeholder
-                    } else {
-                        ZStack { placeholder; ProgressView() }
-                    }
-                }
+            if let thumbnail {
+                Image(uiImage: thumbnail)
+                    .resizable()
+                    .scaledToFill()
             } else {
                 placeholder
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
+        .task(id: url) {
+            thumbnail = nil
+            guard let url else { return }
+            if let cached = ListingThumbnailCache.image(for: url) {
+                thumbnail = cached
+                return
+            }
+
+            do {
+                let (data, response) = try await URLSession.shared.data(from: url)
+                guard !Task.isCancelled,
+                      (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) == true else { return }
+                let decoded = await Task.detached(priority: .utility) { () -> CGImage? in
+                    guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+                    let options: [CFString: Any] = [
+                        kCGImageSourceCreateThumbnailFromImageAlways: true,
+                        kCGImageSourceCreateThumbnailWithTransform: true,
+                        kCGImageSourceThumbnailMaxPixelSize: 1200
+                    ]
+                    return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+                }.value
+                guard !Task.isCancelled, let decoded else { return }
+                let image = UIImage(cgImage: decoded)
+                ListingThumbnailCache.insert(image, for: url)
+                thumbnail = image
+            } catch {
+                // Keep the light placeholder when a remote photo is unavailable.
+            }
+        }
     }
 
     private var placeholder: some View {
         Rectangle()
             .fill(Color.teal.opacity(0.09))
             .overlay(Image(systemName: "house.fill").font(.title2).foregroundStyle(.teal.opacity(0.6)))
+    }
+}
+
+@MainActor
+private enum ListingThumbnailCache {
+    private static let storage: NSCache<NSURL, UIImage> = {
+        let cache = NSCache<NSURL, UIImage>()
+        cache.totalCostLimit = 24 * 1024 * 1024
+        cache.countLimit = 100
+        return cache
+    }()
+
+    static func image(for url: URL) -> UIImage? {
+        storage.object(forKey: url as NSURL)
+    }
+
+    static func insert(_ image: UIImage, for url: URL) {
+        let cost = Int(image.size.width * image.size.height * image.scale * image.scale * 4)
+        storage.setObject(image, forKey: url as NSURL, cost: cost)
     }
 }
 
