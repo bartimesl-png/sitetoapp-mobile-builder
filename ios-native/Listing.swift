@@ -12,6 +12,27 @@ enum WixImageSource {
         }
         return nil
     }
+
+    /// Different Wix URL forms can refer to the same original media file.
+    static func deduplicationKey(for url: URL) -> String {
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return url.absoluteString
+        }
+        components.scheme = components.scheme?.lowercased()
+        components.host = components.host?.lowercased()
+        components.query = nil
+        components.fragment = nil
+        return components.string ?? url.absoluteString
+    }
+
+    static func uniqueURLs(from rawValues: [String]) -> [URL] {
+        var seen = Set<String>()
+        return rawValues.compactMap { rawValue in
+            guard let imageURL = url(rawValue),
+                  seen.insert(deduplicationKey(for: imageURL)).inserted else { return nil }
+            return imageURL
+        }
+    }
 }
 
 struct WixOptionalNumber: Decodable, Hashable {
@@ -104,11 +125,7 @@ struct Listing: Decodable, Identifiable, Hashable {
     var gallery: [URL] {
         var candidates = images ?? []
         if let imageUrl { candidates.insert(imageUrl, at: 0) }
-        var seen = Set<String>()
-        return candidates.compactMap { value in
-            guard seen.insert(value).inserted else { return nil }
-            return WixImageSource.url(value)
-        }
+        return WixImageSource.uniqueURLs(from: candidates)
     }
 
     var locationLabel: String {
@@ -433,11 +450,7 @@ struct WixSeasonalAccommodation: Identifiable, Hashable {
     }
 
     var gallery: [URL] {
-        var seen = Set<String>()
-        return photos.compactMap { value in
-            guard seen.insert(value).inserted else { return nil }
-            return WixImageSource.url(value)
-        }
+        WixImageSource.uniqueURLs(from: photos)
     }
 
     var formattedPrice: String {

@@ -496,6 +496,7 @@ private struct NativeSeasonalAccommodationDetail: View {
         .listStyle(.insetGrouped)
         .navigationTitle("Hébergement")
         .navigationBarTitleDisplayMode(.inline)
+        .modifier(NativeBackButtonModifier())
     }
 }
 
@@ -794,6 +795,7 @@ private struct ProfessionalPropertyDetailView: View {
         }
         .navigationTitle("Annonce immobilière")
         .navigationBarTitleDisplayMode(.inline)
+        .modifier(NativeBackButtonModifier())
     }
 }
 
@@ -1014,6 +1016,7 @@ private struct ProfessionalDetailView: View {
         .listStyle(.insetGrouped)
         .navigationTitle("Fiche professionnelle")
         .navigationBarTitleDisplayMode(.inline)
+        .modifier(NativeBackButtonModifier())
         .task(id: auth.member?.id) { await loadFavoriteStatus() }
         .task(id: professional.cmsProfileID ?? professional.memberID ?? professional.id) {
             if showsProfessionalListings {
@@ -2526,6 +2529,7 @@ private struct NativeClassifiedAdDetailView: View {
         .background(Color(uiColor: .systemGroupedBackground))
         .navigationTitle("Petite annonce")
         .navigationBarTitleDisplayMode(.inline)
+        .modifier(NativeBackButtonModifier())
         .sheet(item: $activeSheet) { sheet in
             switch sheet {
             case .report(let ad):
@@ -3295,6 +3299,7 @@ private struct ListingDetailView: View {
         .background(Color(uiColor: .systemGroupedBackground))
         .navigationTitle(appLanguage == "en" ? "Listing details" : "Détail de l’annonce")
         .navigationBarTitleDisplayMode(.inline)
+        .modifier(NativeBackButtonModifier())
         .sheet(isPresented: $showImportedContact) {
             NavigationStack {
                 ImportedListingContactForm(listing: listing)
@@ -8433,7 +8438,24 @@ private struct NativeProfileShowcase: View {
     }
 }
 
-private struct NativeProfileImage: View {
+private private struct NativeBackButtonModifier: ViewModifier {
+    @Environment(\.dismiss) private var dismiss
+
+    func body(content: Content) -> some View {
+        content
+            .navigationBarBackButtonHidden(true)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { dismiss() } label: {
+                        Label("Retour", systemImage: "chevron.left")
+                    }
+                    .accessibilityLabel("Retour")
+                }
+            }
+        }
+    }
+
+struct NativeProfileImage: View {
     let source: String
     let fallback: String
 

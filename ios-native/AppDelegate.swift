@@ -9,6 +9,14 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        // AsyncImage uses URLSession.shared; this disk cache avoids downloading
+        // the same listing photos again when users browse between screens.
+        URLCache.shared = URLCache(
+            memoryCapacity: 48 * 1024 * 1024,
+            diskCapacity: 256 * 1024 * 1024,
+            diskPath: "partenairefoyer-image-cache"
+        )
+
         FirebaseApp.configure()
 
         let center = UNUserNotificationCenter.current()
