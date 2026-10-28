@@ -145,7 +145,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
             request.httpBody = try JSONSerialization.data(withJSONObject: ["email": normalizedEmail, "password": password])
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse else { throw AuthError.invalidResponse }
-            let payload = try? JSONDecoder().decode(ProfessionalPortalLoginResponse.self, from: data)
+            let payload = try? await BackgroundJSONDecoder.decode(ProfessionalPortalLoginResponse.self, from: data)
             guard (200..<300).contains(http.statusCode), payload?.success == true,
                   let token = payload?.sessionToken, !token.isEmpty else {
                 if payload?.code?.uppercased() == "ACTIVATION_REQUIRED" {
@@ -2951,7 +2951,7 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw URLError(.badServerResponse)
         }
-        let payload = try JSONDecoder().decode(PublicProfessionalAccessResponse.self, from: data)
+        let payload = try await BackgroundJSONDecoder.decode(PublicProfessionalAccessResponse.self, from: data)
         let allowedIDs = Set((payload.allowedProfileIds ?? []).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })
         return (payload.freeAccess == true, allowedIDs)
     }
@@ -3312,10 +3312,10 @@ final class WixAuthStore: NSObject, ObservableObject, ASWebAuthenticationPresent
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw AuthError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else {
-            let apiError = (try? JSONDecoder().decode(WixAPIError.self, from: data))
+            let apiError = try? await BackgroundJSONDecoder.decode(WixAPIError.self, from: data)
             throw AuthError.api(apiError?.details ?? apiError?.message ?? "La connexion au service de comptes a échoué (\(http.statusCode)).")
         }
-        do { return try JSONDecoder().decode(T.self, from: data) }
+        do { return try await BackgroundJSONDecoder.decode(T.self, from: data) }
         catch { throw AuthError.invalidResponse }
     }
 
@@ -3422,4 +3422,18 @@ private struct WixInsertDataItemResponse: Decodable {
 
 private struct WixInsertedDataItem: Decodable {
     let id: String?
+}
+
+private struct BackgroundDecodeBox<Value>: @unchecked Sendable {
+    let value: Value
+}
+
+/// Keep large Wix and feed JSON decoding off the UI actor.
+enum BackgroundJSONDecoder {
+    static func decode<Value: Decodable>(_ type: Value.Type, from data: Data) async throws -> Value {
+        let decoded = try await Task.detached(priority: .utility) {
+            BackgroundDecodeBox(value: try JSONDecoder().decode(type, from: data))
+        }.value
+        return decoded.value
+    }
 }

@@ -5749,32 +5749,32 @@ private struct RoleEntryView: View {
                     }
                 } else if role == .professionnel {
                     Section("Compte professionnel partagé") {
-                        Text("Utilisez votre accès PartenaireFoyer habituel. La même connexion sert sur PC et Android.")
+                        Text("Utilisez les mêmes identifiants que sur le portail professionnel PartenaireFoyer.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
-                        Label("Connexion sécurisée PartenaireFoyer", systemImage: "checkmark.shield.fill")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(.teal)
+                        TextField("Adresse e-mail professionnelle", text: $email)
+                            .textContentType(.username)
+                            .keyboardType(.emailAddress)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        SecureField("Mot de passe", text: $password)
+                            .textContentType(.password)
+                            .onSubmit { Task { await signInProfessionalPortal() } }
+                        Button("Mot de passe oublié ?") {
+                            auth.errorMessage = nil
+                            showAccountRecovery = true
+                        }
+                        .font(.footnote)
+                        Button("Ouvrir la connexion du site") {
+                            auth.errorMessage = nil
+                            showSiteLogin = true
+                        }
+                        .font(.footnote)
                     }
                 } else {
                     Section("Compte PartenaireFoyer") {
-                        if role == .professionnel {
-                            TextField("Adresse e-mail professionnelle", text: $email)
-                                .textContentType(.username)
-                                .keyboardType(.emailAddress)
-                                .textInputAutocapitalization(.never)
-                                .autocorrectionDisabled()
-                            SecureField("Mot de passe", text: $password)
-                                .textContentType(.password)
-                                .onSubmit { Task { await signInProfessionalPortal() } }
-                            Text("Utilisez les mêmes identifiants que sur le portail professionnel PartenaireFoyer.")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Text("La connexion, la création de compte et la récupération du mot de passe passent par le parcours officiel de votre espace. Vos identifiants et vos données restent ceux utilisés sur le site.")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
+                        Text("La connexion, la création de compte et la récupération du mot de passe passent par le parcours officiel de votre espace. Vos identifiants et vos données restent ceux utilisés sur le site.")
+                            .font(.subheadline)
                         Label("Même compte et mêmes données que sur le site", systemImage: "checkmark.shield.fill")
                             .font(.footnote.weight(.semibold))
                             .foregroundStyle(.teal)
@@ -5804,10 +5804,7 @@ private struct RoleEntryView: View {
 
                 Section {
                     Button {
-                        if role == .professionnel && !isEditing {
-                            if isCreatingAccount { showSignupCountryPicker = true }
-                            else { showSiteLogin = true }
-                        } else if isEditing {
+                        if isEditing {
                             Task { await updateExistingProfile() }
                         } else if isCreatingAccount {
                             showSignupCountryPicker = true

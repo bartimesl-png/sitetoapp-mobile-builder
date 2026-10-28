@@ -40,6 +40,8 @@ final class ListingsService: ObservableObject {
         sourceFailures = []
 
         // Load the imported catalog alongside Wix so its first pages appear without waiting.
+        // Keep the two large Wix catalogs sequential so older iPhones do not
+        // decode and publish both paginated result sets at the same time.
         Task { @MainActor [weak self] in
             guard let self else { return }
             do {
@@ -50,9 +52,7 @@ final class ListingsService: ObservableObject {
             } catch {
                 self.finish(.privateOwner, items: nil, failure: "les biens de particuliers (\(error.localizedDescription))")
             }
-        }
-        Task { @MainActor [weak self] in
-            guard let self else { return }
+
             do {
                 let items = try await WixAuthStore.shared.fetchPublicProfessionalListings { [weak self] page in
                     self?.appendSourcePage(.professional, page)
@@ -178,7 +178,7 @@ final class ListingsService: ObservableObject {
             guard (200..<300).contains(http.statusCode) else {
                 throw ListingFeedError.httpStatus(http.statusCode)
             }
-            let page = try JSONDecoder().decode(ListingFeedResponse.self, from: data)
+            let page = try await BackgroundJSONDecoder.decode(ListingFeedResponse.self, from: data)
             if !page.items.isEmpty { await onPage(page.items) }
             guard !page.items.isEmpty else { break }
             let nextOffset = offset + page.items.count
