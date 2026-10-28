@@ -8454,7 +8454,6 @@ private struct NativeBackButtonModifier: ViewModifier {
             }
         }
     }
-}
 
 private struct NativeProfileImage: View {
     let source: String
