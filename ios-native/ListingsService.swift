@@ -175,11 +175,7 @@ final class ListingsService: ObservableObject {
             }.value
 
             guard !Task.isCancelled, let self, self.catalogRevision == revision else { return }
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) {
-                self.listings = publication.listings
-            }
+            self.listings = publication.listings
             if !self.listings.isEmpty {
                 self.hasLoaded = true
                 self.errorMessage = nil
@@ -207,7 +203,7 @@ final class ListingsService: ObservableObject {
                 throw ListingFeedError.httpStatus(http.statusCode)
             }
             let page = try await BackgroundJSONDecoder.decode(ListingFeedResponse.self, from: data)
-            if !page.items.isEmpty { await onPage(page.items) }
+            if !page.items.isEmpty { onPage(page.items) }
             guard !page.items.isEmpty else { break }
             let nextOffset = offset + page.items.count
             guard nextOffset > offset else { break }
