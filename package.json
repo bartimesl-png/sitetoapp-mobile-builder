@@ -6,6 +6,7 @@
   "packageManager": "yarn@4.9.2",
   "scripts": {
     "build": "echo \"SiteToApp mobile builder\"",
+    "verify:ios-matching": "node --experimental-strip-types scripts/verify-ios-matching.mjs",
     "android:add": "npx cap add android",
     "android:sync": "npx cap sync android",
     "ios:add": "npx cap add ios",
