@@ -184,3 +184,174 @@ struct SeasonalMagicCanvas: View {
         context.stroke(ring, with: .color(.white.opacity(alpha * 0.55)), lineWidth: 2.4)
     }
 }
+
+
+/// Large, event-specific illustration underneath the animated actors.
+/// Everything is vector-drawn so the IPA does not grow with animated media.
+struct SeasonalScenicBackdrop: View {
+    let theme: NativeSeasonalTheme
+
+    var body: some View {
+        Canvas(opaque: false) { context, size in
+            let w = Double(size.width)
+            let h = Double(size.height)
+            guard w > 0, h > 0 else { return }
+            let glow = theme.secondary.opacity(0.25)
+            let highlight = Color.white.opacity(0.19)
+
+            switch theme.id {
+            case "noel":
+                // Deep evergreen tree silhouettes and a snowy foreground.
+                for index in 0..<5 {
+                    let i = Double(index)
+                    let x = w * (0.51 + i * 0.112)
+                    let baseline = h * (0.94 + 0.01 * Double(index % 2))
+                    let treeHeight = h * (0.53 + Double(index % 3) * 0.10)
+                    var pine = Path()
+                    pine.move(to: CGPoint(x: x, y: baseline - treeHeight))
+                    pine.addLine(to: CGPoint(x: x - treeHeight * 0.29, y: baseline))
+                    pine.addLine(to: CGPoint(x: x + treeHeight * 0.29, y: baseline))
+                    pine.closeSubpath()
+                    context.fill(pine, with: .color(Color(red: 0.04, green: 0.19, blue: 0.17).opacity(0.40 + 0.08 * i)))
+                }
+                var snow = Path()
+                snow.move(to: CGPoint(x: w * 0.44, y: h))
+                snow.addQuadCurve(to: CGPoint(x: w, y: h * 0.89),
+                                  control: CGPoint(x: w * 0.78, y: h * 0.76))
+                snow.addLine(to: CGPoint(x: w, y: h))
+                snow.closeSubpath()
+                context.fill(snow, with: .color(.white.opacity(0.30)))
+
+            case "ete":
+                let sun = Path(ellipseIn: CGRect(x: w * 0.73, y: h * 0.04,
+                                                 width: h * 0.48, height: h * 0.48))
+                context.fill(sun, with: .color(Color.yellow.opacity(0.32)))
+                for index in 0..<5 {
+                    let y = h * (0.65 + 0.09 * Double(index))
+                    var wave = Path()
+                    wave.move(to: CGPoint(x: w * 0.43, y: y))
+                    wave.addCurve(to: CGPoint(x: w * 1.08, y: y),
+                                  control1: CGPoint(x: w * 0.66, y: y - 27),
+                                  control2: CGPoint(x: w * 0.81, y: y + 28))
+                    context.stroke(wave, with: .color(.white.opacity(0.20 + 0.07 * Double(index % 3))),
+                                   style: StrokeStyle(lineWidth: 3, lineCap: .round))
+
+                }
+
+            case "paques", "printemps":
+                for index in 0..<3 {
+                    let i = Double(index)
+                    var hill = Path()
+                    hill.move(to: CGPoint(x: w * (0.34 + i * 0.12), y: h))
+                    hill.addQuadCurve(to: CGPoint(x: w * 1.05, y: h * (0.61 + i * 0.08)),
+                                      control: CGPoint(x: w * (0.71 - i * 0.07), y: h * (0.24 + i * 0.07)))
+                    hill.addLine(to: CGPoint(x: w * 1.05, y: h))
+                    hill.closeSubpath()
+                    context.fill(hill, with: .color(Color(red: 0.29, green: 0.69, blue: 0.40).opacity(0.18 + i * 0.12)))
+                }
+                for index in 0..<11 {
+                    let i = Double(index)
+                    let at = CGPoint(x: w * (0.48 + i * 0.056),
+                                     y: h * (0.83 + 0.05 * sin(i * 1.6)))
+                    drawSoftDot(context, center: at, radius: 5 + Double(index % 3) * 3,
+                                color: .white.opacity(0.32))
+                }
+
+            case "rentree":
+                for index in 0..<5 {
+                    let i = Double(index)
+                    let center = CGPoint(x: w * (0.54 + i * 0.12),
+                                         y: h * (0.66 + 0.08 * sin(i)))
+                    drawSoftDot(context, center: center, radius: 26 + i * 4,
+                                color: Color.orange.opacity(0.10 + i * 0.026))
+                }
+
+            case "saint-valentin", "fete-des-meres", "octobre-rose":
+                for index in 0..<7 {
+                    let i = Double(index)
+                    let center = CGPoint(x: w * (0.47 + i * 0.085),
+                                         y: h * (0.18 + 0.60 * (Double(index % 4) / 4)))
+                    drawSoftDot(context, center: center, radius: 29 + Double(index % 3) * 13,
+                                color: .white.opacity(0.08 + Double(index % 3) * 0.035))
+                }
+
+            case "14-juillet", "nouvel-an":
+                // A nighttime skyline gives the live fireworks a visual anchor.
+                for index in 0..<12 {
+                    let i = Double(index)
+                    let x = w * (0.45 + i * 0.052)
+                    let buildingHeight = h * (0.18 + Double(index % 4) * 0.060)
+                    let rect = CGRect(x: x, y: h - buildingHeight, width: w * 0.048, height: buildingHeight)
+                    context.fill(Path(rect), with: .color(Color.black.opacity(0.24)))
+                    if index % 2 == 0 {
+                        let window = CGRect(x: x + w * 0.014, y: h - buildingHeight + h * 0.060,
+                                            width: 4, height: 7)
+                        context.fill(Path(window), with: .color(Color.yellow.opacity(0.64)))
+                    }
+                }
+
+            case "armistice":
+                // Calm dawn and light rather than festive explosions.
+                var horizon = Path()
+                horizon.move(to: CGPoint(x: w * 0.42, y: h))
+                horizon.addQuadCurve(to: CGPoint(x: w, y: h * 0.79),
+                                     control: CGPoint(x: w * 0.73, y: h * 0.58))
+                horizon.addLine(to: CGPoint(x: w, y: h))
+                horizon.closeSubpath()
+                context.fill(horizon, with: .color(Color.white.opacity(0.11)))
+                drawSoftDot(context, center: CGPoint(x: w * 0.80, y: h * 0.43),
+                            radius: h * 0.27, color: .white.opacity(0.15))
+
+            case "black-friday":
+                // Retail spotlight beams (without asserting discounts).
+                for index in 0..<4 {
+                    let i = Double(index)
+                    var beam = Path()
+                    beam.move(to: CGPoint(x: w * (0.57 + i * 0.09), y: 0))
+                    beam.addLine(to: CGPoint(x: w * (0.49 + i * 0.15), y: h))
+                    beam.addLine(to: CGPoint(x: w * (0.68 + i * 0.15), y: h))
+                    beam.closeSubpath()
+                    context.fill(beam, with: .color(.white.opacity(index % 2 == 0 ? 0.09 : 0.04)))
+                }
+
+            case "fete-des-peres", "movember":
+                for index in 0..<6 {
+                    let i = Double(index)
+                    var arc = Path()
+                    arc.addArc(center: CGPoint(x: w * 0.78, y: h * 0.60),
+                               radius: h * (0.23 + i * 0.09),
+                               startAngle: .degrees(225), endAngle: .degrees(28),
+                               clockwise: false)
+                    context.stroke(arc, with: .color(.white.opacity(0.13 - i * 0.012)),
+                                   lineWidth: 2.3)
+                }
+
+            default:
+                // Halloween already has the big haunted house and glowing moon.
+                for index in 0..<13 {
+                    let i = Double(index)
+                    let at = CGPoint(x: w * (0.44 + 0.52 * abs(sin(i * 7.16))),
+                                     y: h * (0.09 + 0.64 * abs(cos(i * 3.46))))
+                    drawSoftDot(context, center: at, radius: 1.8 + Double(index % 3),
+                                color: .white.opacity(0.3))
+                }
+            }
+
+            // Unify the illustrations with a little reflected light.
+            drawSoftDot(context, center: CGPoint(x: w * 0.92, y: h * 0.26),
+                        radius: min(w, h) * 0.20, color: glow)
+            drawSoftDot(context, center: CGPoint(x: w * 0.62, y: h * 0.94),
+                        radius: min(w, h) * 0.12, color: highlight)
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    private func drawSoftDot(_ context: GraphicsContext, center: CGPoint,
+                             radius: Double, color: Color) {
+        guard radius > 0 else { return }
+        let dot = Path(ellipseIn: CGRect(x: center.x - radius, y: center.y - radius,
+                                        width: radius * 2, height: radius * 2))
+        context.fill(dot, with: .color(color))
+    }
+}
