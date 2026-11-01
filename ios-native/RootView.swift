@@ -173,6 +173,7 @@ private struct SeasonalFeatureBanner: View {
                 startPoint: .leading,
                 endPoint: .trailing
             )
+            SeasonalScenicBackdrop(theme: theme)
 
             GeometryReader { geometry in
                 let width = geometry.size.width
