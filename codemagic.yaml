@@ -151,10 +151,11 @@ workflows:
 
     scripts:
 
-      - name: Configurer la signature Apple
+      - name: Configurer la signature Apple pour TestFlight interne
         script: |
           xcode-project use-profiles \
-            --project "$CM_BUILD_DIR/$XCODE_PROJECT"
+            --project "$CM_BUILD_DIR/$XCODE_PROJECT" \
+            --custom-export-options='{"testFlightInternalTestingOnly": true}'
 
       - name: Préparer la configuration Firebase iOS
         script: |
@@ -186,10 +187,10 @@ workflows:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
 
-    # Téléverse l'IPA dans App Store Connect et le soumet à TestFlight.
-    # Ne soumet pas de version à la publication publique sur l'App Store.
+    # Téléverse l'IPA sur App Store Connect comme build TestFlight interne.
+    # Aucune revue bêta externe ni publication publique sur l'App Store.
     publishing:
       app_store_connect:
         auth: integration
-        submit_to_testflight: true
+        submit_to_testflight: false
         submit_to_app_store: false
