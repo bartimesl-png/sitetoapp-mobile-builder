@@ -121,8 +121,9 @@ final class ListingsService: ObservableObject {
                     let fresh = page.filter { seen.insert($0.id).inserted }
                     guard !fresh.isEmpty else { return }
                     accumulated.append(contentsOf: fresh)
+                    // Keep imported pages out of the visible catalog while Wix
+                    // is still loading, so they never appear first and then jump.
                     self.importedSource = accumulated
-                    self.publishCatalog()
                 }
                 self.finishImported(items: accumulated, failure: nil)
             } catch {
@@ -153,8 +154,9 @@ final class ListingsService: ObservableObject {
     private func publishCatalog() {
         catalogRevision &+= 1
         let revision = catalogRevision
+        let wixCatalogIsReady = pendingSources == 0 && !isLoadingImported
         let snapshot = CatalogPublicationInput(
-            imported: importedSource ?? [],
+            imported: wixCatalogIsReady ? (importedSource ?? []) : [],
             privateOwner: privateOwnerSource ?? [],
             professional: professionalSource ?? []
         )
