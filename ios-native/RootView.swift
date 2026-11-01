@@ -74,187 +74,215 @@ private extension EnvironmentValues {
     }
 }
 
+
 private struct SeasonalDecorationsLayer: View {
     let theme: NativeSeasonalTheme
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var passageIndex = 0
-    @State private var flybyX: CGFloat = -100
-    @State private var flybyActive = false
 
-    private var symbols: [String] {
-        switch theme.id {
-        case "paques": return ["hare.fill", "bird.fill", "sun.max.fill", "sparkles"]
-        case "printemps": return ["leaf.fill", "sun.max.fill", "wind", "sparkles"]
-        case "fete-des-meres": return ["heart.fill", "gift.fill", "leaf.fill", "sparkles"]
-        case "fete-des-peres": return ["gift.fill", "star.fill", "hammer.fill", "sun.max.fill"]
-        case "14-juillet": return ["flag.fill", "sparkles", "star.fill", "burst.fill"]
-        case "ete": return ["sun.max.fill", "water.waves", "sailboat.fill", "sparkles"]
-        case "rentree": return ["book.fill", "pencil", "leaf.fill", "sparkles"]
-        case "octobre-rose": return ["heart.fill", "gift.fill", "sparkles", "leaf.fill"]
-        case "halloween": return ["moon.stars.fill", "cloud.fog.fill", "sparkles", "flame.fill"]
-        case "armistice": return ["flag.fill", "medal.fill", "bird.fill", "star.fill"]
-        case "movember": return ["drop.fill", "cross.case.fill", "heart.fill", "sparkles"]
-        case "noel": return ["gift.fill", "snowflake", "tree.fill", "star.fill"]
-        case "nouvel-an": return ["sparkles", "party.popper.fill", "wineglass.fill", "star.fill"]
-        case "saint-valentin": return ["heart.fill", "heart.circle.fill", "envelope.fill", "sparkles"]
-        case "black-friday": return ["tag.fill", "bolt.fill", "bag.fill", "sparkles"]
-        default: return ["sparkles", "star.fill", "sun.max.fill", "leaf.fill"]
-        }
-    }
-
-    private var particleStyle: String {
-        switch theme.id {
-        case "noel": return "snow"
-        case "halloween", "movember": return "embers"
-        case "paques", "printemps", "fete-des-meres", "octobre-rose", "armistice", "saint-valentin": return "petals"
-        case "rentree", "ete": return "leaves"
-        default: return "confetti"
-        }
-    }
-
+    // Keep controls and listing photos unobstructed. The seasonal artwork belongs
+    // inside the homepage, not in floating circular badges over every screen.
     var body: some View {
-        GeometryReader { geometry in
-            let safeTop = geometry.safeAreaInsets.top
-            ZStack {
-                // Light pools make the active event visible without changing page layouts.
-                RadialGradient(colors: [theme.accent.opacity(0.15), .clear], center: .topLeading, startRadius: 8, endRadius: geometry.size.width * 0.72)
-                    .ignoresSafeArea()
-                RadialGradient(colors: [theme.secondary.opacity(0.13), .clear], center: .bottomTrailing, startRadius: 10, endRadius: geometry.size.width * 0.78)
-                    .ignoresSafeArea()
-
-                TimelineView(.animation(minimumInterval: 1.0 / 12.0, paused: reduceMotion)) { timeline in
-                    Canvas { context, size in
-                        let time = reduceMotion ? 0 : timeline.date.timeIntervalSinceReferenceDate
-                        for index in 0..<38 {
-                            let seed = Double(index)
-                            let xBase = ((seed * 0.61803398875).truncatingRemainder(dividingBy: 1.0)) * size.width
-                            let cycle = size.height + 34.0
-                            let speed = 9.0 + (seed.truncatingRemainder(dividingBy: 5.0) * 3.2)
-                            let y = ((seed * 31.7 + time * speed).truncatingRemainder(dividingBy: cycle)) - 17
-                            let drift = reduceMotion ? 0 : sin(time * (0.45 + seed.truncatingRemainder(dividingBy: 4.0) * 0.12) + seed) * (9 + seed.truncatingRemainder(dividingBy: 15.0))
-                            let x = xBase + drift
-                            let radius = 1.4 + seed.truncatingRemainder(dividingBy: 4.0) * 0.55
-                            let alpha = 0.12 + (seed.truncatingRemainder(dividingBy: 4.0) * 0.035)
-                            let color = index.isMultiple(of: 3) ? theme.secondary.opacity(alpha) : theme.accent.opacity(alpha)
-                            var path = Path()
-                            switch particleStyle {
-                            case "snow":
-                                path.addEllipse(in: CGRect(x: x, y: y, width: radius * 2.2, height: radius * 2.2))
-                                context.fill(path, with: .color(color))
-                            case "petals":
-                                let rect = CGRect(x: x - radius, y: y - radius * 0.58, width: radius * 2.5, height: radius * 1.15)
-                                path.addEllipse(in: rect)
-                                let angle = sin(time * 0.55 + seed) * 0.7
-                                path = path.applying(CGAffineTransform(translationX: rect.midX, y: rect.midY).rotated(by: angle).translatedBy(x: -rect.midX, y: -rect.midY))
-                                context.fill(path, with: .color(color))
-                            case "leaves":
-                                let rect = CGRect(x: x - radius * 1.2, y: y - radius * 0.65, width: radius * 2.5, height: radius * 1.3)
-                                path.addEllipse(in: rect)
-                                let angle = sin(time * 0.42 + seed) * 0.9
-                                path = path.applying(CGAffineTransform(translationX: rect.midX, y: rect.midY).rotated(by: angle).translatedBy(x: -rect.midX, y: -rect.midY))
-                                context.fill(path, with: .color(color))
-                            case "embers":
-                                path.addEllipse(in: CGRect(x: x, y: y, width: radius * 1.5, height: radius * 1.5))
-                                context.fill(path, with: .color(color))
-                            default:
-                                if index.isMultiple(of: 2) {
-                                    path.addRoundedRect(in: CGRect(x: x, y: y, width: radius * 2.8, height: radius * 1.15), cornerSize: CGSize(width: 1, height: 1))
-                                } else {
-                                    path.move(to: CGPoint(x: x, y: y - radius))
-                                    path.addLine(to: CGPoint(x: x + radius, y: y))
-                                    path.addLine(to: CGPoint(x: x, y: y + radius))
-                                    path.addLine(to: CGPoint(x: x - radius, y: y))
-                                    path.closeSubpath()
-                                }
-                                let angle = sin(time * 0.6 + seed) * 0.6
-                                path = path.applying(CGAffineTransform(translationX: x, y: y).rotated(by: angle).translatedBy(x: -x, y: -y))
-                                context.fill(path, with: .color(color))
-                            }
-                        }
-                    }
-                }
-                .ignoresSafeArea()
-
-                VStack(spacing: 0) {
-                    LinearGradient(colors: [theme.accent, theme.secondary, theme.accent], startPoint: .leading, endPoint: .trailing)
-                        .frame(height: 5)
-                    Spacer()
-                    LinearGradient(colors: [.clear, theme.secondary.opacity(0.58), theme.accent.opacity(0.9)], startPoint: .leading, endPoint: .trailing)
-                        .frame(height: 4)
-                }
-                .ignoresSafeArea()
-
-                ForEach(0..<6, id: \.self) { index in
-                    let isLeft = index.isMultiple(of: 2)
-                    SeasonalThemeEmblem(symbol: symbols[(index + 1) % symbols.count], theme: theme, size: index == 2 || index == 3 ? 40 : 34)
-                        .position(
-                            x: isLeft ? 19 : max(19, geometry.size.width - 19),
-                            y: max(safeTop + 76, geometry.size.height * (0.23 + Double(index / 2) * 0.27))
-                        )
-                }
-
-                SeasonalThemeEmblem(symbol: symbols[passageIndex % symbols.count], theme: theme, size: 54)
-                    .position(x: flybyX, y: max(safeTop + 34, 50))
-                    .opacity(flybyActive ? 1 : 0)
-                    .rotationEffect(.degrees(flybyActive ? 7 : -7))
-                    .task(id: theme.id) {
-                        while !Task.isCancelled {
-                            try? await Task.sleep(nanoseconds: 7_000_000_000)
-                            guard !Task.isCancelled else { return }
-                            flybyX = -70
-                            flybyActive = true
-                            withAnimation(.easeInOut(duration: 4.8)) {
-                                flybyX = geometry.size.width + 70
-                            }
-                            try? await Task.sleep(nanoseconds: 5_000_000_000)
-                            guard !Task.isCancelled else { return }
-                            flybyActive = false
-                            passageIndex = (passageIndex + 1) % symbols.count
-                        }
-                    }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .ignoresSafeArea()
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
+        VStack(spacing: 0) {
+            LinearGradient(
+                colors: [theme.accent, theme.secondary, theme.accent],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+            .frame(height: 4)
+            Spacer(minLength: 0)
         }
-    }
-}
-
-private struct SeasonalThemeEmblem: View {
-    let symbol: String
-    let theme: NativeSeasonalTheme
-    let size: CGFloat
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var floats = false
-
-    var body: some View {
-        ZStack {
-            Circle()
-                .fill(RadialGradient(colors: [theme.secondary.opacity(0.48), theme.accent.opacity(0.18), .clear], center: .center, startRadius: 2, endRadius: size * 0.72))
-                .frame(width: size * 1.65, height: size * 1.65)
-                .blur(radius: size * 0.12)
-            Circle()
-                .fill(LinearGradient(colors: [theme.soft.opacity(0.92), theme.secondary.opacity(0.34), theme.accent.opacity(0.25)], startPoint: .topLeading, endPoint: .bottomTrailing))
-                .overlay(Circle().stroke(AngularGradient(colors: [theme.secondary.opacity(0.95), .white.opacity(0.92), theme.accent.opacity(0.85), theme.secondary.opacity(0.95)], center: .center), lineWidth: 1.4))
-                .overlay {
-                    Image(systemName: symbol)
-                        .font(.system(size: size * 0.46, weight: .heavy, design: .rounded))
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(LinearGradient(colors: [theme.accent, theme.secondary], startPoint: .topLeading, endPoint: .bottomTrailing))
-                        .shadow(color: theme.accent.opacity(0.38), radius: 5, y: 2)
-                }
-                .frame(width: size, height: size)
-                .shadow(color: theme.accent.opacity(0.27), radius: 9, y: 4)
-        }
-        .frame(width: size * 1.65, height: size * 1.65)
-        .offset(y: reduceMotion ? 0 : (floats ? -3 : 3))
-        .rotationEffect(.degrees(reduceMotion ? 0 : (floats ? 4 : -4)))
-        .animation(.easeInOut(duration: 2.2).repeatForever(autoreverses: true), value: floats)
-        .onAppear { floats = true }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
         .accessibilityHidden(true)
     }
 }
+
+private struct HalloweenHouseShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        let w = rect.width
+        let h = rect.height
+        var path = Path()
+        path.addRect(CGRect(x: w * 0.24, y: h * 0.45, width: w * 0.58, height: h * 0.55))
+        path.move(to: CGPoint(x: w * 0.15, y: h * 0.47))
+        path.addLine(to: CGPoint(x: w * 0.52, y: h * 0.12))
+        path.addLine(to: CGPoint(x: w * 0.91, y: h * 0.47))
+        path.closeSubpath()
+        path.addRect(CGRect(x: w * 0.11, y: h * 0.28, width: w * 0.18, height: h * 0.72))
+        path.move(to: CGPoint(x: w * 0.075, y: h * 0.32))
+        path.addLine(to: CGPoint(x: w * 0.20, y: h * 0.05))
+        path.addLine(to: CGPoint(x: w * 0.33, y: h * 0.32))
+        path.closeSubpath()
+        path.addRect(CGRect(x: w * 0.74, y: h * 0.30, width: w * 0.20, height: h * 0.70))
+        path.move(to: CGPoint(x: w * 0.70, y: h * 0.35))
+        path.addLine(to: CGPoint(x: w * 0.84, y: h * 0.04))
+        path.addLine(to: CGPoint(x: w * 0.98, y: h * 0.35))
+        path.closeSubpath()
+        path.addRect(CGRect(x: w * 0.59, y: h * 0.06, width: w * 0.055, height: h * 0.28))
+        return path
+    }
+}
+
+private struct SeasonalFeatureBanner: View {
+    let theme: NativeSeasonalTheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var floating = false
+
+    private var content: (title: String, caption: String, primary: String, secondary: String) {
+        switch theme.id {
+        case "halloween": return ("HALLOWEEN", "Le foyer se pare de mystère", "🎃", "👻")
+        case "noel": return ("JOYEUX NOËL", "La magie des fêtes est chez vous", "🎄", "🎁")
+        case "nouvel-an": return ("BONNE ANNÉE", "De nouveaux projets à célébrer", "🎆", "🥂")
+        case "paques": return ("JOYEUSES PÂQUES", "Des surprises à chaque coin de maison", "🐰", "🥚")
+        case "printemps": return ("LE PRINTEMPS", "Un souffle nouveau pour vos projets", "🌷", "🦋")
+        case "fete-des-meres": return ("FÊTE DES MÈRES", "De belles attentions à partager", "💐", "💗")
+        case "fete-des-peres": return ("FÊTE DES PÈRES", "Une journée pleine de surprises", "🎁", "🏆")
+        case "14-juillet": return ("14 JUILLET", "Un air de fête partout en France", "🎆", "🇫🇷")
+        case "ete": return ("BEL ÉTÉ", "Place au soleil et aux nouveaux projets", "☀️", "🌴")
+        case "rentree": return ("C'EST LA RENTRÉE", "Une nouvelle saison commence", "🎒", "📚")
+        case "octobre-rose": return ("OCTOBRE ROSE", "Ensemble, faisons rayonner le soutien", "🎀", "💗")
+        case "armistice": return ("11 NOVEMBRE", "Un moment de mémoire et de paix", "🕊️", "🌺")
+        case "movember": return ("MOVEMBER", "Un mois pour sensibiliser", "🧔", "💙")
+        case "saint-valentin": return ("SAINT-VALENTIN", "Les plus belles histoires commencent ici", "❤️", "🌹")
+        case "black-friday": return ("BLACK FRIDAY", "Des opportunités à découvrir", "🛍️", "⚡")
+        default: return ("LES MOMENTS", "Une touche de magie dans l'application", "✨", "⭐")
+        }
+    }
+
+    private var darkColor: Color {
+        switch theme.id {
+        case "halloween": return Color(pfHex: 0x160B2C)
+        case "noel": return Color(pfHex: 0x103F34)
+        case "octobre-rose", "fete-des-meres", "saint-valentin": return Color(pfHex: 0x581632)
+        case "ete", "14-juillet": return Color(pfHex: 0x0F3D60)
+        default: return Color(pfHex: 0x162A35)
+        }
+    }
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            LinearGradient(
+                colors: [darkColor, theme.accent.opacity(0.96), theme.secondary.opacity(0.80)],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+
+            GeometryReader { geometry in
+                let width = geometry.size.width
+                let height = geometry.size.height
+
+                Circle()
+                    .fill(theme.secondary.opacity(0.33))
+                    .frame(width: 155, height: 155)
+                    .blur(radius: 40)
+                    .position(x: width * 0.87, y: height * 0.27)
+
+                if theme.id == "halloween" {
+                    Circle()
+                        .fill(RadialGradient(
+                            colors: [Color(pfHex: 0xFFF3D0), Color(pfHex: 0xFFA650)],
+                            center: .center,
+                            startRadius: 2,
+                            endRadius: 60
+                        ))
+                        .frame(width: 108, height: 108)
+                        .shadow(color: Color(pfHex: 0xFF9D45).opacity(0.66), radius: 28)
+                        .position(x: width * 0.79, y: height * 0.35)
+                        .scaleEffect(floating ? 1.055 : 1.0)
+
+                    HalloweenHouseShape()
+                        .fill(Color(pfHex: 0x100B1B))
+                        .frame(width: 174, height: 119)
+                        .position(x: width * 0.79, y: height * 0.71)
+
+                    HStack(spacing: 19) {
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(Color(pfHex: 0xFFBF5A))
+                            .frame(width: 9, height: 17)
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(Color(pfHex: 0xFFBF5A))
+                            .frame(width: 9, height: 17)
+                    }
+                    .shadow(color: .orange.opacity(0.7), radius: 6)
+                    .position(x: width * 0.83, y: height * 0.74)
+
+                    Text("🦇")
+                        .font(.system(size: 49))
+                        .rotationEffect(.degrees(floating ? 12 : -10))
+                        .position(x: width * 0.63, y: height * 0.23)
+                    Text("👻")
+                        .font(.system(size: 58))
+                        .rotationEffect(.degrees(floating ? 8 : -8))
+                        .position(x: width * 0.94, y: height * 0.51)
+                    Text("🎃")
+                        .font(.system(size: 89))
+                        .position(x: width * 0.76, y: height * 0.94)
+                } else {
+                    Circle()
+                        .stroke(.white.opacity(0.21), lineWidth: 1.5)
+                        .frame(width: 158, height: 158)
+                        .position(x: width * 0.81, y: height * 0.49)
+                    Text(content.primary)
+                        .font(.system(size: 110))
+                        .rotationEffect(.degrees(floating ? 5 : -5))
+                        .shadow(color: .black.opacity(0.18), radius: 15, y: 9)
+                        .position(x: width * 0.78, y: height * 0.51)
+                    Text(content.secondary)
+                        .font(.system(size: 65))
+                        .rotationEffect(.degrees(floating ? -9 : 8))
+                        .position(x: width * 0.93, y: height * 0.77)
+                }
+            }
+
+            LinearGradient(
+                colors: [darkColor.opacity(0.78), darkColor.opacity(0.18), .clear],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 7) {
+                    Image(systemName: "sparkle")
+                        .font(.system(size: 12, weight: .bold))
+                    Text("LES MOMENTS PARTENAIREFOYER")
+                        .tracking(1.0)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                }
+                .font(.system(size: 9, weight: .bold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.88))
+
+                Text(content.title)
+                    .font(.system(size: 29, weight: .black, design: .rounded))
+                    .tracking(-0.5)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.75)
+                    .foregroundStyle(.white)
+                    .shadow(color: .black.opacity(0.30), radius: 7, y: 3)
+
+                Text(content.caption)
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.94))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(width: 198, alignment: .leading)
+            .padding(.leading, 19)
+        }
+        .frame(height: 192)
+        .clipShape(RoundedRectangle(cornerRadius: 25, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 25, style: .continuous)
+                .stroke(.white.opacity(0.26), lineWidth: 1)
+        }
+        .shadow(color: theme.accent.opacity(0.25), radius: 17, y: 8)
+        .accessibilityElement(children: .combine)
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 3.0).repeatForever(autoreverses: true)) {
+                floating = true
+            }
+        }
+    }
+}
+
 private extension Color {
     init(pfHex: UInt) {
         self.init(.sRGB, red: Double((pfHex >> 16) & 0xFF) / 255, green: Double((pfHex >> 8) & 0xFF) / 255, blue: Double(pfHex & 0xFF) / 255, opacity: 1)
@@ -4005,11 +4033,21 @@ private struct HomeDashboardView: View {
     @State private var showFavorites = false
     @State private var showFullSite = false
     @State private var publicDemandType = "recherche_achat"
+    @Environment(\.pfNativeSeasonalTheme) private var seasonalTheme
+    @Environment(\.pfNativeSeasonalEnabled) private var seasonalThemeEnabled
+
+    private var homeHeroTint: Color {
+        guard seasonalThemeEnabled, let theme = seasonalTheme else { return PFTheme.deepGreen }
+        return theme.id == "halloween" ? Color(pfHex: 0x361344) : theme.accent
+    }
 
     var body: some View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 20) {
+                    if seasonalThemeEnabled, let theme = seasonalTheme {
+                        SeasonalFeatureBanner(theme: theme)
+                    }
                     hero
                     matchingCard
                     HStack(alignment: .firstTextBaseline) {
@@ -4318,7 +4356,7 @@ private struct HomeDashboardView: View {
                     .frame(width: proxy.size.width, height: proxy.size.height)
                     .overlay {
                         LinearGradient(
-                            colors: [PFTheme.deepGreen.opacity(0.65), PFTheme.deepGreen.opacity(0.84)],
+                            colors: [homeHeroTint.opacity(0.77), PFTheme.deepGreen.opacity(0.84)],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
