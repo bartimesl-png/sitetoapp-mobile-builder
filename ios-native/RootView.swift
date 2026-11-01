@@ -85,7 +85,7 @@ private struct SeasonalDecorationsLayer: View {
             let safeBottom = geometry.safeAreaInsets.bottom
             ZStack(alignment: .top) {
                 LinearGradient(
-                    colors: [theme.soft.opacity(0.24), .clear, theme.secondary.opacity(0.035), .clear, theme.soft.opacity(0.19)],
+                    colors: [theme.soft.opacity(0.42), theme.accent.opacity(0.055), .clear, theme.secondary.opacity(0.065), .clear, theme.soft.opacity(0.34)],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
@@ -93,18 +93,18 @@ private struct SeasonalDecorationsLayer: View {
 
                 VStack(spacing: 0) {
                     LinearGradient(colors: [theme.accent, theme.secondary, theme.accent], startPoint: .leading, endPoint: .trailing)
-                        .frame(height: 5)
+                        .frame(height: 7)
                     HStack(spacing: 9) {
-                        ForEach(0..<9, id: \.self) { index in
+                        ForEach(0..<7, id: \.self) { index in
                             Capsule().fill(index.isMultiple(of: 2) ? theme.accent.opacity(0.68) : theme.secondary.opacity(0.7))
                                 .frame(width: 20, height: 3)
                             Text(theme.decorations[index % theme.decorations.count])
                                 .font(.system(size: 16))
-                            if index < 8 { Spacer(minLength: 0) }
+                            if index < 6 { Spacer(minLength: 0) }
                         }
                     }
                     .padding(.horizontal, 12)
-                    .frame(height: 31)
+                    .frame(height: 38)
                     .background(.ultraThinMaterial.opacity(0.7))
                     Spacer()
                     LinearGradient(colors: [theme.secondary.opacity(0.0), theme.secondary.opacity(0.48), theme.accent.opacity(0.86)], startPoint: .leading, endPoint: .trailing)
@@ -129,10 +129,10 @@ private struct SeasonalDecorationsLayer: View {
                     .position(x: flybyX, y: max(safeTop + 42, 58))
                     .task(id: theme.id) {
                         while !Task.isCancelled {
-                            try? await Task.sleep(nanoseconds: 12_000_000_000)
+                            try? await Task.sleep(nanoseconds: 9_000_000_000)
                             guard !Task.isCancelled else { return }
                             flybyX = -110
-                            withAnimation(.linear(duration: 4.6)) {
+                            withAnimation(.linear(duration: 4.2)) {
                                 flybyX = geometry.size.width + 110
                             }
                             try? await Task.sleep(nanoseconds: 5_000_000_000)
@@ -158,7 +158,7 @@ struct RootView: View {
     @AppStorage("partenairefoyer.activeRole") private var activeRoleRaw = ""
     @AppStorage("partenairefoyer.language") private var appLanguage = "fr"
     @State private var seasonalTheme: NativeSeasonalTheme?
-    @AppStorage("partenairefoyer.nativeSeasonalEnabled") private var seasonalThemeEnabled = true
+    @AppStorage("partenairefoyer.nativeSeasonalEnabled.v2") private var seasonalThemeEnabled = true
     @StateObject private var listingsService = ListingsService()
     @StateObject private var classifiedAdsService = ClassifiedAdsService()
     @StateObject private var buyerSearchesService = PublicBuyerSearchesService()
@@ -197,7 +197,9 @@ struct RootView: View {
                 .tag(4)
         }
         .tint(visibleSeasonalTheme?.accent ?? PFTheme.brand)
-        .toolbarBackground(visibleSeasonalTheme?.soft.opacity(0.62) ?? Color(uiColor: .systemBackground), for: .tabBar)
+        .toolbarBackground(visibleSeasonalTheme?.soft.opacity(0.90) ?? Color(uiColor: .systemBackground), for: .tabBar)
+        .toolbarBackground(visibleSeasonalTheme?.soft.opacity(0.94) ?? Color(uiColor: .systemBackground), for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
         .toolbarBackground(.visible, for: .tabBar)
         .overlay {
             if let theme = visibleSeasonalTheme {
@@ -208,25 +210,6 @@ struct RootView: View {
         .environment(\.pfNativeSeasonalEnabled, seasonalThemeEnabled)
         .preferredColorScheme(.light)
         .environment(\.locale, Locale(identifier: appLanguage == "en" ? "en_US" : "fr_FR"))
-        .safeAreaInset(edge: .top, spacing: 0) {
-            HStack {
-                if seasonalTheme != nil {
-                    Button { seasonalThemeEnabled.toggle() } label: {
-                        Image(systemName: seasonalThemeEnabled ? "xmark" : "sparkles")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 30, height: 30)
-                            .background(.ultraThinMaterial, in: Circle())
-                    }
-                    .accessibilityLabel(appLanguage == "en" ? "Toggle seasonal decorations" : "Afficher ou masquer les décorations saisonnières")
-                }
-                Spacer()
-                AppLanguageControl(selection: $appLanguage)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 5)
-            .background(.bar)
-        }
         .task { await loadSeasonalTheme() }
         .onReceive(NotificationCenter.default.publisher(for: .partenaireFoyerPushNotificationTapped)) { notification in
             guard let fields = notification.object as? [String: String] else { return }
@@ -5682,6 +5665,9 @@ private struct NativeSpacePickerView: View {
     @State private var showFullSite = false
     @StateObject private var auth = WixAuthStore.shared
     @AppStorage("partenairefoyer.activeRole") private var activeRoleRaw = ""
+    @AppStorage("partenairefoyer.language") private var appLanguage = "fr"
+    @AppStorage("partenairefoyer.nativeSeasonalEnabled.v2") private var seasonalThemeEnabled = true
+    @Environment(\.pfNativeSeasonalTheme) private var seasonalTheme
 
     var body: some View {
         NavigationStack {
@@ -5709,6 +5695,20 @@ private struct NativeSpacePickerView: View {
             }
             .navigationTitle("Mon espace")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    AppLanguageControl(selection: $appLanguage)
+                    if seasonalTheme != nil {
+                        Button { seasonalThemeEnabled.toggle() } label: {
+                            Image(systemName: seasonalThemeEnabled ? "xmark" : "sparkles")
+                                .font(.system(size: 10, weight: .bold))
+                                .frame(width: 26, height: 26)
+                                .background(.thinMaterial, in: Circle())
+                        }
+                        .accessibilityLabel(appLanguage == "en" ? "Toggle seasonal decorations" : "Afficher ou masquer les décorations saisonnières")
+                    }
+                }
+            }
             .task(id: activeRoleRaw) {
                 guard activeRoleRaw == AccountRole.particulier.rawValue,
                       auth.member != nil else { return }
