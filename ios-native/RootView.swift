@@ -126,15 +126,15 @@ struct RootView: View {
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            SearchView()
+            PartenaireFoyerWebsiteView()
                 .tag(0)
+                .tabItem { Label("Accueil", systemImage: "house.fill") }
+            SearchView()
+                .tag(1)
                 .tabItem { Label("Annonces", systemImage: "magnifyingglass") }
             FavoritesView()
-                .tag(1)
-                .tabItem { Label("Favoris", systemImage: "heart") }
-            PartenaireFoyerWebsiteView()
                 .tag(2)
-                .tabItem { Label("Site", systemImage: "safari") }
+                .tabItem { Label("Favoris", systemImage: "heart") }
             AccountView(showSeasonalTheme: $seasonalThemeEnabled)
                 .tag(3)
                 .tabItem { Label("Aide", systemImage: "questionmark.circle") }
@@ -144,7 +144,7 @@ struct RootView: View {
         .toolbarBackground(.visible, for: .tabBar)
         .overlay {
             // The website renders its own seasonal theme; native screens use this layer.
-            if selectedTab != 2, let theme = visibleSeasonalTheme {
+            if selectedTab != 0, let theme = visibleSeasonalTheme {
                 SeasonalDecorationsLayer(theme: theme)
             }
         }
