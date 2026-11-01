@@ -76,74 +76,183 @@ private extension EnvironmentValues {
 
 private struct SeasonalDecorationsLayer: View {
     let theme: NativeSeasonalTheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var passageIndex = 0
-    @State private var flybyX: CGFloat = -110
+    @State private var flybyX: CGFloat = -100
+    @State private var flybyActive = false
+
+    private var symbols: [String] {
+        switch theme.id {
+        case "paques": return ["hare.fill", "bird.fill", "sun.max.fill", "sparkles"]
+        case "printemps": return ["leaf.fill", "sun.max.fill", "wind", "sparkles"]
+        case "fete-des-meres": return ["heart.fill", "gift.fill", "leaf.fill", "sparkles"]
+        case "fete-des-peres": return ["gift.fill", "star.fill", "hammer.fill", "sun.max.fill"]
+        case "14-juillet": return ["flag.fill", "sparkles", "star.fill", "burst.fill"]
+        case "ete": return ["sun.max.fill", "water.waves", "sailboat.fill", "sparkles"]
+        case "rentree": return ["book.fill", "pencil", "leaf.fill", "sparkles"]
+        case "octobre-rose": return ["heart.fill", "gift.fill", "sparkles", "leaf.fill"]
+        case "halloween": return ["moon.stars.fill", "cloud.fog.fill", "sparkles", "flame.fill"]
+        case "armistice": return ["flag.fill", "medal.fill", "bird.fill", "star.fill"]
+        case "movember": return ["drop.fill", "cross.case.fill", "heart.fill", "sparkles"]
+        case "noel": return ["gift.fill", "snowflake", "tree.fill", "star.fill"]
+        case "nouvel-an": return ["sparkles", "party.popper.fill", "wineglass.fill", "star.fill"]
+        case "saint-valentin": return ["heart.fill", "heart.circle.fill", "envelope.fill", "sparkles"]
+        case "black-friday": return ["tag.fill", "bolt.fill", "bag.fill", "sparkles"]
+        default: return ["sparkles", "star.fill", "sun.max.fill", "leaf.fill"]
+        }
+    }
+
+    private var particleStyle: String {
+        switch theme.id {
+        case "noel": return "snow"
+        case "halloween", "movember": return "embers"
+        case "paques", "printemps", "fete-des-meres", "octobre-rose", "armistice", "saint-valentin": return "petals"
+        case "rentree", "ete": return "leaves"
+        default: return "confetti"
+        }
+    }
 
     var body: some View {
         GeometryReader { geometry in
             let safeTop = geometry.safeAreaInsets.top
-            let safeBottom = geometry.safeAreaInsets.bottom
-            ZStack(alignment: .top) {
-                LinearGradient(
-                    colors: [theme.soft.opacity(0.42), theme.accent.opacity(0.055), .clear, theme.secondary.opacity(0.065), .clear, theme.soft.opacity(0.34)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
+            ZStack {
+                // Light pools make the active event visible without changing page layouts.
+                RadialGradient(colors: [theme.accent.opacity(0.15), .clear], center: .topLeading, startRadius: 8, endRadius: geometry.size.width * 0.72)
+                    .ignoresSafeArea()
+                RadialGradient(colors: [theme.secondary.opacity(0.13), .clear], center: .bottomTrailing, startRadius: 10, endRadius: geometry.size.width * 0.78)
+                    .ignoresSafeArea()
+
+                TimelineView(.animation(minimumInterval: 1.0 / 12.0, paused: reduceMotion)) { timeline in
+                    Canvas { context, size in
+                        let time = reduceMotion ? 0 : timeline.date.timeIntervalSinceReferenceDate
+                        for index in 0..<38 {
+                            let seed = Double(index)
+                            let xBase = ((seed * 0.61803398875).truncatingRemainder(dividingBy: 1.0)) * size.width
+                            let cycle = size.height + 34.0
+                            let speed = 9.0 + (seed.truncatingRemainder(dividingBy: 5.0) * 3.2)
+                            let y = ((seed * 31.7 + time * speed).truncatingRemainder(dividingBy: cycle)) - 17
+                            let drift = reduceMotion ? 0 : sin(time * (0.45 + seed.truncatingRemainder(dividingBy: 4.0) * 0.12) + seed) * (9 + seed.truncatingRemainder(dividingBy: 15.0))
+                            let x = xBase + drift
+                            let radius = 1.4 + seed.truncatingRemainder(dividingBy: 4.0) * 0.55
+                            let alpha = 0.12 + (seed.truncatingRemainder(dividingBy: 4.0) * 0.035)
+                            let color = index.isMultiple(of: 3) ? theme.secondary.opacity(alpha) : theme.accent.opacity(alpha)
+                            var path = Path()
+                            switch particleStyle {
+                            case "snow":
+                                path.addEllipse(in: CGRect(x: x, y: y, width: radius * 2.2, height: radius * 2.2))
+                                context.fill(path, with: .color(color))
+                            case "petals":
+                                let rect = CGRect(x: x - radius, y: y - radius * 0.58, width: radius * 2.5, height: radius * 1.15)
+                                path.addEllipse(in: rect)
+                                let angle = sin(time * 0.55 + seed) * 0.7
+                                path = path.applying(CGAffineTransform(translationX: rect.midX, y: rect.midY).rotated(by: angle).translatedBy(x: -rect.midX, y: -rect.midY))
+                                context.fill(path, with: .color(color))
+                            case "leaves":
+                                let rect = CGRect(x: x - radius * 1.2, y: y - radius * 0.65, width: radius * 2.5, height: radius * 1.3)
+                                path.addEllipse(in: rect)
+                                let angle = sin(time * 0.42 + seed) * 0.9
+                                path = path.applying(CGAffineTransform(translationX: rect.midX, y: rect.midY).rotated(by: angle).translatedBy(x: -rect.midX, y: -rect.midY))
+                                context.fill(path, with: .color(color))
+                            case "embers":
+                                path.addEllipse(in: CGRect(x: x, y: y, width: radius * 1.5, height: radius * 1.5))
+                                context.fill(path, with: .color(color))
+                            default:
+                                if index.isMultiple(of: 2) {
+                                    path.addRoundedRect(in: CGRect(x: x, y: y, width: radius * 2.8, height: radius * 1.15), cornerSize: CGSize(width: 1, height: 1))
+                                } else {
+                                    path.move(to: CGPoint(x: x, y: y - radius))
+                                    path.addLine(to: CGPoint(x: x + radius, y: y))
+                                    path.addLine(to: CGPoint(x: x, y: y + radius))
+                                    path.addLine(to: CGPoint(x: x - radius, y: y))
+                                    path.closeSubpath()
+                                }
+                                let angle = sin(time * 0.6 + seed) * 0.6
+                                path = path.applying(CGAffineTransform(translationX: x, y: y).rotated(by: angle).translatedBy(x: -x, y: -y))
+                                context.fill(path, with: .color(color))
+                            }
+                        }
+                    }
+                }
                 .ignoresSafeArea()
 
                 VStack(spacing: 0) {
                     LinearGradient(colors: [theme.accent, theme.secondary, theme.accent], startPoint: .leading, endPoint: .trailing)
-                        .frame(height: 7)
-                    HStack(spacing: 9) {
-                        ForEach(0..<7, id: \.self) { index in
-                            Capsule().fill(index.isMultiple(of: 2) ? theme.accent.opacity(0.68) : theme.secondary.opacity(0.7))
-                                .frame(width: 20, height: 3)
-                            Text(theme.decorations[index % theme.decorations.count])
-                                .font(.system(size: 16))
-                            if index < 6 { Spacer(minLength: 0) }
-                        }
-                    }
-                    .padding(.horizontal, 12)
-                    .frame(height: 38)
-                    .background(.ultraThinMaterial.opacity(0.7))
+                        .frame(height: 5)
                     Spacer()
-                    LinearGradient(colors: [theme.secondary.opacity(0.0), theme.secondary.opacity(0.48), theme.accent.opacity(0.86)], startPoint: .leading, endPoint: .trailing)
-                        .frame(height: 3)
+                    LinearGradient(colors: [.clear, theme.secondary.opacity(0.58), theme.accent.opacity(0.9)], startPoint: .leading, endPoint: .trailing)
+                        .frame(height: 4)
                 }
-                .frame(maxHeight: .infinity)
                 .ignoresSafeArea()
 
-                ForEach(0..<4, id: \.self) { index in
-                    Text(theme.decorations[(index + 1) % theme.decorations.count])
-                        .font(.system(size: index.isMultiple(of: 2) ? 25 : 21))
-                        .shadow(color: theme.accent.opacity(0.25), radius: 5, y: 2)
+                ForEach(0..<6, id: \.self) { index in
+                    let isLeft = index.isMultiple(of: 2)
+                    SeasonalThemeEmblem(symbol: symbols[(index + 1) % symbols.count], theme: theme, size: index == 2 || index == 3 ? 40 : 34)
                         .position(
-                            x: index.isMultiple(of: 2) ? 15 : max(15, geometry.size.width - 15),
-                            y: max(safeTop + 92, geometry.size.height * (index < 2 ? 0.28 : 0.72))
+                            x: isLeft ? 19 : max(19, geometry.size.width - 19),
+                            y: max(safeTop + 76, geometry.size.height * (0.23 + Double(index / 2) * 0.27))
                         )
                 }
 
-                Text(theme.passages[passageIndex % theme.passages.count])
-                    .font(.system(size: 54))
-                    .shadow(color: theme.accent.opacity(0.45), radius: 9, y: 4)
-                    .position(x: flybyX, y: max(safeTop + 42, 58))
+                SeasonalThemeEmblem(symbol: symbols[passageIndex % symbols.count], theme: theme, size: 54)
+                    .position(x: flybyX, y: max(safeTop + 34, 50))
+                    .opacity(flybyActive ? 1 : 0)
+                    .rotationEffect(.degrees(flybyActive ? 7 : -7))
                     .task(id: theme.id) {
                         while !Task.isCancelled {
-                            try? await Task.sleep(nanoseconds: 9_000_000_000)
+                            try? await Task.sleep(nanoseconds: 7_000_000_000)
                             guard !Task.isCancelled else { return }
-                            flybyX = -110
-                            withAnimation(.linear(duration: 4.2)) {
-                                flybyX = geometry.size.width + 110
+                            flybyX = -70
+                            flybyActive = true
+                            withAnimation(.easeInOut(duration: 4.8)) {
+                                flybyX = geometry.size.width + 70
                             }
                             try? await Task.sleep(nanoseconds: 5_000_000_000)
-                            passageIndex = (passageIndex + 1) % theme.passages.count
-                            flybyX = -110
+                            guard !Task.isCancelled else { return }
+                            flybyActive = false
+                            passageIndex = (passageIndex + 1) % symbols.count
                         }
                     }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .ignoresSafeArea()
             .allowsHitTesting(false)
             .accessibilityHidden(true)
         }
+    }
+}
+
+private struct SeasonalThemeEmblem: View {
+    let symbol: String
+    let theme: NativeSeasonalTheme
+    let size: CGFloat
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var floats = false
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(RadialGradient(colors: [theme.secondary.opacity(0.48), theme.accent.opacity(0.18), .clear], center: .center, startRadius: 2, endRadius: size * 0.72))
+                .frame(width: size * 1.65, height: size * 1.65)
+                .blur(radius: size * 0.12)
+            Circle()
+                .fill(LinearGradient(colors: [theme.soft.opacity(0.92), theme.secondary.opacity(0.34), theme.accent.opacity(0.25)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                .overlay(Circle().stroke(AngularGradient(colors: [theme.secondary.opacity(0.95), .white.opacity(0.92), theme.accent.opacity(0.85), theme.secondary.opacity(0.95)], center: .center), lineWidth: 1.4))
+                .overlay {
+                    Image(systemName: symbol)
+                        .font(.system(size: size * 0.46, weight: .heavy, design: .rounded))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(LinearGradient(colors: [theme.accent, theme.secondary], startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .shadow(color: theme.accent.opacity(0.38), radius: 5, y: 2)
+                }
+                .frame(width: size, height: size)
+                .shadow(color: theme.accent.opacity(0.27), radius: 9, y: 4)
+        }
+        .frame(width: size * 1.65, height: size * 1.65)
+        .offset(y: reduceMotion ? 0 : (floats ? -3 : 3))
+        .rotationEffect(.degrees(reduceMotion ? 0 : (floats ? 4 : -4)))
+        .animation(.easeInOut(duration: 2.2).repeatForever(autoreverses: true), value: floats)
+        .onAppear { floats = true }
+        .accessibilityHidden(true)
     }
 }
 private extension Color {
