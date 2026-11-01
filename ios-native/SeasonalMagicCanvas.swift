@@ -282,11 +282,11 @@ struct SeasonalScenicBackdrop: View {
                     let x = w * (0.45 + i * 0.052)
                     let buildingHeight = h * (0.18 + Double(index % 4) * 0.060)
                     let rect = CGRect(x: x, y: h - buildingHeight, width: w * 0.048, height: buildingHeight)
-                    context.fill(Path(rect), with: .color(Color.black.opacity(0.24)))
+                    context.fill(Path { $0.addRect(rect) }, with: .color(Color.black.opacity(0.24)))
                     if index % 2 == 0 {
                         let window = CGRect(x: x + w * 0.014, y: h - buildingHeight + h * 0.060,
                                             width: 4, height: 7)
-                        context.fill(Path(window), with: .color(Color.yellow.opacity(0.64)))
+                        context.fill(Path { $0.addRect(window) }, with: .color(Color.yellow.opacity(0.64)))
                     }
                 }
 
