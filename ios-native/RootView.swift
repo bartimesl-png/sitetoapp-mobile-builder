@@ -15,15 +15,133 @@ private enum PFTheme {
     static let paleMint = Color(red: 0.91, green: 0.98, blue: 0.95)
 }
 
+private struct NativeSeasonalThemeResponse: Decodable {
+    let activeTheme: String?
+}
+
+private struct NativeSeasonalTheme {
+    let id: String
+    let accent: Color
+    let secondary: Color
+    let soft: Color
+    let decorations: [String]
+    let passages: [String]
+
+    init?(id: String?) {
+        guard let id else { return nil }
+        let values: (UInt, UInt, UInt, [String], [String])
+        switch id {
+        case "paques": values = (0xA84D9B,0x45A889,0xFFF0C9,["🐰","🥚","🌷","🐣","🌼","🪺","🦋","🌿","🥕","💐"],["🐣","🥚","🐰"])
+        case "printemps": values = (0x32895E,0xEF9A43,0xE5F6DD,["🌼","🌿","🦋","🌸","🐝","🌱","🌷","🍃","🌻","🐞"],["🐝","🐞","🌻"])
+        case "fete-des-meres": values = (0xC44578,0xE6A546,0xFFE8EF,["🌸","💐","💗","🌷","🌺","🎀","🌼","💕","🪻","🌹"],["🌹","💝","🌷"])
+        case "fete-des-peres": values = (0x276AA5,0xEDAA39,0xE7F3FF,["☀️","🎁","💙","⭐","🎉","🧢","🛠️","🏆","🎈","🚙"],["👔","🏆","🎁"])
+        case "14-juillet": values = (0x2456A6,0xE04455,0xE9F0FF,["🔵","⚪","🔴","🎆","🎇","🎉","🇫🇷","✨","🎊","🎈"],["🎆","🇫🇷","🎇"])
+        case "ete": values = (0xDF762E,0x1E9EAA,0xFFF2D4,["☀️","🍋","🌊","🍉","🐚","🕶️","🌴","🧡","🐬","🍍"],["🐬","🍉","🕶️"])
+        case "rentree": values = (0xB35C2E,0x586EB6,0xFFF0DB,["📚","✏️","🍂","🍁","🎒","🖍️","📒","🌰","📝","🍎"],["🎒","✏️","📚"])
+        case "octobre-rose": values = (0xC93678,0xE98DB7,0xFFEBF4,["🎀","🌸","💗","🌷","💕","🩷","🌺","💞","🪷","💖"],["🎀","🌸","🩷"])
+        case "halloween": values = (0x9B4DE0,0xF07825,0xF2EAFF,["🎃","🦇","👻","🕸️","🕷️","🍬","🧙","🌙","🧡","💜"],["🎃","🦇","🕷️","👻"])
+        case "armistice": values = (0x365677,0xBB3440,0xEDF3F8,["🌺","🇫🇷","🕊️","🌹","⭐","💐","🪖","🎗️","🕯️","🌿"],["🕊️","🌺","🪖"])
+        case "movember": values = (0x187F94,0x385AA0,0xE2F6F7,["🧔","💙","🎗️","🩵","⭐","🫶","💬","🌀","🌊","💠"],["🧔","🎗️","🩵"])
+        case "noel": values = (0xB73543,0x268459,0xFFF0E9,["🎄","⭐","🎁","❄️","🦌","🔔","🎅","🧦","🕯️","🍪"],["🎅","🦌","⛄","🎄"])
+        case "nouvel-an": values = (0x8262C5,0xD6A942,0xF0EAFF,["✨","🥂","🎆","🎇","🎉","🪩","⭐","🥳","💫","🎊"],["🍾","🎆","🪩"])
+        case "saint-valentin": values = (0xCF3C65,0xF18CA6,0xFFEBF0,["💌","❤️","🌹","💘","💕","💞","💗","🌷","💝","🩷"],["💌","🌹","💘"])
+        case "black-friday": values = (0x8056DB,0xF0B53E,0xEEE8FF,["✨","🖤","🏷️","💜","⚡","💎","🌟","🎁","💫","🛍️"],["🛍️","🏷️","💎"])
+        default: return nil
+        }
+        self.id = id
+        self.accent = Color(pfHex: values.0)
+        self.secondary = Color(pfHex: values.1)
+        self.soft = Color(pfHex: values.2)
+        self.decorations = values.3
+        self.passages = values.4
+    }
+}
+
+private struct NativeSeasonalThemeKey: EnvironmentKey {
+    static let defaultValue: NativeSeasonalTheme? = nil
+}
+private struct NativeSeasonalEnabledKey: EnvironmentKey {
+    static let defaultValue = true
+}
+private extension EnvironmentValues {
+    var pfNativeSeasonalTheme: NativeSeasonalTheme? {
+        get { self[NativeSeasonalThemeKey.self] }
+        set { self[NativeSeasonalThemeKey.self] = newValue }
+    }
+    var pfNativeSeasonalEnabled: Bool {
+        get { self[NativeSeasonalEnabledKey.self] }
+        set { self[NativeSeasonalEnabledKey.self] = newValue }
+    }
+}
+
+private struct SeasonalDecorationsLayer: View {
+    let theme: NativeSeasonalTheme
+    @State private var passageIndex = 0
+    @State private var flybyX: CGFloat = -140
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .topLeading) {
+                theme.soft.opacity(0.055).ignoresSafeArea()
+                LinearGradient(colors: [theme.accent, theme.secondary, theme.accent], startPoint: .leading, endPoint: .trailing)
+                    .frame(height: 7)
+                    .frame(maxHeight: .infinity, alignment: .top)
+                    .ignoresSafeArea(edges: .top)
+
+                ForEach(0..<theme.decorations.count, id: \.self) { index in
+                    Text(theme.decorations[index])
+                        .font(.system(size: index.isMultiple(of: 3) ? 25 : 21))
+                        .opacity(index.isMultiple(of: 3) ? 0.82 : 0.66)
+                        .position(
+                            x: index.isMultiple(of: 2) ? 18 : max(18, geometry.size.width - 18),
+                            y: geometry.size.height * (0.13 + CGFloat(index % 7) * 0.115)
+                        )
+                }
+
+                Text(theme.passages[passageIndex % theme.passages.count])
+                    .font(.system(size: 66))
+                    .shadow(color: theme.accent.opacity(0.35), radius: 8, y: 4)
+                    .position(x: flybyX, y: max(48, geometry.safeAreaInsets.top + 42))
+                    .task(id: theme.id) {
+                        while !Task.isCancelled {
+                            try? await Task.sleep(nanoseconds: 25_000_000_000)
+                            guard !Task.isCancelled else { return }
+                            flybyX = -140
+                            withAnimation(.linear(duration: 6.0)) {
+                                flybyX = geometry.size.width + 140
+                            }
+                            try? await Task.sleep(nanoseconds: 8_000_000_000)
+                            passageIndex = (passageIndex + 1) % theme.passages.count
+                            flybyX = -140
+                        }
+                    }
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
+    }
+}
+private extension Color {
+    init(pfHex: UInt) {
+        self.init(.sRGB, red: Double((pfHex >> 16) & 0xFF) / 255, green: Double((pfHex >> 8) & 0xFF) / 255, blue: Double(pfHex & 0xFF) / 255, opacity: 1)
+    }
+}
+
 struct RootView: View {
     @State private var selectedTab = 0
     @State private var selectedCatalogSection: NativeCatalogSection = .hub
     @AppStorage("partenairefoyer.activeRole") private var activeRoleRaw = ""
     @AppStorage("partenairefoyer.language") private var appLanguage = "fr"
+    @State private var seasonalTheme: NativeSeasonalTheme?
+    @AppStorage("partenairefoyer.nativeSeasonalEnabled") private var seasonalThemeEnabled = true
     @StateObject private var listingsService = ListingsService()
     @StateObject private var classifiedAdsService = ClassifiedAdsService()
     @StateObject private var buyerSearchesService = PublicBuyerSearchesService()
     @StateObject private var professionalsService = ProfessionalsService()
+
+    private var visibleSeasonalTheme: NativeSeasonalTheme? {
+        seasonalThemeEnabled ? seasonalTheme : nil
+    }
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -53,11 +171,30 @@ struct RootView: View {
                 .tabItem { Label(appLanguage == "en" ? "Menu" : "Menu", systemImage: "line.3.horizontal") }
                 .tag(4)
         }
-        .tint(PFTheme.brand)
+        .tint(visibleSeasonalTheme?.accent ?? PFTheme.brand)
+        .toolbarBackground(visibleSeasonalTheme?.soft ?? Color(uiColor: .systemBackground), for: .tabBar)
+        .toolbarBackground(.visible, for: .tabBar)
+        .overlay {
+            if let theme = visibleSeasonalTheme {
+                SeasonalDecorationsLayer(theme: theme)
+            }
+        }
+        .environment(\.pfNativeSeasonalTheme, seasonalTheme)
+        .environment(\.pfNativeSeasonalEnabled, seasonalThemeEnabled)
         .preferredColorScheme(.light)
         .environment(\.locale, Locale(identifier: appLanguage == "en" ? "en_US" : "fr_FR"))
         .safeAreaInset(edge: .top, spacing: 0) {
             HStack {
+                if seasonalTheme != nil {
+                    Button { seasonalThemeEnabled.toggle() } label: {
+                        Image(systemName: seasonalThemeEnabled ? "xmark" : "sparkles")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 30, height: 30)
+                            .background(.ultraThinMaterial, in: Circle())
+                    }
+                    .accessibilityLabel(appLanguage == "en" ? "Toggle seasonal decorations" : "Afficher ou masquer les décorations saisonnières")
+                }
                 Spacer()
                 AppLanguageControl(selection: $appLanguage)
             }
@@ -65,6 +202,7 @@ struct RootView: View {
             .padding(.vertical, 5)
             .background(.bar)
         }
+        .task { await loadSeasonalTheme() }
         .onReceive(NotificationCenter.default.publisher(for: .partenaireFoyerPushNotificationTapped)) { notification in
             guard let fields = notification.object as? [String: String] else { return }
             openPushDestination(fields)
@@ -73,6 +211,21 @@ struct RootView: View {
             if let fields = UserDefaults.standard.dictionary(forKey: "partenairefoyer.pendingPushTap.v1") as? [String: String] {
                 openPushDestination(fields)
             }
+        }
+    }
+
+    private func loadSeasonalTheme() async {
+        guard let url = URL(string: "https://www.partenairefoyer.com/api/seasonal-theme") else { return }
+        do {
+            var request = URLRequest(url: url)
+            request.cachePolicy = .reloadIgnoringLocalCacheData
+            request.timeoutInterval = 10
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else { return }
+            let payload = try JSONDecoder().decode(NativeSeasonalThemeResponse.self, from: data)
+            seasonalTheme = NativeSeasonalTheme(id: payload.activeTheme)
+        } catch {
+            // Keep the native app usable if the seasonal endpoint is unavailable.
         }
     }
 
