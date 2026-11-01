@@ -19,7 +19,7 @@ private struct NativeSeasonalThemeResponse: Decodable {
     let activeTheme: String?
 }
 
-private struct NativeSeasonalTheme {
+struct NativeSeasonalTheme {
     let id: String
     let accent: Color
     let secondary: Color
@@ -77,18 +77,25 @@ private extension EnvironmentValues {
 
 private struct SeasonalDecorationsLayer: View {
     let theme: NativeSeasonalTheme
+    let isHome: Bool
 
-    // Keep controls and listing photos unobstructed. The seasonal artwork belongs
-    // inside the homepage, not in floating circular badges over every screen.
     var body: some View {
-        VStack(spacing: 0) {
+        ZStack {
+            // Floating shapes move behind the controls and never intercept touches.
+            if isHome {
+                SeasonalMagicCanvas(theme: theme, stage: .ambient)
+                    .opacity(0.72)
+                    .ignoresSafeArea()
+            }
+            VStack(spacing: 0) {
             LinearGradient(
                 colors: [theme.accent, theme.secondary, theme.accent],
                 startPoint: .leading,
                 endPoint: .trailing
             )
             .frame(height: 4)
-            Spacer(minLength: 0)
+                Spacer(minLength: 0)
+            }
         }
         .ignoresSafeArea()
         .allowsHitTesting(false)
@@ -124,7 +131,9 @@ private struct HalloweenHouseShape: Shape {
 private struct SeasonalFeatureBanner: View {
     let theme: NativeSeasonalTheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var floating = false
+    @State private var celebrationTime: TimeInterval = -1000
 
     private var content: (title: String, caption: String, primary: String, secondary: String) {
         switch theme.id {
@@ -168,11 +177,12 @@ private struct SeasonalFeatureBanner: View {
             GeometryReader { geometry in
                 let width = geometry.size.width
                 let height = geometry.size.height
+                let visualScale = min(1.75, max(0.95, width / 500))
 
                 Circle()
                     .fill(theme.secondary.opacity(0.33))
-                    .frame(width: 155, height: 155)
-                    .blur(radius: 40)
+                    .frame(width: 155 * visualScale, height: 155 * visualScale)
+                    .blur(radius: 40 * visualScale)
                     .position(x: width * 0.87, y: height * 0.27)
 
                 if theme.id == "halloween" {
@@ -183,20 +193,20 @@ private struct SeasonalFeatureBanner: View {
                             startRadius: 2,
                             endRadius: 60
                         ))
-                        .frame(width: 108, height: 108)
+                        .frame(width: 108 * visualScale, height: 108 * visualScale)
                         .shadow(color: Color(pfHex: 0xFF9D45).opacity(0.66), radius: 28)
                         .position(x: width * 0.79, y: height * 0.35)
                         .scaleEffect(floating ? 1.055 : 1.0)
 
                     HalloweenHouseShape()
                         .fill(Color(pfHex: 0x100B1B))
-                        .frame(width: 174, height: 119)
+                        .frame(width: 174 * visualScale, height: 119 * visualScale)
                         .position(x: width * 0.79, y: height * 0.71)
 
                     HStack(spacing: 19) {
                         RoundedRectangle(cornerRadius: 2)
                             .fill(Color(pfHex: 0xFFBF5A))
-                            .frame(width: 9, height: 17)
+                            .frame(width: 9 * visualScale, height: 17 * visualScale)
                         RoundedRectangle(cornerRadius: 2)
                             .fill(Color(pfHex: 0xFFBF5A))
                             .frame(width: 9, height: 17)
@@ -205,40 +215,41 @@ private struct SeasonalFeatureBanner: View {
                     .position(x: width * 0.83, y: height * 0.74)
 
                     Text("🦇")
-                        .font(.system(size: 49))
+                        .font(.system(size: 49 * visualScale))
                         .rotationEffect(.degrees(floating ? 12 : -10))
                         .position(x: width * 0.63, y: height * 0.23)
                     Text("👻")
-                        .font(.system(size: 58))
+                        .font(.system(size: 58 * visualScale))
                         .rotationEffect(.degrees(floating ? 8 : -8))
                         .position(x: width * 0.94, y: height * 0.51)
                     Text("🎃")
-                        .font(.system(size: 89))
+                        .font(.system(size: 89 * visualScale))
                         .position(x: width * 0.76, y: height * 0.94)
                 } else {
                     Circle()
                         .stroke(.white.opacity(0.21), lineWidth: 1.5)
-                        .frame(width: 158, height: 158)
+                        .frame(width: 158 * visualScale, height: 158 * visualScale)
                         .position(x: width * 0.81, y: height * 0.49)
                     Text(content.primary)
-                        .font(.system(size: 110))
+                        .font(.system(size: 110 * visualScale))
                         .rotationEffect(.degrees(floating ? 5 : -5))
                         .shadow(color: .black.opacity(0.18), radius: 15, y: 9)
                         .position(x: width * 0.78, y: height * 0.51)
                     Text(content.secondary)
-                        .font(.system(size: 65))
+                        .font(.system(size: 65 * visualScale))
                         .rotationEffect(.degrees(floating ? -9 : 8))
                         .position(x: width * 0.93, y: height * 0.77)
                 }
             }
 
             LinearGradient(
-                colors: [darkColor.opacity(0.78), darkColor.opacity(0.18), .clear],
+                colors: [darkColor.opacity(0.86), darkColor.opacity(0.20), .clear],
                 startPoint: .leading,
                 endPoint: .trailing
             )
+            SeasonalMagicCanvas(theme: theme, stage: .feature, burstTime: celebrationTime)
 
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 15) {
                 HStack(spacing: 7) {
                     Image(systemName: "sparkle")
                         .font(.system(size: 12, weight: .bold))
@@ -251,7 +262,8 @@ private struct SeasonalFeatureBanner: View {
                 .foregroundStyle(.white.opacity(0.88))
 
                 Text(content.title)
-                    .font(.system(size: 29, weight: .black, design: .rounded))
+                    .font(.system(size: horizontalSizeClass == .regular ? 43 : 31,
+                                  weight: .black, design: .rounded))
                     .tracking(-0.5)
                     .lineLimit(2)
                     .minimumScaleFactor(0.75)
@@ -262,18 +274,34 @@ private struct SeasonalFeatureBanner: View {
                     .font(.system(size: 14, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.94))
                     .fixedSize(horizontal: false, vertical: true)
+
+                Button {
+                    guard !reduceMotion else { return }
+                    celebrationTime = Date().timeIntervalSinceReferenceDate
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                } label: {
+                    Label("Lancer la magie", systemImage: "sparkles")
+                        .font(.system(size: horizontalSizeClass == .regular ? 15 : 13,
+                                      weight: .bold, design: .rounded))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .foregroundStyle(darkColor)
+                        .background(.white.opacity(0.95), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(reduceMotion)
+                .accessibilityHint("Déclenche une pluie d'animations de l'événement.")
             }
-            .frame(width: 198, alignment: .leading)
-            .padding(.leading, 19)
+            .frame(width: horizontalSizeClass == .regular ? 360 : 208, alignment: .leading)
+            .padding(.leading, horizontalSizeClass == .regular ? 34 : 20)
         }
-        .frame(height: 192)
+        .frame(height: horizontalSizeClass == .regular ? 290 : 258)
         .clipShape(RoundedRectangle(cornerRadius: 25, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 25, style: .continuous)
                 .stroke(.white.opacity(0.26), lineWidth: 1)
         }
         .shadow(color: theme.accent.opacity(0.25), radius: 17, y: 8)
-        .accessibilityElement(children: .combine)
         .onAppear {
             guard !reduceMotion else { return }
             withAnimation(.easeInOut(duration: 3.0).repeatForever(autoreverses: true)) {
@@ -340,7 +368,7 @@ struct RootView: View {
         .toolbarBackground(.visible, for: .tabBar)
         .overlay {
             if let theme = visibleSeasonalTheme {
-                SeasonalDecorationsLayer(theme: theme)
+                SeasonalDecorationsLayer(theme: theme, isHome: selectedTab == 0)
             }
         }
         .environment(\.pfNativeSeasonalTheme, seasonalTheme)
