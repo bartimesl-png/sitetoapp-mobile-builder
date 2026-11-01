@@ -77,42 +77,67 @@ private extension EnvironmentValues {
 private struct SeasonalDecorationsLayer: View {
     let theme: NativeSeasonalTheme
     @State private var passageIndex = 0
-    @State private var flybyX: CGFloat = -140
+    @State private var flybyX: CGFloat = -110
 
     var body: some View {
         GeometryReader { geometry in
-            ZStack(alignment: .topLeading) {
-                theme.soft.opacity(0.055).ignoresSafeArea()
-                LinearGradient(colors: [theme.accent, theme.secondary, theme.accent], startPoint: .leading, endPoint: .trailing)
-                    .frame(height: 7)
-                    .frame(maxHeight: .infinity, alignment: .top)
-                    .ignoresSafeArea(edges: .top)
+            let safeTop = geometry.safeAreaInsets.top
+            let safeBottom = geometry.safeAreaInsets.bottom
+            ZStack(alignment: .top) {
+                LinearGradient(
+                    colors: [theme.soft.opacity(0.24), .clear, theme.secondary.opacity(0.035), .clear, theme.soft.opacity(0.19)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .ignoresSafeArea()
 
-                ForEach(0..<theme.decorations.count, id: \.self) { index in
-                    Text(theme.decorations[index])
-                        .font(.system(size: index.isMultiple(of: 3) ? 25 : 21))
-                        .opacity(index.isMultiple(of: 3) ? 0.82 : 0.66)
+                VStack(spacing: 0) {
+                    LinearGradient(colors: [theme.accent, theme.secondary, theme.accent], startPoint: .leading, endPoint: .trailing)
+                        .frame(height: 5)
+                    HStack(spacing: 9) {
+                        ForEach(0..<9, id: \.self) { index in
+                            Capsule().fill(index.isMultiple(of: 2) ? theme.accent.opacity(0.68) : theme.secondary.opacity(0.7))
+                                .frame(width: 20, height: 3)
+                            Text(theme.decorations[index % theme.decorations.count])
+                                .font(.system(size: 16))
+                            if index < 8 { Spacer(minLength: 0) }
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .frame(height: 31)
+                    .background(.ultraThinMaterial.opacity(0.7))
+                    Spacer()
+                    LinearGradient(colors: [theme.secondary.opacity(0.0), theme.secondary.opacity(0.48), theme.accent.opacity(0.86)], startPoint: .leading, endPoint: .trailing)
+                        .frame(height: 3)
+                }
+                .frame(maxHeight: .infinity)
+                .ignoresSafeArea()
+
+                ForEach(0..<4, id: \.self) { index in
+                    Text(theme.decorations[(index + 1) % theme.decorations.count])
+                        .font(.system(size: index.isMultiple(of: 2) ? 25 : 21))
+                        .shadow(color: theme.accent.opacity(0.25), radius: 5, y: 2)
                         .position(
-                            x: index.isMultiple(of: 2) ? 18 : max(18, geometry.size.width - 18),
-                            y: geometry.size.height * (0.13 + CGFloat(index % 7) * 0.115)
+                            x: index.isMultiple(of: 2) ? 15 : max(15, geometry.size.width - 15),
+                            y: max(safeTop + 92, geometry.size.height * (index < 2 ? 0.28 : 0.72))
                         )
                 }
 
                 Text(theme.passages[passageIndex % theme.passages.count])
-                    .font(.system(size: 66))
-                    .shadow(color: theme.accent.opacity(0.35), radius: 8, y: 4)
-                    .position(x: flybyX, y: max(48, geometry.safeAreaInsets.top + 42))
+                    .font(.system(size: 54))
+                    .shadow(color: theme.accent.opacity(0.45), radius: 9, y: 4)
+                    .position(x: flybyX, y: max(safeTop + 42, 58))
                     .task(id: theme.id) {
                         while !Task.isCancelled {
-                            try? await Task.sleep(nanoseconds: 25_000_000_000)
+                            try? await Task.sleep(nanoseconds: 12_000_000_000)
                             guard !Task.isCancelled else { return }
-                            flybyX = -140
-                            withAnimation(.linear(duration: 6.0)) {
-                                flybyX = geometry.size.width + 140
+                            flybyX = -110
+                            withAnimation(.linear(duration: 4.6)) {
+                                flybyX = geometry.size.width + 110
                             }
-                            try? await Task.sleep(nanoseconds: 8_000_000_000)
+                            try? await Task.sleep(nanoseconds: 5_000_000_000)
                             passageIndex = (passageIndex + 1) % theme.passages.count
-                            flybyX = -140
+                            flybyX = -110
                         }
                     }
             }
@@ -172,7 +197,7 @@ struct RootView: View {
                 .tag(4)
         }
         .tint(visibleSeasonalTheme?.accent ?? PFTheme.brand)
-        .toolbarBackground(visibleSeasonalTheme?.soft ?? Color(uiColor: .systemBackground), for: .tabBar)
+        .toolbarBackground(visibleSeasonalTheme?.soft.opacity(0.62) ?? Color(uiColor: .systemBackground), for: .tabBar)
         .toolbarBackground(.visible, for: .tabBar)
         .overlay {
             if let theme = visibleSeasonalTheme {
@@ -901,7 +926,44 @@ private struct ProfessionalPropertyDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                if listing.gallery.count > 1 {
+                if listing.gallery.isEmpty {
+                    VStack(spacing: 12) {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                                .fill(LinearGradient(colors: [PFTheme.deepGreen, PFTheme.brand, Color(red: 0.35, green: 0.73, blue: 0.60)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                            Circle().fill(.white.opacity(0.12)).frame(width: 190).offset(x: 130, y: -76)
+                            Circle().stroke(.white.opacity(0.18), lineWidth: 1).frame(width: 240).offset(x: -140, y: 74)
+                            VStack(spacing: 10) {
+                                Image(systemName: "house.lodge.fill")
+                                    .font(.system(size: 42, weight: .medium))
+                                    .foregroundStyle(.white)
+                                Text("Les photos sont sur l’annonce d’origine")
+                                    .font(.headline.weight(.semibold))
+                                    .multilineTextAlignment(.center)
+                                    .foregroundStyle(.white)
+                                Text("Ouvrez la fiche source pour consulter toutes les images du bien.")
+                                    .font(.subheadline)
+                                    .multilineTextAlignment(.center)
+                                    .foregroundStyle(.white.opacity(0.86))
+                                if let rawURL = listing.sourceUrl, let url = URL(string: rawURL) {
+                                    Link(destination: url) {
+                                        Label("Voir les photos de l’annonce", systemImage: "arrow.up.right")
+                                            .font(.subheadline.weight(.bold))
+                                            .foregroundStyle(PFTheme.deepGreen)
+                                            .padding(.horizontal, 16)
+                                            .padding(.vertical, 11)
+                                            .background(.white, in: Capsule())
+                                    }
+                                    .padding(.top, 3)
+                                }
+                            }
+                            .padding(22)
+                        }
+                        .frame(height: 270)
+                        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    }
+                    .padding(.horizontal, 16)
+                } else if listing.gallery.count > 1 {
                     TabView {
                         ForEach(Array(listing.gallery.enumerated()), id: \.offset) { image in
                             NativeProfileImage(source: image.element.absoluteString, fallback: "house")
@@ -912,7 +974,7 @@ private struct ProfessionalPropertyDetailView: View {
                     .tabViewStyle(.page)
                     .frame(height: 270)
                 } else {
-                    NativeProfileImage(source: listing.gallery.first?.absoluteString ?? "", fallback: "house")
+                    NativeProfileImage(source: listing.gallery[0].absoluteString, fallback: "house")
                         .frame(maxWidth: .infinity).frame(height: 270)
                         .clipped()
                 }
@@ -936,7 +998,7 @@ private struct ProfessionalPropertyDetailView: View {
                        !description.isEmpty {
                         ListingDescriptionTranslation(original: description)
                     }
-                    if let rawURL = listing.sourceUrl, let url = URL(string: rawURL) {
+                    if !listing.gallery.isEmpty, let rawURL = listing.sourceUrl, let url = URL(string: rawURL) {
                         Link(destination: url) {
                             Label("Voir l’annonce sur PartenaireFoyer", systemImage: "safari")
                                 .frame(maxWidth: .infinity)
