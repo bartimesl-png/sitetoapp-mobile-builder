@@ -82,11 +82,9 @@ private struct SeasonalDecorationsLayer: View {
     var body: some View {
         ZStack {
             // Floating shapes move behind the controls and never intercept touches.
-            if isHome {
-                SeasonalMagicCanvas(theme: theme, stage: .ambient)
-                    .opacity(0.72)
-                    .ignoresSafeArea()
-            }
+            SeasonalMagicCanvas(theme: theme, stage: .ambient)
+                .opacity(isHome ? 0.96 : 0.78)
+                .ignoresSafeArea()
             VStack(spacing: 0) {
             LinearGradient(
                 colors: [theme.accent, theme.secondary, theme.accent],
@@ -100,6 +98,162 @@ private struct SeasonalDecorationsLayer: View {
         .ignoresSafeArea()
         .allowsHitTesting(false)
         .accessibilityHidden(true)
+    }
+}
+
+
+
+// Theme-aware accents belong to the actual native cards, not just the hero.
+private struct SeasonalCardOrnament: ViewModifier {
+    @Environment(\.pfNativeSeasonalTheme) private var theme
+    @Environment(\.pfNativeSeasonalEnabled) private var themeEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var floating = false
+
+    let emphasized: Bool
+
+    private var pair: (String, String) {
+        switch theme?.id {
+        case "halloween": return ("👻", "🦇")
+        case "noel": return ("❄️", "🎄")
+        case "nouvel-an": return ("✨", "🎆")
+        case "paques": return ("🐣", "🌷")
+        case "printemps": return ("🦋", "🌼")
+        case "fete-des-meres": return ("💗", "💐")
+        case "fete-des-peres": return ("⭐", "🎁")
+        case "14-juillet": return ("✨", "🇫🇷")
+        case "ete": return ("☀️", "🌴")
+        case "rentree": return ("🍂", "🍁")
+        case "octobre-rose": return ("🎀", "💗")
+        case "armistice": return ("🕊️", "🌺")
+        case "movember": return ("💙", "🎗️")
+        case "saint-valentin": return ("❤️", "💌")
+        case "black-friday": return ("⚡", "✨")
+        default: return ("✨", "✦")
+        }
+    }
+
+    func body(content: Content) -> some View {
+        content.overlay(alignment: .topTrailing) {
+            if themeEnabled, let theme {
+                ZStack {
+                    Circle()
+                        .fill(theme.secondary.opacity(emphasized ? 0.25 : 0.10))
+                        .frame(width: emphasized ? 77 : 44, height: emphasized ? 77 : 44)
+                        .blur(radius: emphasized ? 17 : 9)
+                    Text(pair.0)
+                        .font(.system(size: emphasized ? 42 : 25))
+                        .shadow(color: theme.accent.opacity(0.38), radius: 4, y: 2)
+                        .offset(x: emphasized ? -13 : -6, y: floating ? -9 : -2)
+                    Text(pair.1)
+                        .font(.system(size: emphasized ? 22 : 14))
+                        .offset(x: emphasized ? 19 : 14, y: emphasized ? 21 : 14)
+                }
+                .frame(width: emphasized ? 90 : 53, height: emphasized ? 78 : 47)
+                .opacity(emphasized ? 0.90 : 0.63)
+                .offset(x: emphasized ? 9 : 1, y: emphasized ? -13 : -6)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+                .onAppear {
+                    guard emphasized, !reduceMotion else { return }
+                    withAnimation(.easeInOut(duration: 2.7).repeatForever(autoreverses: true)) {
+                        floating = true
+                    }
+                }
+            }
+        }
+    }
+}
+
+private extension View {
+    func pfFestiveCard(emphasized: Bool = false) -> some View {
+        modifier(SeasonalCardOrnament(emphasized: emphasized))
+    }
+}
+
+private struct SeasonalPageRibbon: View {
+    @Environment(\.pfNativeSeasonalTheme) private var theme
+    @Environment(\.pfNativeSeasonalEnabled) private var themeEnabled
+    @AppStorage("partenairefoyer.language") private var appLanguage = "fr"
+
+    let context: String
+
+    private var themeName: String {
+        switch theme?.id {
+        case "halloween": return "Halloween"
+        case "noel": return "Noël"
+        case "nouvel-an": return "Nouvel An"
+        case "paques": return "Pâques"
+        case "printemps": return "Printemps"
+        case "fete-des-meres": return "Fête des mères"
+        case "fete-des-peres": return "Fête des pères"
+        case "14-juillet": return "14 Juillet"
+        case "ete": return "Été"
+        case "rentree": return "Rentrée"
+        case "octobre-rose": return "Octobre rose"
+        case "armistice": return "11 Novembre"
+        case "movember": return "Movember"
+        case "saint-valentin": return "Saint-Valentin"
+        case "black-friday": return "Black Friday"
+        default: return "Les moments"
+        }
+    }
+
+    private var icon: String {
+        switch theme?.id {
+        case "halloween": return "👻"
+        case "noel": return "🎅"
+        case "nouvel-an", "14-juillet": return "🎆"
+        case "paques": return "🐰"
+        case "printemps": return "🦋"
+        case "fete-des-meres": return "💐"
+        case "fete-des-peres": return "🎁"
+        case "ete": return "☀️"
+        case "rentree": return "🍁"
+        case "octobre-rose": return "🎀"
+        case "armistice": return "🕊️"
+        case "movember": return "💙"
+        case "saint-valentin": return "❤️"
+        case "black-friday": return "⚡"
+        default: return "✨"
+        }
+    }
+
+    var body: some View {
+        if themeEnabled, let theme {
+            HStack(spacing: 11) {
+                Text(icon)
+                    .font(.system(size: 34))
+                    .frame(width: 47, height: 47)
+                    .background(.white.opacity(0.70), in: Circle())
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(themeName.uppercased())
+                        .font(.caption.weight(.heavy))
+                        .tracking(0.9)
+                    Text(appLanguage == "en" ? "A touch of magic on every page" : "La magie accompagne vos découvertes")
+                        .font(.caption)
+                        .lineLimit(2)
+                }
+                Spacer(minLength: 4)
+                Text("✨")
+                    .font(.title2)
+            }
+            .foregroundStyle(theme.id == "halloween" ? Color(red: 0.24, green: 0.11, blue: 0.34) : Color(red: 0.08, green: 0.23, blue: 0.23))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                LinearGradient(colors: [theme.soft, theme.secondary.opacity(0.19), theme.soft],
+                               startPoint: .leading, endPoint: .trailing),
+                in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(theme.accent.opacity(0.24), lineWidth: 1)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(themeName) · \(context)")
+        }
     }
 }
 
@@ -487,6 +641,10 @@ private struct NativeSeasonalStaysView: View {
                 } else {
                     List {
                         Section {
+                            SeasonalPageRibbon(context: "Séjours")
+                                .listRowBackground(Color.clear)
+                        }
+                        Section {
                             if let calendarWarning {
                                 Label(calendarWarning, systemImage: "exclamationmark.triangle.fill")
                                     .font(.footnote).foregroundStyle(.orange)
@@ -717,6 +875,7 @@ private struct SeasonalAccommodationRow: View {
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())
+        .pfFestiveCard()
     }
 }
 
@@ -843,6 +1002,7 @@ private struct NativeProfessionalsView: View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 14) {
+                    SeasonalPageRibbon(context: "Professionnels")
                     Text("Choisissez un métier").font(.title2.bold()).foregroundStyle(PFTheme.deepGreen)
                     Text("Chaque métier dispose de son propre annuaire et de sa recherche.")
                         .font(.subheadline).foregroundStyle(.secondary)
@@ -941,6 +1101,10 @@ private struct ProfessionalDirectoryListView: View {
                     ContentUnavailableView.search(text: searchText)
                 } else {
                     List {
+                        Section {
+                            SeasonalPageRibbon(context: title)
+                                .listRowBackground(Color.clear)
+                        }
                         if service.isLoading {
                             Section { ProgressView("Chargement des autres fiches…").font(.footnote) }
                         }
@@ -1033,6 +1197,7 @@ private struct ProfessionalRow: View {
         }
         .padding(.vertical, 5)
         .contentShape(Rectangle())
+        .pfFestiveCard()
     }
 }
 
@@ -1914,6 +2079,7 @@ private struct NativeListingsView: View {
                 NavigationStack {
                     ScrollView(showsIndicators: false) {
                         VStack(alignment: .leading, spacing: 16) {
+                            SeasonalPageRibbon(context: "Annonces")
                             Text("Trouvez ce qu’il vous faut")
                                 .font(.title2.bold()).foregroundStyle(PFTheme.deepGreen)
                             Button {
@@ -2238,6 +2404,11 @@ private struct NativeCatalogContentView: View {
         let visibleBuyerSearches = catalogSection == .buyerSearches ? filteredBuyerSearches : []
         NavigationStack {
             List {
+                Section {
+                    SeasonalPageRibbon(context: catalogSection == .classifiedAds ? "Petites annonces" : catalogSection == .realEstate ? "Annonces immobilières" : "Projets immobiliers")
+                        .listRowInsets(EdgeInsets(top: 10, leading: 14, bottom: 8, trailing: 14))
+                        .listRowBackground(Color.clear)
+                }
                 if catalogSection == .realEstate {
                     Section {
                         HStack(spacing: 10) {
@@ -2704,6 +2875,7 @@ private struct ClassifiedAdRow: View {
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())
+        .pfFestiveCard()
     }
 }
 
@@ -3260,6 +3432,7 @@ private struct ListingRow: View {
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())
+        .pfFestiveCard()
     }
 }
 
@@ -4266,6 +4439,7 @@ private struct HomeDashboardView: View {
             .frame(maxWidth: .infinity, minHeight: 164, maxHeight: 164)
             .clipShape(RoundedRectangle(cornerRadius: 19, style: .continuous))
             .shadow(color: PFTheme.deepGreen.opacity(0.14), radius: 9, y: 4)
+            .pfFestiveCard(emphasized: true)
         }
         .buttonStyle(.plain)
     }
@@ -4447,6 +4621,7 @@ private struct HomeDashboardView: View {
         .background(.background, in: RoundedRectangle(cornerRadius: 23, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 23, style: .continuous).stroke(PFTheme.brand.opacity(0.12), lineWidth: 1))
         .shadow(color: PFTheme.brand.opacity(0.08), radius: 14, y: 6)
+        .pfFestiveCard(emphasized: true)
     }
 
     private func matchingStep(_ title: String, symbol: String) -> some View {
@@ -4502,6 +4677,7 @@ private struct CatalogPhotoCard: View {
         .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .shadow(color: PFTheme.deepGreen.opacity(0.14), radius: 8, y: 3)
+        .pfFestiveCard(emphasized: true)
     }
 }
 
@@ -5919,6 +6095,10 @@ private struct NativeSpacePickerView: View {
 
     private var rolePicker: some View {
         List {
+                Section {
+                    SeasonalPageRibbon(context: "Menu")
+                        .listRowBackground(Color.clear)
+                }
                 Section {
                     VStack(alignment: .leading, spacing: 7) {
                         Text("Vous êtes… ?")
