@@ -26,6 +26,8 @@ final class ListingsService: ObservableObject {
     // Once the first complete catalogue has been displayed, keep it stable
     // during manual refreshes instead of inserting CMS/import pages mid-scroll.
     private var hasCompletedCatalogLoad = false
+    private var initialCMSPreviewScheduled = false
+    private var unpublishedCMSRowCount = 0
     private var pendingSources = 0
     private var sourceFailures: [String] = []
 
@@ -87,7 +89,16 @@ final class ListingsService: ObservableObject {
             professionalSource = (professionalSource ?? []) + fresh
         }
         hasLoaded = true
-        publishCatalog()
+        unpublishedCMSRowCount += fresh.count
+        // A huge CMS collection can contain many network pages. Show the
+        // first page promptly, then coalesce subsequent pages in larger batches
+        // to avoid dozens of sorting and SwiftUI diff passes per launch.
+        if !hasCompletedCatalogLoad &&
+            (!initialCMSPreviewScheduled || unpublishedCMSRowCount >= 500) {
+            initialCMSPreviewScheduled = true
+            unpublishedCMSRowCount = 0
+            publishCatalog()
+        }
     }
 
     private func finish(_ source: Source, items: [Listing]?, failure: String?) {
@@ -104,6 +115,7 @@ final class ListingsService: ObservableObject {
         } else if let failure, !sourceFailures.contains(failure) {
             sourceFailures.append(failure)
         }
+        unpublishedCMSRowCount = 0
         publishCatalog()
 
         guard pendingSources == 0 else { return }
