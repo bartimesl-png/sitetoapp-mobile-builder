@@ -66,7 +66,7 @@ struct SeasonalMagicCanvas: View {
                 guard width > 0, height > 0 else { return }
 
                 // Deliberately restrained across the page; vivid inside the event artwork.
-                let particleCount = isFeature ? 35 : 12
+                let particleCount = isFeature ? 39 : 24
                 for index in 0..<particleCount {
                     let i = Double(index)
                     let speed = (isFeature ? 0.012 : 0.007) + Double(index % 7) * 0.0018
@@ -75,9 +75,9 @@ struct SeasonalMagicCanvas: View {
                     let x = rawX * width
                     let y = (1.10 - progress * 1.25) * height
                     let drift = sin(time * 0.7 + i * 1.8) * (isFeature ? 8.0 : 4.0)
-                    let scale = isFeature ? 1.0 : 0.70
+                    let scale = isFeature ? 1.0 : 0.88
                     let font = (9.0 + Double(index % 4) * 4.0) * scale
-                    let alpha = (isFeature ? 0.38 : 0.16) + 0.13 * sin(time * 0.8 + i)
+                    let alpha = (isFeature ? 0.38 : 0.23) + 0.13 * sin(time * 0.8 + i)
                     drawGlyph(particleGlyphs[index % particleGlyphs.count],
                               fontSize: font, at: CGPoint(x: x + drift, y: y),
                               alpha: max(0.09, alpha), in: context)
@@ -85,25 +85,25 @@ struct SeasonalMagicCanvas: View {
 
                 // Three large, staggered actors cross the scene. Ghosts and bats
                 // fly independently; each other festival has its own performers.
-                let actors = isFeature ? 5 : 2
+                let actors = isFeature ? 7 : 6
                 let visualScale = min(1.60, max(0.85, width / (isFeature ? 450.0 : 650.0)))
                 for index in 0..<actors {
                     let i = Double(index)
-                    let speed = (isFeature ? 0.075 : 0.046) + i * 0.011
-                    let progress = positiveFraction(time * speed + i * 0.25 + 0.12)
+                    let speed = (isFeature ? 0.075 : 0.030) + i * 0.008
+                    let progress = positiveFraction(time * speed + i / Double(actors) + 0.12)
                     let forwards = index % 3 != 1
                     let x = forwards
                         ? -95.0 + progress * (width + 190.0)
                         : width + 95.0 - progress * (width + 190.0)
                     let baseY: Double
                     if isFeature {
-                        baseY = [0.22, 0.45, 0.70, 0.84, 0.29][index] * height
+                        baseY = [0.16, 0.36, 0.56, 0.77, 0.26, 0.91, 0.47][index] * height
                     } else {
-                        baseY = [0.22, 0.76][index] * height
+                        baseY = [0.12, 0.31, 0.48, 0.65, 0.83, 0.94][index] * height
                     }
                     let y = baseY + sin(time * (0.95 + i * 0.14) + i) * (isFeature ? 20.0 : 13.0)
-                    let font = (isFeature ? 58.0 + Double(index % 3) * 15.0 : 54.0) * visualScale
-                    let fade = isFeature ? 0.95 : 0.44
+                    let font = (isFeature ? 58.0 + Double(index % 3) * 15.0 : 43.0 + Double(index % 3) * 10.0) * visualScale
+                    let fade = isFeature ? 0.95 : 0.65
                     // Suppress flying shapes when Reduce Motion is enabled; particles rest.
                     if !reduceMotion {
                         drawGlyph(performers[index % performers.count],
