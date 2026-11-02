@@ -121,6 +121,7 @@ final class ListingsService: ObservableObject {
         guard pendingSources == 0 else { return }
         isLoading = false
         hasLoaded = true
+        if !isLoadingImported { updateFeedStatus() }
     }
 
     private func startImportedLoad() {
@@ -153,7 +154,10 @@ final class ListingsService: ObservableObject {
         if let failure, !sourceFailures.contains(failure) { sourceFailures.append(failure) }
         isLoadingImported = false
         publishCatalog()
+        if pendingSources == 0 { updateFeedStatus() }
+    }
 
+    private func updateFeedStatus() {
         let successfulSources = [importedSource, privateOwnerSource, professionalSource].compactMap { $0 }.count
         if successfulSources > 0 {
             hasLoaded = true
