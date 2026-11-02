@@ -23,6 +23,9 @@ final class ListingsService: ObservableObject {
     private var professionalSource: [Listing]?
     private var catalogPublicationTask: Task<Void, Never>?
     private var catalogRevision = 0
+    // Once the first complete catalogue has been displayed, keep it stable
+    // during manual refreshes instead of inserting CMS/import pages mid-scroll.
+    private var hasCompletedCatalogLoad = false
     private var pendingSources = 0
     private var sourceFailures: [String] = []
 
@@ -113,17 +116,18 @@ final class ListingsService: ObservableObject {
         isLoadingImported = true
         Task { @MainActor [weak self] in
             guard let self else { return }
-            var accumulated = self.importedSource ?? []
-            var seen = Set(accumulated.map(\.id))
+            // Each refresh replaces the imported snapshot; never seed it from
+            // the previous feed or removed/hidden imported listings will remain.
+            var accumulated: [Listing] = []
+            var seen = Set<String>()
             do {
                 try await self.loadImportedListings { [weak self] page in
                     guard let self else { return }
                     let fresh = page.filter { seen.insert($0.id).inserted }
                     guard !fresh.isEmpty else { return }
+                    // Stage imported pages off-screen until the complete feed
+                    // succeeds. The published catalogue remains unchanged.
                     accumulated.append(contentsOf: fresh)
-                    // Keep imported pages out of the visible catalog while Wix
-                    // is still loading, so they never appear first and then jump.
-                    self.importedSource = accumulated
                 }
                 self.finishImported(items: accumulated, failure: nil)
             } catch {
@@ -152,18 +156,26 @@ final class ListingsService: ObservableObject {
     }
 
     private func publishCatalog() {
+        let allSourcesSettled = pendingSources == 0 && !isLoadingImported
+        // On subsequent refreshes preserve both order and scroll anchor until
+        // all sources settle; on first launch still stream Wix CMS pages early.
+        guard !hasCompletedCatalogLoad || allSourcesSettled else { return }
         catalogRevision &+= 1
         let revision = catalogRevision
-        let wixCatalogIsReady = pendingSources == 0 && !isLoadingImported
+        if allSourcesSettled { hasCompletedCatalogLoad = true }
+
         let snapshot = CatalogPublicationInput(
-            imported: wixCatalogIsReady ? (importedSource ?? []) : [],
+            imported: allSourcesSettled ? (importedSource ?? []) : [],
             privateOwner: privateOwnerSource ?? [],
             professional: professionalSource ?? []
         )
 
-        // Pagination can deliver several pages in quick succession. Coalesce
-        // them so a large catalogue is merged and sorted once per burst, and
-        // keep all of that work off the main actor used by SwiftUI.
+        // Prefer the SAME source hierarchy the website uses: registered CMS
+        // properties first, then complementary imported properties. A new
+        // imported listing must never overtake registered CMS listings simply
+        // because its firstSeenAt/createdAt timestamp is more recent.
+        // Within each group keep the existing 2-day / price-drop / 7-day cycle.
+        // Do this outside the main actor to avoid blocking gestures.
         catalogPublicationTask?.cancel()
         catalogPublicationTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 120_000_000)
@@ -171,9 +183,13 @@ final class ListingsService: ObservableObject {
 
             let publication = await Task.detached(priority: .utility) {
                 var seen = Set<String>()
-                let unique = (snapshot.imported + snapshot.privateOwner + snapshot.professional)
+                let registered = (snapshot.privateOwner + snapshot.professional)
                     .filter { seen.insert($0.id).inserted }
-                return CatalogPublicationOutput(listings: ListingCatalogOrdering.ordered(unique))
+                let complementaryImported = snapshot.imported
+                    .filter { seen.insert($0.id).inserted }
+                let cmsOrdered = ListingCatalogOrdering.ordered(registered)
+                let importedOrdered = ListingCatalogOrdering.ordered(complementaryImported)
+                return CatalogPublicationOutput(listings: cmsOrdered + importedOrdered)
             }.value
 
             guard !Task.isCancelled, let self, self.catalogRevision == revision else { return }
