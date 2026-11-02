@@ -202,12 +202,20 @@ final class ListingsService: ObservableObject {
     }
 
     private func loadImportedListings(onPage: @escaping @MainActor ([Listing]) -> Void) async throws {
-        let limit = 50
+        // Matches the website's summary feed but keeps requests sequential
+        // and smaller than the browser's 250-item batches for older iPhones.
+        let limit = 200
         var offset = 0
+        var seenFeedIDs = Set<String>()
+        var consecutiveRepeatedPages = 0
 
         while true {
+            // Safeguard against a broken paging endpoint that ignores offset.
+            guard offset < 100_000 else { throw ListingFeedError.repeatedPage }
+            try Task.checkCancellation()
             var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)!
             components.queryItems = [
+                URLQueryItem(name: "summary", value: "1"),
                 URLQueryItem(name: "limit", value: String(limit)),
                 URLQueryItem(name: "offset", value: String(offset))
             ]
@@ -221,8 +229,17 @@ final class ListingsService: ObservableObject {
                 throw ListingFeedError.httpStatus(http.statusCode)
             }
             let page = try await BackgroundJSONDecoder.decode(ListingFeedResponse.self, from: data)
-            if !page.items.isEmpty { onPage(page.items) }
-            guard !page.items.isEmpty else { break }
+            guard !page.items.isEmpty else {
+                // Empty pages are only valid after the feed is exhausted.
+                if let total = page.total, offset < total { throw ListingFeedError.incompletePage }
+                break
+            }
+            let oldCount = seenFeedIDs.count
+            for listing in page.items { seenFeedIDs.insert(listing.id) }
+            consecutiveRepeatedPages = seenFeedIDs.count == oldCount
+                ? consecutiveRepeatedPages + 1 : 0
+            guard consecutiveRepeatedPages < 2 else { throw ListingFeedError.repeatedPage }
+            onPage(page.items)
             let nextOffset = offset + page.items.count
             guard nextOffset > offset else { break }
             offset = nextOffset
@@ -233,9 +250,13 @@ final class ListingsService: ObservableObject {
 
     private enum ListingFeedError: LocalizedError {
         case httpStatus(Int)
+        case repeatedPage
+        case incompletePage
         var errorDescription: String? {
             switch self {
             case .httpStatus(let status): "Le service des annonces a répondu (\(status))."
+            case .repeatedPage: "Le catalogue importé renvoie plusieurs fois les mêmes annonces."
+            case .incompletePage: "Le catalogue importé a retourné une page incomplète."
             }
         }
     }
