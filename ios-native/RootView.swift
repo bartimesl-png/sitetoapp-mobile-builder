@@ -936,6 +936,7 @@ private struct NativeSeasonalAccommodationDetail: View {
                 }
             }
             Section {
+                SeasonalPageRibbon(context: "Hébergement")
                 Text(accommodation.name).font(.title2.bold())
                 if let type = accommodation.accommodationType, !type.isEmpty {
                     Label(type, systemImage: "house.lodge").foregroundStyle(.teal)
@@ -1364,6 +1365,10 @@ private struct ProfessionalDetailView: View {
 
     var body: some View {
         List {
+            Section {
+                SeasonalPageRibbon(context: "Professionnel")
+                    .listRowBackground(Color.clear)
+            }
             Section {
                 VStack(alignment: .leading, spacing: 12) {
                     if let source = professional.logo {
@@ -2955,6 +2960,7 @@ private struct NativeClassifiedAdDetailView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                     .accessibilityLabel("Galerie de photos de la petite annonce")
                 }
+                SeasonalPageRibbon(context: "Petite annonce")
                 HStack(alignment: .top) {
                     Text(ad.formattedPrice).font(.title2.bold())
                     Spacer()
@@ -3656,6 +3662,7 @@ private struct ListingDetailView: View {
                     .frame(height: 290)
                     .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                 }
+                SeasonalPageRibbon(context: "Annonce immobilière")
 
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 7) {
