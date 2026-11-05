@@ -991,12 +991,13 @@ private struct NativeSeasonalAccommodationDetail: View {
 private struct NativeProfessionalsView: View {
     @ObservedObject var service: ProfessionalsService
 
-    private let directories: [(String, String, String, String)] = [
+    private let directories: [(String, String, String, String?)] = [
         ("Immobilier", "building.2.fill", "Professionnels de l’immobilier", "CategoryMaison"),
         ("Courtiers", "person.text.rectangle.fill", "Courtiers", "CategoryCourtiers"),
         ("Artisans", "hammer.fill", "Artisans", "CategoryArtisans"),
         ("Diagnostiqueurs", "checkmark.seal.fill", "Diagnostiqueurs", "CategoryDiagnostics"),
-        ("Prestataires", "wrench.and.screwdriver.fill", "Prestataires de services", "CategoryServices")
+        ("Prestataires", "wrench.and.screwdriver.fill", "Prestataires de services", "CategoryServices"),
+        ("Auto/Moto", "car.2.fill", "Professionnels de l’auto et de la moto", nil)
     ]
 
     var body: some View {
@@ -1048,6 +1049,11 @@ private struct ProfessionalDirectoryListView: View {
                 matchesType = isDiagnostician
             case "Prestataires":
                 matchesType = professional.isServiceProviderProfile || professional.importedCategory == "prestataire"
+            case "Auto/Moto":
+                let category = (professional.importedCategory ?? "").lowercased()
+                matchesType = category.contains("auto") || category.contains("moto") ||
+                    activity.contains("auto") || activity.contains("moto") ||
+                    activity.contains("voiture") || activity.contains("garage")
             default:
                 matchesType = true
             }
@@ -2068,6 +2074,7 @@ private enum NativeCatalogSection: String, CaseIterable, Identifiable {
     case realEstate = "Immobilier"
     case buyerSearches = "Recherches"
     case classifiedAds = "Petites annonces"
+    case autoMoto = "Auto/Moto"
     var id: String { rawValue }
 }
 
@@ -2102,6 +2109,12 @@ private struct NativeListingsView: View {
                             }
                             label: {
                                 CatalogPhotoCard(title: "Petites annonces", subtitle: "Vendre, donner, échanger ou louer", image: "CategoryPetitesAnnonces", symbol: "tag.fill")
+                            }
+                            .buttonStyle(.plain)
+                            Button {
+                                catalogSection = .autoMoto
+                            } label: {
+                                CatalogPhotoCard(title: "Auto/Moto", subtitle: "Annonces de véhicules et professionnels auto/moto", image: nil, symbol: "car.2.fill")
                             }
                             .buttonStyle(.plain)
                         }.padding(17)
@@ -2228,7 +2241,7 @@ private struct NativeCatalogContentView: View {
         let yearMinimum = Double(classifiedYearMin)
         let yearMaximum = Double(classifiedYearMax)
         let mileageMaximum = Double(classifiedMileageMax.replacingOccurrences(of: ",", with: "."))
-        let usesVehicleFilters = classifiedCategory == "Auto / Moto — accessoires"
+        let usesVehicleFilters = catalogSection == .autoMoto || classifiedCategory == "Auto / Moto — accessoires"
         let filtered = classifiedAds.ads.filter { ad in
             let needsAttributes = !query.isEmpty ||
                 (classifiedAttributeKey != "Aucun" && !classifiedAttributeValue.isEmpty) ||
@@ -2236,7 +2249,12 @@ private struct NativeCatalogContentView: View {
                     !classifiedEnergy.isEmpty || !classifiedGearbox.isEmpty || yearMinimum != nil ||
                     yearMaximum != nil || mileageMaximum != nil))
             let attributes = needsAttributes ? (attributeDictionary(ad) ?? [:]) : [:]
+            let vehicleText = [ad.title, ad.category ?? "", ad.subcategory ?? "", ad.importedAttributesJSON ?? ""]
+                .joined(separator: " ").folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            let isAutoMoto = ["auto", "moto", "voiture", "vehicule", "scooter", "quad", "garage"]
+                .contains { vehicleText.contains($0) }
             return ad.resolvedCountryCode == searchCountryCode &&
+            (catalogSection != .autoMoto || isAutoMoto) &&
             (query.isEmpty ||
              ad.title.localizedCaseInsensitiveContains(query) ||
              (ad.category ?? "").localizedCaseInsensitiveContains(query) ||
@@ -2410,7 +2428,7 @@ private struct NativeCatalogContentView: View {
         NavigationStack {
             List {
                 Section {
-                    SeasonalPageRibbon(context: catalogSection == .classifiedAds ? "Petites annonces" : catalogSection == .realEstate ? "Annonces immobilières" : "Projets immobiliers")
+                    SeasonalPageRibbon(context: catalogSection == .autoMoto ? "Auto/Moto" : catalogSection == .classifiedAds ? "Petites annonces" : catalogSection == .realEstate ? "Annonces immobilières" : "Projets immobiliers")
                         .listRowInsets(EdgeInsets(top: 10, leading: 14, bottom: 8, trailing: 14))
                         .listRowBackground(Color.clear)
                 }
@@ -2548,11 +2566,11 @@ private struct NativeCatalogContentView: View {
                             .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                         }
                     }
-                } else if catalogSection == .classifiedAds {
+                } else if catalogSection == .classifiedAds || catalogSection == .autoMoto {
                     Section {
                         HStack(spacing: 10) {
                             Image(systemName: "tag.fill").foregroundStyle(.teal)
-                            Text("Petites annonces Wix et annonces de véhicules importées, avec leurs critères et le lien vers le vendeur d’origine.")
+                            Text(catalogSection == .autoMoto ? "Annonces auto et moto, véhicules importés et accessoires, avec accès aux professionnels spécialisés." : "Petites annonces Wix et annonces de véhicules importées, avec leurs critères et le lien vers le vendeur d’origine.")
                                 .font(.footnote).foregroundStyle(.secondary)
                         }
                         .listRowBackground(Color.teal.opacity(0.07))
@@ -2650,7 +2668,7 @@ private struct NativeCatalogContentView: View {
             .listStyle(.plain)
             .refreshable {
                 if catalogSection == .realEstate { await service.reload() }
-                else if catalogSection == .classifiedAds { await classifiedAds.reload() }
+                else if catalogSection == .classifiedAds || catalogSection == .autoMoto { await classifiedAds.reload() }
                 else { await buyerSearches.reload() }
             }
             .navigationDestination(for: Listing.self) { listing in
@@ -2661,7 +2679,7 @@ private struct NativeCatalogContentView: View {
             }
             .navigationTitle(catalogSection.rawValue)
             .navigationBarTitleDisplayMode(.large)
-            .searchable(text: $searchText, prompt: catalogSection == .realEstate ? "Ville, code postal, bien…" : catalogSection == .classifiedAds ? "Article, catégorie, ville…" : "Ville, type de bien, demande…")
+            .searchable(text: $searchText, prompt: catalogSection == .realEstate ? "Ville, code postal, bien…" : (catalogSection == .classifiedAds || catalogSection == .autoMoto) ? "Article, catégorie, ville…" : "Ville, type de bien, demande…")
             .sheet(isPresented: $showClassifiedFilters) {
                 NavigationStack {
                     Form {
@@ -2789,7 +2807,7 @@ private struct NativeCatalogContentView: View {
             }
             .task(id: catalogSection) {
                 if catalogSection == .realEstate { await service.loadIfNeeded() }
-                else if catalogSection == .classifiedAds { await classifiedAds.loadIfNeeded() }
+                else if catalogSection == .classifiedAds || catalogSection == .autoMoto { await classifiedAds.loadIfNeeded() }
                 else { await buyerSearches.loadIfNeeded() }
             }
             .toolbar {
@@ -4648,13 +4666,22 @@ private struct HomeDashboardView: View {
 private struct CatalogPhotoCard: View {
     let title: String
     let subtitle: String
-    let image: String
+    let image: String?
     let symbol: String
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
+            if let image {
+                Image(image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 220)
+                    .clipped()
+                    .allowsHitTesting(false)
+            }
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(LinearGradient(colors: [PFTheme.deepGreen, Color.teal], startPoint: .topLeading, endPoint: .bottomTrailing))
+                .fill(LinearGradient(colors: [PFTheme.deepGreen.opacity(0.08), PFTheme.deepGreen.opacity(0.28), PFTheme.deepGreen.opacity(0.94)], startPoint: .top, endPoint: .bottom))
                 .allowsHitTesting(false)
             Circle()
                 .fill(.white.opacity(0.06))
@@ -4680,7 +4707,7 @@ private struct CatalogPhotoCard: View {
             }.foregroundStyle(.white).padding(14)
                 .allowsHitTesting(false)
         }
-        .frame(maxWidth: .infinity, minHeight: 142, maxHeight: 142)
+        .frame(maxWidth: .infinity, minHeight: 220, maxHeight: 220)
         .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .shadow(color: PFTheme.deepGreen.opacity(0.14), radius: 8, y: 3)
