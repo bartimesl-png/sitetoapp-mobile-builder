@@ -4884,7 +4884,7 @@ private struct CatalogPhotoCard: View {
             .padding(16)
             .allowsHitTesting(false)
         }
-        .frame(maxWidth: .infinity, minHeight: 158, maxHeight: 158)
+        .frame(maxWidth: .infinity, minHeight: 228, maxHeight: 228)
         .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .shadow(color: PFTheme.deepGreen.opacity(0.14), radius: 8, y: 3)
