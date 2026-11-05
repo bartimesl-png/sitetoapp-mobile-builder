@@ -1014,6 +1014,17 @@ private struct NativeProfessionalsView: View {
                             CatalogPhotoCard(title: directory.2, subtitle: "Voir l’annuaire", image: directory.3, symbol: directory.1)
                         }.buttonStyle(.plain)
                     }
+                    NavigationLink {
+                        NativeAutoMotoHubView()
+                    } label: {
+                        CatalogPhotoCard(
+                            title: "Professionnels Auto/Moto",
+                            subtitle: "Annonces, garages et espaces professionnels",
+                            image: "CategoryPetitesAnnonces",
+                            symbol: "car.side.fill"
+                        )
+                    }
+                    .buttonStyle(.plain)
                 }.padding(17)
             }
             .navigationTitle("Professionnels")
@@ -4230,6 +4241,139 @@ private struct LocalizedListingTitle: View {
     }
 }
 
+private struct NativeAutoMotoDestination: Identifiable {
+    let path: String
+    let title: String
+    let subtitle: String
+    let symbol: String
+    var id: String { path }
+}
+
+private struct NativeAutoMotoHubView: View {
+    @AppStorage("partenairefoyer.language") private var appLanguage = "fr"
+    @State private var selectedDestination: NativeAutoMotoDestination?
+
+    private var isEnglish: Bool { appLanguage == "en" }
+
+    private var sections: [(String, [NativeAutoMotoDestination])] {
+        if isEnglish {
+            return [
+                ("Explore Auto & Moto", [
+                    .init(path: "automobile-moto", title: "Vehicle listings", subtitle: "Cars, motorcycles, parts and accessories", symbol: "car.side.fill"),
+                    .init(path: "professionnels-auto-moto", title: "Auto & Moto professionals", subtitle: "Find garages, dealers and specialists", symbol: "storefront.fill"),
+                    .init(path: "devenir-mandataire-auto-moto", title: "Become a vehicle broker", subtitle: "Discover professionals currently recruiting", symbol: "person.badge.plus")
+                ]),
+                ("Your searches", [
+                    .init(path: "mes-recherches-auto-moto", title: "My saved searches", subtitle: "Manage vehicle criteria and alerts", symbol: "magnifyingglass"),
+                    .init(path: "mes-matchings-auto-moto", title: "My matches", subtitle: "See vehicles matching your searches", symbol: "bell.badge.fill")
+                ]),
+                ("For professionals", [
+                    .init(path: "connexion-auto-moto", title: "Professional Auto & Moto space", subtitle: "Sign in to manage your profile and activity", symbol: "person.crop.rectangle"),
+                    .init(path: "espace-auto-moto/recherches", title: "Customer searches", subtitle: "Manage customer vehicle requests", symbol: "text.magnifyingglass"),
+                    .init(path: "espace-auto-moto/matchings", title: "Professional matches", subtitle: "View matches with other professionals and customers", symbol: "arrow.trianglehead.2.clockwise"),
+                    .init(path: "inscription-auto-moto", title: "Register your business", subtitle: "Create a separate Auto & Moto profile", symbol: "plus.circle.fill")
+                ])
+            ]
+        }
+        return [
+            ("Explorer Auto/Moto", [
+                .init(path: "automobile-moto", title: "Annonces Auto/Moto", subtitle: "Voitures, motos, pièces et accessoires", symbol: "car.side.fill"),
+                .init(path: "professionnels-auto-moto", title: "Professionnels Auto/Moto", subtitle: "Garages, concessionnaires et spécialistes", symbol: "storefront.fill"),
+                .init(path: "devenir-mandataire-auto-moto", title: "Devenir mandataire", subtitle: "Découvrir les professionnels qui recrutent", symbol: "person.badge.plus")
+            ]),
+            ("Vos recherches", [
+                .init(path: "mes-recherches-auto-moto", title: "Mes recherches enregistrées", subtitle: "Gérer vos critères et alertes véhicules", symbol: "magnifyingglass"),
+                .init(path: "mes-matchings-auto-moto", title: "Mes matchings", subtitle: "Voir les véhicules correspondant à vos recherches", symbol: "bell.badge.fill")
+            ]),
+            ("Pour les professionnels", [
+                .init(path: "connexion-auto-moto", title: "Espace professionnel Auto/Moto", subtitle: "Se connecter pour gérer votre activité", symbol: "person.crop.rectangle"),
+                .init(path: "espace-auto-moto/recherches", title: "Recherches de clients", subtitle: "Gérer les véhicules recherchés par vos clients", symbol: "text.magnifyingglass"),
+                .init(path: "espace-auto-moto/matchings", title: "Matchings professionnels", subtitle: "Voir les correspondances avec pros et particuliers", symbol: "arrow.trianglehead.2.clockwise"),
+                .init(path: "inscription-auto-moto", title: "Inscrire mon activité", subtitle: "Créer une fiche Auto/Moto indépendante", symbol: "plus.circle.fill")
+            ])
+        ]
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 19) {
+                    SeasonalPageRibbon(context: "Auto/Moto")
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("AUTO & MOTO", systemImage: "car.side.fill")
+                            .font(.caption.weight(.bold))
+                            .tracking(1.1)
+                            .foregroundStyle(Color.white.opacity(0.82))
+                        Text(isEnglish ? "Everything for vehicles, in one place" : "Tout l’univers Auto/Moto, au même endroit")
+                            .font(.title2.bold())
+                            .foregroundStyle(.white)
+                        Text(isEnglish
+                             ? "Browse listings, find professionals and manage your searches. Professional vehicle services have their own dedicated space."
+                             : "Consultez les annonces, trouvez un professionnel et gérez vos recherches. Les espaces des professionnels de l’auto et de la moto restent dédiés.")
+                            .font(.subheadline)
+                            .foregroundStyle(Color.white.opacity(0.88))
+                    }
+                    .padding(18)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        LinearGradient(colors: [PFTheme.deepGreen, PFTheme.brand], startPoint: .topLeading, endPoint: .bottomTrailing),
+                        in: RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    )
+
+                    ForEach(Array(sections.enumerated()), id: \.offset) { _, section in
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(section.0)
+                                .font(.headline)
+                                .foregroundStyle(PFTheme.deepGreen)
+                            ForEach(section.1) { destination in
+                                Button { selectedDestination = destination } label: {
+                                    HStack(spacing: 13) {
+                                        Image(systemName: destination.symbol)
+                                            .font(.system(size: 18, weight: .semibold))
+                                            .foregroundStyle(PFTheme.brand)
+                                            .frame(width: 44, height: 44)
+                                            .background(PFTheme.paleMint, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            Text(destination.title)
+                                                .font(.subheadline.weight(.semibold))
+                                                .foregroundStyle(PFTheme.deepGreen)
+                                            Text(destination.subtitle)
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                                .multilineTextAlignment(.leading)
+                                        }
+                                        Spacer(minLength: 6)
+                                        Image(systemName: "chevron.right")
+                                            .font(.caption.weight(.bold))
+                                            .foregroundStyle(.tertiary)
+                                    }
+                                    .padding(12)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(.background, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                    .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(.quaternary, lineWidth: 1))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+                .padding(16)
+                .padding(.bottom, 24)
+            }
+            .background(Color(uiColor: .systemGroupedBackground))
+            .navigationTitle(isEnglish ? "Auto & Moto" : "Auto/Moto")
+            .navigationBarTitleDisplayMode(.inline)
+            .sheet(item: $selectedDestination) { destination in
+                ProfessionalPortalWebView(
+                    url: URL(string: "https://www.partenairefoyer.com/\(destination.path)")!,
+                    initialToken: nil,
+                    title: destination.title
+                ) { _ in }
+            }
+        }
+    }
+}
+
 private struct HomeDashboardView: View {
     @Binding var selectedTab: Int
     @Binding var catalogSection: NativeCatalogSection
@@ -4241,6 +4385,7 @@ private struct HomeDashboardView: View {
     @State private var showPublicDemand = false
     @State private var showFavorites = false
     @State private var showFullSite = false
+    @State private var showAutoMotoHub = false
     @State private var publicDemandType = "recherche_achat"
     @Environment(\.pfNativeSeasonalTheme) private var seasonalTheme
     @Environment(\.pfNativeSeasonalEnabled) private var seasonalThemeEnabled
@@ -4292,6 +4437,31 @@ private struct HomeDashboardView: View {
                             selectedTab = 3
                         }
                     }
+                    Button { showAutoMotoHub = true } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "car.side.fill")
+                                .font(.title3.weight(.semibold))
+                                .frame(width: 46, height: 46)
+                                .foregroundStyle(.white)
+                                .background(Color.white.opacity(0.16), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(appLanguage == "en" ? "Auto & Moto" : "Auto/Moto")
+                                    .font(.headline)
+                                    .foregroundStyle(.white)
+                                Text(appLanguage == "en" ? "Listings, professionals, searches and matches" : "Annonces, professionnels, recherches et matchings")
+                                    .font(.caption)
+                                    .foregroundStyle(Color.white.opacity(0.84))
+                            }
+                            Spacer(minLength: 4)
+                            Image(systemName: "arrow.right")
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(.white)
+                        }
+                        .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(LinearGradient(colors: [PFTheme.deepGreen, PFTheme.brand], startPoint: .leading, endPoint: .trailing), in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
                     Button { showFullSite = true } label: {
                         HStack(spacing: 11) {
                             Image(systemName: "safari.fill")
@@ -4415,6 +4585,9 @@ private struct HomeDashboardView: View {
             ) { token in
                 auth.adoptProfessionalPortalSession(token: token)
             }
+        }
+        .sheet(isPresented: $showAutoMotoHub) {
+            NativeAutoMotoHubView()
         }
     }
 
