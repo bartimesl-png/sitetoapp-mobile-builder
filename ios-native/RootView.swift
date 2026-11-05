@@ -4376,6 +4376,7 @@ private struct NativeAutoMotoHubView: View {
 
 private struct HomeDashboardView: View {
     @Binding var selectedTab: Int
+    @AppStorage("partenairefoyer.language") private var appLanguage = "fr"
     @Binding var catalogSection: NativeCatalogSection
     @ObservedObject var listingsService: ListingsService
     @ObservedObject var classifiedAdsService: ClassifiedAdsService
