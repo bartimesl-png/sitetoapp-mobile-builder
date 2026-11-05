@@ -5,7 +5,7 @@ workflows:
       events:
         - push
       branch_patterns:
-        - pattern: "main"
+        - pattern: "feature/ios-full-partenairefoyer-portal"
       cancel_previous_builds: true
     max_build_duration: 120
     instance_type: mac_mini_m2
