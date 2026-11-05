@@ -1020,7 +1020,7 @@ private struct NativeProfessionalsView: View {
                         CatalogPhotoCard(
                             title: "Professionnels Auto/Moto",
                             subtitle: "Annonces, garages et espaces professionnels",
-                            image: "CategoryPetitesAnnonces",
+                            image: "CategoryAutoMoto",
                             symbol: "car.side.fill"
                         )
                     }
@@ -2101,18 +2101,24 @@ private struct NativeListingsView: View {
                             Button {
                                 catalogSection = .realEstate
                             } label: {
-                                CatalogPhotoCard(title: "Annonces immobilières", subtitle: "Maisons, appartements et terrains", image: "CategoryMaison", symbol: "house.fill")
+                                CatalogPhotoCard(title: "Annonces immobilières", subtitle: "Maisons, appartements et terrains", image: "HomeMaison", symbol: "house.fill")
                             }
                             Button {
                                 catalogSection = .buyerSearches
                             } label: {
-                                CatalogPhotoCard(title: "Demandes de recherche", subtitle: "Les projets immobiliers des particuliers", image: "CategoryPro", symbol: "person.crop.circle.badge.magnifyingglass")
+                                CatalogPhotoCard(title: "Demandes de recherche", subtitle: "Les projets immobiliers des particuliers", image: "HomeProfessionnels", symbol: "person.crop.circle.badge.magnifyingglass")
                             }
                             Button {
                                 catalogSection = .classifiedAds
                             }
                             label: {
-                                CatalogPhotoCard(title: "Petites annonces", subtitle: "Vendre, donner, échanger ou louer", image: "CategoryPetitesAnnonces", symbol: "tag.fill")
+                                CatalogPhotoCard(title: "Petites annonces", subtitle: "Vendre, donner, échanger ou louer", image: "HomePetitesAnnonces", symbol: "tag.fill")
+                            }
+                            .buttonStyle(.plain)
+                            NavigationLink {
+                                NativeAutoMotoHubView()
+                            } label: {
+                                CatalogPhotoCard(title: "Auto/Moto", subtitle: "Annonces, professionnels, recherches et matchings", image: "CategoryAutoMoto", symbol: "car.side.fill")
                             }
                             .buttonStyle(.plain)
                         }.padding(17)
@@ -4423,18 +4429,18 @@ private struct HomeDashboardView: View {
                         .buttonStyle(.plain)
                     }
                     LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
-                        homeActionCard("Biens immobiliers", subtitle: "Acheter, louer, consulter", symbol: "house.fill", image: "CategoryMaison") {
+                        homeActionCard("Biens immobiliers", subtitle: "Acheter, louer, consulter", symbol: "house.fill", image: "HomeMaison") {
                             catalogSection = .realEstate
                             selectedTab = 1
                         }
-                        homeActionCard("Petites annonces", subtitle: "Vendre, donner, échanger, louer", symbol: "tag.fill", image: "CategoryPetitesAnnonces") {
+                        homeActionCard("Petites annonces", subtitle: "Vendre, donner, échanger, louer", symbol: "tag.fill", image: "HomePetitesAnnonces") {
                             catalogSection = .classifiedAds
                             selectedTab = 1
                         }
-                        homeActionCard("Séjours", subtitle: "Hébergements saisonniers", symbol: "bed.double.fill", image: "CategorySejours") {
+                        homeActionCard("Séjours", subtitle: "Hébergements saisonniers", symbol: "bed.double.fill", image: "HomeSejours") {
                             selectedTab = 2
                         }
-                        homeActionCard("Professionnels", subtitle: "Immo, courtiers, artisans, services", symbol: "person.2.fill", image: "CategoryPro") {
+                        homeActionCard("Professionnels", subtitle: "Immo, courtiers, artisans, services", symbol: "person.2.fill", image: "HomeProfessionnels") {
                             selectedTab = 3
                         }
                     }
@@ -4734,7 +4740,7 @@ private struct HomeDashboardView: View {
         .frame(maxWidth: .infinity, minHeight: 286, alignment: .leading)
         .background {
             GeometryReader { proxy in
-                Image("CategoryMaison")
+                Image("HomeHero")
                     .resizable()
                     .scaledToFill()
                     .frame(width: proxy.size.width, height: proxy.size.height)
