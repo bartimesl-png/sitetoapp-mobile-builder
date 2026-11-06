@@ -504,7 +504,10 @@ struct RootView: View {
                 .tabItem { Label(appLanguage == "en" ? "Listings" : "Annonces", systemImage: "magnifyingglass") }
                 .tag(1)
 
-            NativeSeasonalStaysView()
+            NativeListingWebView(
+                url: URL(string: "https://www.partenairefoyer.com/locations-saisonnieres")!,
+                title: "Séjours saisonniers"
+            )
                 .tabItem { Label(appLanguage == "en" ? "Stays" : "Séjours", systemImage: "bed.double") }
                 .tag(2)
 
@@ -988,6 +991,44 @@ private struct NativeSeasonalAccommodationDetail: View {
     }
 }
 
+
+private enum PublicProfessionalWebRoute {
+    static func directoryURL(for directory: String) -> URL {
+        let path: String
+        switch directory {
+        case "Immobilier": path = "professionnels"
+        case "Courtiers": path = "nos-courtiers"
+        case "Artisans", "Diagnostiqueurs", "Prestataires": path = "trouver-professionnel-local"
+        default: path = "professionnels"
+        }
+        return URL(string: "https://www.partenairefoyer.com/\(path)")!
+    }
+
+    static func profileURL(for professional: WixPublicProfessional) -> URL {
+        if let miniSiteURL = professional.miniSiteURL { return miniSiteURL }
+
+        let rawSlug = professional.miniSiteSlug?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let identifier = (rawSlug?.isEmpty == false ? rawSlug : nil)
+            ?? professional.cmsProfileID
+            ?? professional.id
+        let slug = identifier.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? identifier
+        let category = professional.importedCategory?.lowercased()
+
+        let path: String
+        switch category {
+        case "artisan": path = "artisan-profile/\(slug)"
+        case "courtier": path = "broker-profile/\(slug)"
+        case "prestataire": path = "prestataire/\(slug)"
+        case "auto-moto", "automoto", "automobile": path = "pro-auto-moto/\(slug)"
+        case let value? where !value.isEmpty: path = "professionnel/\(value)/\(slug)"
+        default:
+            if professional.isServiceProviderProfile { path = "prestataire/\(slug)" }
+            else { path = "professionnels/\(slug)" }
+        }
+        return URL(string: "https://www.partenairefoyer.com/\(path)")!
+    }
+}
+
 private struct NativeProfessionalsView: View {
     @ObservedObject var service: ProfessionalsService
 
@@ -1009,13 +1050,19 @@ private struct NativeProfessionalsView: View {
                         .font(.subheadline).foregroundStyle(.secondary)
                     ForEach(directories, id: \.0) { directory in
                         NavigationLink {
-                            ProfessionalDirectoryListView(service: service, directoryType: directory.0, title: directory.2)
+                            NativeListingWebView(
+                                url: PublicProfessionalWebRoute.directoryURL(for: directory.0),
+                                title: directory.2
+                            )
                         } label: {
                             CatalogPhotoCard(title: directory.2, subtitle: directory.3, image: directory.4, symbol: directory.1)
                         }.buttonStyle(.plain)
                     }
                     NavigationLink {
-                        NativeAutoMotoHubView()
+                        NativeListingWebView(
+                            url: URL(string: "https://www.partenairefoyer.com/professionnels-auto-moto")!,
+                            title: "Professionnels Auto/Moto"
+                        )
                     } label: {
                         CatalogPhotoCard(
                             title: "Professionnels Auto/Moto",
@@ -3512,7 +3559,10 @@ private struct NativeFavoritesView: View {
             }
             .navigationDestination(for: String.self) { id in
                 if let professional = professionalsService.professionals.first(where: { $0.id == id }) {
-                    ProfessionalDetailView(professional: professional)
+                    NativeListingWebView(
+                        url: PublicProfessionalWebRoute.profileURL(for: professional),
+                        title: professional.directoryDisplayName
+                    )
                 }
             }
             .navigationTitle("Favoris")
