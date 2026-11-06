@@ -4276,7 +4276,7 @@ private struct HomeDashboardView: View {
                         }
                         .buttonStyle(.plain)
                     }
-                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 12)], spacing: 10) {
                         homeActionCard("Biens immobiliers", subtitle: "Acheter, louer, consulter", symbol: "house.fill", image: "CategoryMaison") {
                             catalogSection = .realEstate
                             selectedTab = 1
@@ -4426,26 +4426,40 @@ private struct HomeDashboardView: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            ZStack(alignment: .bottomLeading) {
-                Image(image).resizable().scaledToFill()
-                    .frame(maxWidth: .infinity, minHeight: 164, maxHeight: 164).clipped()
-                LinearGradient(colors: [.clear, .black.opacity(0.76)], startPoint: .center, endPoint: .bottom)
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack {
-                        Image(systemName: symbol).font(.caption.weight(.bold))
-                            .padding(8).background(.white.opacity(0.22), in: Circle())
-                        Spacer()
-                        Image(systemName: "arrow.up.right").font(.caption.weight(.bold))
-                            .padding(8).background(.white.opacity(0.22), in: Circle())
+            HStack(spacing: 14) {
+                Image(image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 84, height: 82)
+                    .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 7) {
+                        Image(systemName: symbol)
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(PFTheme.brand)
+                        Text(title)
+                            .font(.headline)
+                            .foregroundStyle(PFTheme.deepGreen)
+                            .multilineTextAlignment(.leading)
+                            .lineLimit(2)
                     }
-                    Spacer(minLength: 15)
-                    Text(title).font(.subheadline.weight(.bold)).lineLimit(2)
-                    Text(subtitle).font(.caption).lineLimit(2).opacity(0.9)
-                }.foregroundStyle(.white).padding(12)
+                    Text(subtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(2)
+                }
+                Spacer(minLength: 2)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(PFTheme.brand)
             }
-            .frame(maxWidth: .infinity, minHeight: 164, maxHeight: 164)
-            .clipShape(RoundedRectangle(cornerRadius: 19, style: .continuous))
-            .shadow(color: PFTheme.deepGreen.opacity(0.14), radius: 9, y: 4)
+            .padding(12)
+            .frame(maxWidth: .infinity, minHeight: 106, alignment: .leading)
+            .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 17, style: .continuous).stroke(PFTheme.deepGreen.opacity(0.09), lineWidth: 1))
+            .contentShape(RoundedRectangle(cornerRadius: 17, style: .continuous))
             .pfFestiveCard(emphasized: true)
         }
         .buttonStyle(.plain)
@@ -6040,6 +6054,9 @@ private struct NativeSpacePickerView: View {
                           auth.member == nil {
                     WebsiteRoleDashboardView(role: role) {
                         signOutEverywhere()
+                    } onSwitchSpace: {
+                        auth.resetDashboard()
+                        activeRoleRaw = ""
                     }
                 } else if let member = auth.member, let role = AccountRole(rawValue: activeRoleRaw) {
                     NativeRoleDashboardView(role: role, member: member) {
@@ -6942,6 +6959,7 @@ private struct WebsiteRoleDashboardView: View {
     @State private var isLoading = true
     let role: AccountRole
     let onSignOut: () -> Void
+    let onSwitchSpace: () -> Void
 
     var body: some View {
         NavigationStack {
@@ -6965,6 +6983,9 @@ private struct WebsiteRoleDashboardView: View {
                 }
                 .toolbar {
                     ToolbarItem(placement: .principal) { Text(role.title).font(.headline) }
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("Changer d’espace", systemImage: "person.2", action: onSwitchSpace)
+                    }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Déconnexion", systemImage: "rectangle.portrait.and.arrow.right", action: onSignOut)
                     }
