@@ -2125,11 +2125,139 @@ private struct NativeListingsView: View {
                     }
                     .navigationTitle("Annonces")
                 }
+            } else if catalogSection == .realEstate {
+                NativeListingWebView(
+                    url: URL(string: "https://www.partenairefoyer.com/annonces")!,
+                    title: "Annonces immobilières",
+                    onBack: { catalogSection = .hub }
+                )
+            } else if catalogSection == .classifiedAds {
+                NativeListingWebView(
+                    url: URL(string: "https://www.partenairefoyer.com/petites-annonces")!,
+                    title: "Petites annonces",
+                    onBack: { catalogSection = .hub }
+                )
             } else {
                 NativeCatalogContentView(service: service, classifiedAds: classifiedAds,
                                          buyerSearches: buyerSearches, professionalsService: professionalsService,
                                          catalogSection: $catalogSection)
             }
+        }
+    }
+}
+
+private struct NativeListingWebView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var webView: WKWebView?
+    @State private var isLoading = true
+    @State private var canGoBack = false
+
+    let url: URL
+    let title: String
+    var onBack: (() -> Void)? = nil
+
+    var body: some View {
+        NavigationStack {
+            NativeListingWebViewRepresentable(
+                url: url,
+                onWebViewCreated: { webView = $0 },
+                onLoadingChanged: { isLoading = $0 },
+                onNavigationChanged: { canGoBack = $0 }
+            )
+            .ignoresSafeArea(edges: .bottom)
+            .overlay(alignment: .top) {
+                if isLoading {
+                    ProgressView("Chargement…")
+                        .font(.footnote.weight(.semibold))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(.regularMaterial, in: Capsule())
+                        .padding(.top, 8)
+                }
+            }
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        if canGoBack {
+                            webView?.goBack()
+                        } else if let onBack {
+                            onBack()
+                        } else {
+                            dismiss()
+                        }
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .accessibilityLabel("Retour")
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        webView?.reload()
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .accessibilityLabel("Actualiser")
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct NativeListingWebViewRepresentable: UIViewRepresentable {
+    let url: URL
+    let onWebViewCreated: (WKWebView) -> Void
+    let onLoadingChanged: (Bool) -> Void
+    let onNavigationChanged: (Bool) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
+
+    func makeUIView(context: Context) -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .default()
+        let view = WKWebView(frame: .zero, configuration: configuration)
+        view.navigationDelegate = context.coordinator
+        view.allowsBackForwardNavigationGestures = true
+        view.scrollView.contentInsetAdjustmentBehavior = .automatic
+        context.coordinator.parent = self
+        onWebViewCreated(view)
+        view.load(URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 30))
+        return view
+    }
+
+    func updateUIView(_ view: WKWebView, context: Context) {
+        context.coordinator.parent = self
+        if view.url?.absoluteString != url.absoluteString {
+            view.load(URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 30))
+        }
+    }
+
+    final class Coordinator: NSObject, WKNavigationDelegate {
+        var parent: NativeListingWebViewRepresentable
+
+        init(parent: NativeListingWebViewRepresentable) {
+            self.parent = parent
+        }
+
+        func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+            parent.onLoadingChanged(true)
+            parent.onNavigationChanged(webView.canGoBack)
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            parent.onLoadingChanged(false)
+            parent.onNavigationChanged(webView.canGoBack)
+        }
+
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            parent.onLoadingChanged(false)
+            parent.onNavigationChanged(webView.canGoBack)
+        }
+
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            parent.onLoadingChanged(false)
+            parent.onNavigationChanged(webView.canGoBack)
         }
     }
 }
@@ -2671,10 +2799,17 @@ private struct NativeCatalogContentView: View {
                 else { await buyerSearches.reload() }
             }
             .navigationDestination(for: Listing.self) { listing in
-                ListingDetailView(listing: listing, listingsService: service, professionalsService: professionalsService)
+                let source = listing.sourceUrl.flatMap(URL.init(string:))
+                let detailURL = source?.host?.hasSuffix("partenairefoyer.com") == true
+                    ? source!
+                    : URL(string: "https://www.partenairefoyer.com/annonces")!
+                NativeListingWebView(url: detailURL, title: "Annonce immobilière")
             }
             .navigationDestination(for: ClassifiedAd.self) { ad in
-                NativeClassifiedAdDetailView(ad: ad)
+                NativeListingWebView(
+                    url: ad.wixDetailURL ?? URL(string: "https://www.partenairefoyer.com/petites-annonces")!,
+                    title: "Petite annonce"
+                )
             }
             .navigationTitle(catalogSection.rawValue)
             .navigationBarTitleDisplayMode(.large)
@@ -3362,8 +3497,19 @@ private struct NativeFavoritesView: View {
                 }
             }
             .listStyle(.insetGrouped)
-            .navigationDestination(for: Listing.self) { ListingDetailView(listing: $0, listingsService: service, professionalsService: professionalsService) }
-            .navigationDestination(for: ClassifiedAd.self) { NativeClassifiedAdDetailView(ad: $0) }
+            .navigationDestination(for: Listing.self) { listing in
+                let source = listing.sourceUrl.flatMap(URL.init(string:))
+                let detailURL = source?.host?.hasSuffix("partenairefoyer.com") == true
+                    ? source!
+                    : URL(string: "https://www.partenairefoyer.com/annonces")!
+                NativeListingWebView(url: detailURL, title: "Annonce immobilière")
+            }
+            .navigationDestination(for: ClassifiedAd.self) { ad in
+                NativeListingWebView(
+                    url: ad.wixDetailURL ?? URL(string: "https://www.partenairefoyer.com/petites-annonces")!,
+                    title: "Petite annonce"
+                )
+            }
             .navigationDestination(for: String.self) { id in
                 if let professional = professionalsService.professionals.first(where: { $0.id == id }) {
                     ProfessionalDetailView(professional: professional)
@@ -6240,6 +6386,7 @@ private struct NativeSeasonalRateForm: View {
 private struct NativeSpacePickerView: View {
     @State private var selectedRole: AccountRole?
     @State private var showTravelerPortal = false
+    @State private var showAutoMotoLogin = false
     @State private var showFullSite = false
     @StateObject private var auth = WixAuthStore.shared
     @AppStorage("partenairefoyer.activeRole") private var activeRoleRaw = ""
@@ -6310,6 +6457,12 @@ private struct NativeSpacePickerView: View {
                     title: "Espace voyageur"
                 ) { _ in }
             }
+            .sheet(isPresented: $showAutoMotoLogin) {
+                NativeListingWebView(
+                    url: URL(string: "https://www.partenairefoyer.com/connexion-auto-moto")!,
+                    title: "Connexion professionnelle Auto/Moto"
+                )
+            }
             .sheet(isPresented: $showFullSite) {
                 ProfessionalPortalWebView(
                     url: URL(string: "https://www.partenairefoyer.com/")!,
@@ -6365,6 +6518,29 @@ private struct NativeSpacePickerView: View {
                     }
                 } header: {
                     Text("Choisir un espace").foregroundStyle(PFTheme.mint)
+                }
+                Section {
+                    Button { showAutoMotoLogin = true } label: {
+                        HStack(spacing: 13) {
+                            Image(systemName: "car.side.fill")
+                                .font(.title3)
+                                .foregroundStyle(PFTheme.brand)
+                                .frame(width: 42, height: 42)
+                                .background(PFTheme.paleMint, in: RoundedRectangle(cornerRadius: 13))
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Connexion professionnelle Auto/Moto").font(.headline).foregroundStyle(PFTheme.deepGreen)
+                                Text("Accéder à l’espace des professionnels automobile").font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.bold)).foregroundStyle(.tertiary)
+                        }
+                        .padding(.vertical, 5)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                } header: {
+                    Text("Professionnels Auto/Moto").foregroundStyle(PFTheme.mint)
                 }
                 Section {
                     Button { showTravelerPortal = true } label: {
