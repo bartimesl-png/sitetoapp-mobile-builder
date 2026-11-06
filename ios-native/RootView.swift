@@ -4428,7 +4428,7 @@ private struct HomeDashboardView: View {
                         }
                         .buttonStyle(.plain)
                     }
-                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 12)], spacing: 10) {
                         homeActionCard("Biens immobiliers", subtitle: "Acheter, louer, consulter", symbol: "house.fill", image: "HomeMaison") {
                             catalogSection = .realEstate
                             selectedTab = 1
@@ -6251,6 +6251,9 @@ private struct NativeSpacePickerView: View {
                           auth.member == nil {
                     WebsiteRoleDashboardView(role: role) {
                         signOutEverywhere()
+                    } onSwitchSpace: {
+                        auth.resetDashboard()
+                        activeRoleRaw = ""
                     }
                 } else if let member = auth.member, let role = AccountRole(rawValue: activeRoleRaw) {
                     NativeRoleDashboardView(role: role, member: member) {
@@ -7153,6 +7156,7 @@ private struct WebsiteRoleDashboardView: View {
     @State private var isLoading = true
     let role: AccountRole
     let onSignOut: () -> Void
+    let onSwitchSpace: () -> Void
 
     var body: some View {
         NavigationStack {
@@ -7176,6 +7180,9 @@ private struct WebsiteRoleDashboardView: View {
                 }
                 .toolbar {
                     ToolbarItem(placement: .principal) { Text(role.title).font(.headline) }
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("Changer d’espace", systemImage: "person.2", action: onSwitchSpace)
+                    }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Déconnexion", systemImage: "rectangle.portrait.and.arrow.right", action: onSignOut)
                     }
