@@ -127,6 +127,7 @@ workflows:
         - push
       branch_patterns:
         - pattern: "feature/ios-full-partenairefoyer-portal"
+        - pattern: "fix/ios-home-space-menu"
       cancel_previous_builds: true
 
     max_build_duration: 120
