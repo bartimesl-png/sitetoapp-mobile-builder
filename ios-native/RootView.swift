@@ -2963,7 +2963,7 @@ private struct NativeClassifiedAdDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            LazyVStack(alignment: .leading, spacing: 18) {
                 if ad.images.isEmpty {
                     ListingImage(url: nil).frame(height: 290)
                 } else {
@@ -3484,15 +3484,18 @@ private struct ListingImage: View {
             }
 
             do {
-                let (data, response) = try await URLSession.shared.data(from: url)
+                // Stream the original photo to disk so gallery preloads do not
+                // keep several large image buffers in memory at once.
+                let (downloadedURL, response) = try await URLSession.shared.download(from: url)
+                defer { try? FileManager.default.removeItem(at: downloadedURL) }
                 guard !Task.isCancelled,
                       (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) == true else { return }
                 let decoded = await Task.detached(priority: .utility) { () -> CGImage? in
-                    guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+                    guard let source = CGImageSourceCreateWithURL(downloadedURL as CFURL, nil) else { return nil }
                     let options: [CFString: Any] = [
                         kCGImageSourceCreateThumbnailFromImageAlways: true,
                         kCGImageSourceCreateThumbnailWithTransform: true,
-                        kCGImageSourceThumbnailMaxPixelSize: 1200
+                        kCGImageSourceThumbnailMaxPixelSize: 960
                     ]
                     return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
                 }.value
@@ -3666,7 +3669,7 @@ private struct ListingDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            LazyVStack(alignment: .leading, spacing: 18) {
                 if listing.gallery.isEmpty {
                     ListingImage(url: nil).frame(height: 290)
                 } else {
@@ -3908,6 +3911,11 @@ private struct ListingDetailView: View {
                     .padding(15)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Color.teal.opacity(0.06), in: RoundedRectangle(cornerRadius: 18))
+                } else if !professionalsService.hasLoaded &&
+                          (!(listing.city ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                           !(listing.postalCode ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
+                    ProgressView(appLanguage == "en" ? "Loading nearby professionals…" : "Chargement des professionnels suggérés…")
+                        .task { await professionalsService.loadIfNeeded() }
                 }
             }
             .padding(18)
@@ -3928,7 +3936,7 @@ private struct ListingDetailView: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
-        .task { await professionalsService.loadIfNeeded() }
+        
     }
 }
 
