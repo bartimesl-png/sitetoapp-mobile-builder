@@ -998,7 +998,7 @@ private enum PublicProfessionalWebRoute {
         switch directory {
         case "Immobilier": path = "professionnels"
         case "Courtiers": path = "nos-courtiers"
-        case "Artisans", "Diagnostiqueurs", "Prestataires": path = "trouver-professionnel-local"
+        case "Artisans", "Diagnostiqueurs", "Prestataires": path = "services-du-quotidien"
         default: path = "professionnels"
         }
         return URL(string: "https://www.partenairefoyer.com/\(path)")!
